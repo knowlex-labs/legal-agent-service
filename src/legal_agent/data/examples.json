@@ -1,0 +1,326 @@
+{
+  "_global_rules": {
+    "critical_format_rules": [
+      "NEVER use placeholder text like [Name], [Date], _____, XXXX, etc.",
+      "Use actual names, dates, amounts from the instructions provided",
+      "If exact date unknown, use 'on or about [month/year]' or describe contextually",
+      "If name unknown, use role descriptors ('the plaintiff', 'the defendant')",
+      "Document must be complete and ready to file - NO blanks"
+    ]
+  },
+  "legal_notice": {
+    "description": "Legal notices for demands, complaints, breach of trust, cheque bounce, eviction, etc.",
+    "agent": "NoticeAgent",
+    "structure": {
+      "header": "Advocate name, credentials (B.Com. LL.B., etc.), office address, contact details",
+      "delivery_method": "BY R.P.A.D / SPEED POST (centered, bold)",
+      "date": "Dated - DD/MM/YYYY (right aligned)",
+      "recipient_section": "To,\n1. Recipient Name\n   Full Address\n   Contact Number\n\n2. Second Recipient (if any)...",
+      "subject": "SUBJECT - Notice for [specific issue] caused by you to my client [Client Name]",
+      "opening": "Under instructions from and on behalf of my client [Client Name], [Occupation], R/O [Full Address], I am sending this legal notice to you as under –",
+      "body": "Numbered paragraphs (1, 2, 3...) with chronological facts. Each paragraph starts with 'That...' and states specific facts with dates, amounts, and details.",
+      "legal_grounds": "State applicable sections of law (IPC Section 406, 420, NI Act Section 138, etc.)",
+      "demand_clause": "Within [X] days from the receipt of this notice, you are called upon to [specific demand - pay amount, return property, cease action, etc.]",
+      "compensation": "Compensation amount for harassment/damages (e.g., Rs. 10,00,000/-)",
+      "notice_costs": "Notice costs (e.g., Rs. 1,00,000/-)",
+      "consequence": "Failing which, my client shall be constrained to initiate appropriate civil and criminal proceedings against you...",
+      "closing": "Issued under my signatures on this [date].\n\nAdvocate for the Noticee\n[Advocate Name]",
+      "copy_to": "Copy to:- My client for information and record."
+    },
+    "format_guidelines": [
+      "Use formal legal language - firm but professional tone",
+      "All amounts in words and figures: Rs. 80,000/- (Rupees Eighty Thousand Only)",
+      "Include specific dates for all events",
+      "Number all paragraphs sequentially",
+      "State legal provisions clearly (Section 406, 420 of IPC)",
+      "Give reasonable time limit (typically 7-15 days)",
+      "End with clear consequences of non-compliance"
+    ],
+    "example_snippet": "SUBJECT - Notice for Criminal Breach of Trust, Cheating and Mental Harassment caused by you to my client Dr. Mahavir Bhagwandas Gandhi\n\nUnder instructions from and on behalf of my client Dr. Mahavir Bhagwandas Gandhi, R/O 49 Samta Colony, Vinayak Nagar, Nagpur, I am sending this legal notice to you as under –\n\n1. That my client is a Medical Practitioner and was running a clinic...\n\n2. That the Noticee No. 1 approached my client in year 2022...\n\n15. Within 7 days from the receipt of this notice, you are called upon to refund Rs. 80,000/- along with interest..."
+  },
+  "affidavit": {
+    "description": "Affidavits for various court proceedings",
+    "agent": "CourtFilingAgent",
+    "subtypes": {
+      "plaint": {
+        "structure": {
+          "court_header": "IN THE HON'BLE [COURT NAME]\nAT [LOCATION] (underlined, centered)",
+          "case_number": "Civil Suit No._______/YYYY",
+          "parties": "Plaintiff Name\nAge: XX yrs, Occ: [Occupation]\nR/o: [Full Address]\nMob. no. [Number] ………Plaintiff\n\nVs.\n\nDefendant Name\nAge: XX yrs, Occ: [Occupation]\nR/o: [Full Address]\nMob. no. [Number] ……Defendant",
+          "title": "Affidavit For Plaint (underlined, centered)",
+          "opening": "I, [Full Name], Age [XX] years, residing at [Full Address], the plaintiff, do hereby state on solemn affirmation as under:",
+          "body": "Numbered paragraphs (1, 2, 3...) starting with 'I say that...' or 'That...' stating facts of the case",
+          "jurisdiction": "That the present court has jurisdiction to try this matter as [reason].",
+          "closing": "That I do hereby state on solemn affirmation that whatever is stated in the above paragraphs is true and correct to the best of my knowledge.",
+          "signature_block": "Place: [City]\nDate: ____/____/YYYY\n\nPlaintiff                    Advocate for the Plaintiff\n                             [Advocate Name]",
+          "verification": "VERIFICATION (underlined, centered)\n\nI, [Full Name], Age: XX yrs, Occ: [Occupation], the Plaintiff in above matter, residing at [Address], do hereby state on solemn affirmation that what is stated in the above paragraphs no. 1 to [X] are true & correct to the best of my knowledge & information, which I believe to be true. Hence verified at [City] on this ___ day of ______YYYY.\n\nPlace: [City]\nDate: ____/____/YYYY\n\nPlaintiff\n\nI know the Deponent.\n\nAdvocate for the Plaintiff"
+        },
+        "format_guidelines": [
+          "Use 'I say that...' or 'That...' to begin each paragraph",
+          "State facts chronologically",
+          "Include specific dates, amounts, and addresses",
+          "Reference any prior legal notices or communications",
+          "State cause of action clearly",
+          "Include jurisdiction statement",
+          "End with verification on oath"
+        ],
+        "example_snippet": "I, Shri Jagdish Panditrao Chaudhari, Age 50 years, residing at 41, Mahaveer Nagar, Part 2, Darwha Road, Yavatmal, Maharashtra - 445001, the plaintiff, do hereby state on solemn affirmation as under:\n\n1. I say that I am the owner of the property situated at flat no. 426 measuring about 717 sq ft, in Lotus Nandanvan society, Moshi, Pimpri Chinchwad, Pune...\n\n2. That the defendant was in need of a flat and therefore inquired with the security guard..."
+      },
+      "interim_application": {
+        "required_input_schema": {
+          "description": "Structured input that MUST be extracted from user instructions or file",
+          "court_details": {
+            "court_name": "Full name of the court (e.g., 'Small Causes Court Pune')",
+            "court_location": "Location (e.g., 'Pune')",
+            "case_number": "Case number if existing (e.g., '192/2022')",
+            "case_year": "Year of filing"
+          },
+          "plaintiff": {
+            "full_name": "Complete name with title (e.g., 'Shri Jagdish Panditrao Choudhari')",
+            "age": "Age in years (e.g., '50 yrs')",
+            "occupation": "Full occupation description (e.g., 'Manager Mechanical Raymonds Ltd. (Denim Division)')",
+            "address": "Complete residential address with pincode",
+            "mobile": "Mobile number with country code optional"
+          },
+          "defendant": {
+            "full_name": "Complete name with title",
+            "age": "Age in years",
+            "occupation": "Occupation (e.g., 'Business')",
+            "address": "Complete address with pincode",
+            "mobile": "Mobile number"
+          },
+          "property_details": {
+            "description": "Full property description (flat no, area, society name, location)",
+            "address": "Complete property address"
+          },
+          "case_facts": {
+            "background": "How the dispute arose",
+            "timeline": "Chronological events with dates",
+            "defaults": "What the defendant failed to do",
+            "prior_notices": "Any legal notices sent",
+            "pending_cases": "Related pending cases if any"
+          },
+          "relief_sought": {
+            "urgency_reason": "Why interim relief is needed urgently",
+            "bonafide_requirement": "Genuine need for the property/relief",
+            "irreparable_harm": "Harm if relief not granted"
+          },
+          "advocate_details": {
+            "name": "Advocate full name",
+            "credentials": "Optional (e.g., 'B.Com. LL.B.')"
+          }
+        },
+        "layout_format": {
+          "description": "EXACT positioning and alignment instructions for document elements",
+          "page_setup": {
+            "margins": "1 inch on all sides",
+            "font": "Times New Roman, 12pt for body, 14pt for headings",
+            "line_spacing": "1.5 for body text"
+          },
+          "elements": [
+            {
+              "element": "court_header",
+              "position": "TOP CENTER",
+              "style": "UNDERLINED, BOLD",
+              "format": "IN THE HON'BLE {COURT_NAME}\nAT {LOCATION}",
+              "spacing_after": "2 lines"
+            },
+            {
+              "element": "case_number",
+              "position": "RIGHT ALIGNED",
+              "style": "BOLD",
+              "format": "Civil Suit No.{NUMBER} /{YEAR}",
+              "spacing_after": "2 lines"
+            },
+            {
+              "element": "plaintiff_block",
+              "position": "LEFT ALIGNED",
+              "style": "Name in BOLD, rest normal",
+              "format": "{PLAINTIFF_NAME}\nAge: {AGE}, Occ: {OCCUPATION}\n{OCCUPATION_DETAILS}\nR/o: {ADDRESS_LINE_1}\n{ADDRESS_LINE_2}\n{ADDRESS_LINE_3}\nMob. no. {MOBILE}",
+              "right_marker": "………Plaintiff",
+              "marker_position": "RIGHT ALIGNED on same line as mobile"
+            },
+            {
+              "element": "vs_separator",
+              "position": "CENTER",
+              "style": "BOLD",
+              "format": "Vs.",
+              "spacing_before": "2 lines",
+              "spacing_after": "2 lines"
+            },
+            {
+              "element": "defendant_block",
+              "position": "LEFT ALIGNED",
+              "style": "Name in BOLD, rest normal",
+              "format": "{DEFENDANT_NAME}\nAge: {AGE}, Occ: {OCCUPATION},\nR/o: {ADDRESS_LINE_1},\n{ADDRESS_LINE_2},\n{ADDRESS_LINE_3}\nMob. no. {MOBILE}",
+              "right_marker": "…….Defendant",
+              "marker_position": "RIGHT ALIGNED on same line as mobile"
+            },
+            {
+              "element": "document_title",
+              "position": "CENTER",
+              "style": "UNDERLINED, BOLD",
+              "format": "Affidavit For Interim Application",
+              "spacing_before": "3 lines",
+              "spacing_after": "2 lines"
+            },
+            {
+              "element": "opening_statement",
+              "position": "LEFT ALIGNED, JUSTIFIED",
+              "format": "I, {TITLE} {FULL_NAME}, Age {AGE} years, residing at {FULL_ADDRESS}, the plaintiff, do hereby state on solemn affirmation as under:",
+              "spacing_after": "1 line"
+            },
+            {
+              "element": "numbered_paragraphs",
+              "position": "LEFT ALIGNED with hanging indent",
+              "style": "JUSTIFIED text",
+              "format": "{NUMBER}. {PARAGRAPH_TEXT starting with 'I say that' or 'That'}",
+              "indent": "Number at margin, text indented 0.5 inch",
+              "spacing_between": "1 line between paragraphs"
+            },
+            {
+              "element": "prayer_closing",
+              "position": "LEFT ALIGNED",
+              "style": "BOLD, CAPS",
+              "format": "AND FOR WHICH ACT OF KINDNESS AND JUSTICE, THE\nPLAINTIFF SHALL AS IN DUTY BOUND EVER PRAY.",
+              "spacing_before": "2 lines",
+              "spacing_after": "2 lines"
+            },
+            {
+              "element": "place_date_signature",
+              "position": "THREE COLUMN LAYOUT",
+              "format": "Place: {CITY}                    Plaintiff                    Advocate for the Plaintiff\nDate: ____/____/{YEAR}                                      {ADVOCATE_NAME}",
+              "columns": "Left: Place/Date | Center: Plaintiff | Right: Advocate details"
+            },
+            {
+              "element": "verification_section",
+              "position": "NEW PAGE or after 3 lines",
+              "title_style": "CENTER, UNDERLINED",
+              "title": "VERIFICATION",
+              "body": "I, {TITLE}. {FULL_NAME}, Age: {AGE}, Occ: {OCCUPATION}, R/o: {FULL_ADDRESS}, do hereby state on solemn affirmation that what is stated in the above paragraphs no. 1 to {LAST_PARA_NUM} are true & correct to the best of my knowledge & information, which I believe to be true. Hence verified at {CITY} on this ___ day of ______{YEAR}.",
+              "signature_layout": "Place: {CITY}\nDate: ____ /___/{YEAR}                                      Plaintiff\n\nI know the deponent.\n\nAdvocate for the Plaintiff"
+            }
+          ]
+        },
+        "structure": {
+          "court_header": "IN THE HON'BLE [COURT NAME]\nAT [LOCATION] (underlined, centered)",
+          "case_number": "Civil Suit No._______/YYYY (right aligned, bold)",
+          "parties": "Plaintiff block (left) with ………Plaintiff marker (right)\n\nVs. (centered)\n\nDefendant block (left) with …….Defendant marker (right)",
+          "title": "Affidavit For Interim Application (underlined, centered, bold)",
+          "opening": "I, [Title] [Full Name], Age [XX] years, residing at [Full Address], the plaintiff, do hereby state on solemn affirmation as under:",
+          "body": "Numbered paragraphs (1, 2, 3...) with facts - each starting with 'I say that' or 'That'",
+          "urgency": "State urgency, bonafide requirement, and irreparable harm",
+          "prayer_closing": "AND FOR WHICH ACT OF KINDNESS AND JUSTICE, THE PLAINTIFF SHALL AS IN DUTY BOUND EVER PRAY. (caps, bold)",
+          "signature_block": "Three-column layout:\nLeft: Place & Date | Center: Plaintiff | Right: Advocate for the Plaintiff + Name",
+          "verification": "VERIFICATION title (centered, underlined)\nFull verification paragraph\nPlace/Date + Plaintiff signature + 'I know the deponent.' + Advocate signature"
+        },
+        "format_guidelines": [
+          "PARTY BLOCKS: Name in bold, details on separate lines, role marker (………Plaintiff) right-aligned",
+          "ADDRESS FORMAT: Break into multiple lines - Street, Area, City, State - Pincode",
+          "NUMBERED PARAGRAPHS: Start with 'I say that' for first paragraph, 'That' for subsequent",
+          "AMOUNTS: Always write in figures AND words: Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only)",
+          "DATES: Use DD/MM/YYYY format for specific dates, 'on or about [month/year]' for approximate",
+          "EMPHASIS: Underline document title, bold party names and section headers",
+          "JUSTIFICATION: Body paragraphs should be fully justified",
+          "SPACING: Double space between major sections, single space within paragraphs"
+        ],
+        "content_requirements": [
+          "Para 1: State ownership/relationship to suit property",
+          "Para 2-N: Chronological facts of how dispute arose",
+          "State all communication attempts with defendant",
+          "Mention any legal notices sent/received with dates",
+          "State bonafide requirement with specific reasons (family need, medical, education)",
+          "State irreparable harm if relief not granted",
+          "State cause of action and when it arose",
+          "State jurisdiction",
+          "State amounts due with calculation (months x rent = total)",
+          "Final paragraph: Solemn affirmation of truth"
+        ],
+        "example_full_document": "IN THE HON'BLE SMALL CAUSES COURT PUNE AT PUNE\n                                                                Civil Suit No.______ /2022\n\nJagdish Panditrao Choudhari\nAge: 50 yrs, Occ: Manager Mechanical\nRaymonds Ltd. (Denim Division),\nR/o: 41, Mahaveer Nagar, Part 2, Darwha\nRoad, Yavatmal, Maharashtra - 445001\nMob. no. 9373188011                                                    ………Plaintiff\n\n                                                    Vs.\n\nOmprakash Keshavrao Devgavdkar\nAge: 50 yrs, Occ: Business,\nR/o: Gate no. 274, Lotus Nandanvan Apartment,\nFlat no. 426, B.no. 01, Moshi,\nDistrict Pune - 412105\nMob. no. 9769205996                                                    …….Defendant\n\n                              Affidavit For Interim Application\n\nI, Shri Jagdish Panditrao Chaudhari, Age 50 years, residing at 41, Mahaveer Nagar, Part 2, Darwha Road, Yavatmal, Maharashtra - 445001, the plaintiff, do hereby state on solemn affirmation as under:\n\n1. I say that I am the owner of the property situated at flat no. 426 measuring about 717 sq ft, in Lotus Nandanvan society, Moshi, Pimpri Chinchwad, Pune and I am currently residing at 41, Mahaveer Nagar, Part 2, Darwha Road, Yavatmal. I am filing the present affidavit for the purpose of stating the facts in the said application.\n\n2. That the defendant was in need of a flat and therefore inquired with the security guard of the Lotus Nandanvan society, and was informed by the security guard of the Lotus Nandanvan society about my flat.\n\n3. That the defendant approached me and requested me to provide the suit premises on leave and license basis till 04/01/2022, to which I agreed.\n\n4. That the defendant inquired with me for the license fee for the suit property, to which I had informed about the deposit of Rs. 20,000/- and a monthly license fee of Rs. 8,500/-. That the defendant agreed to pay the deposit of Rs. 20,000/- to me by cash, and a monthly fee of Rs. 8,500/-.\n\n[Continue with all paragraphs 5-22 as in the reference document...]\n\n22. That I do hereby state on solemn affirmation that whatever is stated in the above paragraphs is true and correct to the best of my knowledge.\n\nAND FOR WHICH ACT OF KINDNESS AND JUSTICE, THE\nPLAINTIFF SHALL AS IN DUTY BOUND EVER PRAY.\n\nPlace: Pune\nDate: ____/____/2022              Plaintiff                    Advocate for the Plaintiff\n                                                              Sattyajeet S. Karale Patil\n\n                                        VERIFICATION\n\nI, Mr. Jagdish Panditrao Choudhari, Age: 50 yrs, Occ: Manager Mechanical Raymonds Ltd. (Denim Division), R/o: 41, Mahaveer Nagar, Part 2, Darwha Road, Yavatmal, Maharashtra - 445001, do hereby state on solemn affirmation that what is stated in the above paragraphs no. 1 to 22 are true & correct to the best of my knowledge & information, which I believe to be true. Hence verified at Pune on this ___ day of ______2022.\n\nPlace: Pune\nDate: ____ /___/2022                                           Plaintiff\n\nI know the deponent.\n\nAdvocate for the Plaintiff"
+      }
+    }
+  },
+  "petition": {
+    "description": "Court petitions and suits",
+    "agent": "CourtFilingAgent",
+    "subtypes": {
+      "possession_suit": {
+        "structure": {
+          "court_header": "IN THE HON'BLE [COURT NAME]\nAT [LOCATION] (underlined, centered)",
+          "case_number": "Civil. Suit. No._______/YYYY",
+          "parties": "Plaintiff Name\nAge: XX yrs, Occ: [Occupation]\nR/o: [Full Address]\nMob. no. [Number] …Plaintiff\n\nVs.\n\nDefendant Name\nAge: XX yrs, Occ: [Occupation]\nR/o: [Full Address]\nMob. no. [Number] …Defendant",
+          "title": "SUIT FOR POSSESSION UNDER SECTION [X] OF THE [ACT NAME] (underlined, centered, caps)",
+          "body": "Numbered paragraphs (1, 2, 3...) starting with 'The plaintiff submits that...'",
+          "cause_of_action": "Paragraphs explaining when and how cause of action arose",
+          "jurisdiction": "The present court has jurisdiction to try this matter as the suit property is situated within the premises of the territorial jurisdiction of this court.",
+          "valuation": "The plaintiff is seeking for possession and hence the suit is valued at Rs. ________/-, hence court fee of amount Rs. ________/- has been paid.",
+          "prayer": "The plaintiff therefore prays that,\na. [First relief sought]\nb. [Second relief sought]\nc. [Third relief sought]\nd. Any just and equitable orders be passed in favour of the plaintiff in the interest of justice.",
+          "signature_block": "Place: [City]\nDate: __/__/YYYY\n\nPlaintiff                    Advocate for the Plaintiff\n                             [Advocate Name]",
+          "verification": "VERIFICATION (underlined, centered)\n\nI [Full Name], Age: XX yrs, Occ: [Occupation], the Plaintiff in above matter, residing at [Address], do hereby state on solemn affirmation that what is stated in the above paragraphs no. 1-[X] are true & correct to the best of my knowledge & information, which I believe to be true. Hence verified at [City] on this ___ day of ______YYYY.\n\nPlace: [City]\nDate: ____/____/YYYY\n\nPlaintiff\n\nI know the Deponent.\n\nAdvocate for the Plaintiff"
+        },
+        "format_guidelines": [
+          "Use 'The plaintiff submits that...' for each paragraph",
+          "State property details precisely (address, area, survey numbers)",
+          "Include chronological facts of tenancy/license",
+          "State defaults and breaches clearly",
+          "Mention any prior notices sent",
+          "Include bonafide requirement if applicable",
+          "State cause of action with specific dates",
+          "Prayer should have specific reliefs (a, b, c, d format)"
+        ],
+        "example_snippet": "SUIT FOR POSSESSION UNDER SECTION 26 OF THE PROVINCIAL SMALL CAUSE COURTS ACT, 1887\n\n1. The plaintiff submits that he is the owner of the property situated at flat no. 426 measuring about 717 sqft, in Lotus Nandanvan society, Moshi, Pimpri Chinchwad, Pune...\n\n17. The Defendant did not pay the rent for 50 months which is Rs. 4,25,000/-...\n\n23. The plaintiff therefore prays that,\na. The defendant be ordered to pay the license fee amount of Rs. 4,08,000/-\nb. The defendant be ordered to pay Rs. 5,00,000/- for the inconvenience caused..."
+      }
+    }
+  },
+  "application": {
+    "description": "Court applications (Vakalatnama, LOD, interim applications)",
+    "agent": "CourtFilingAgent",
+    "structure": {
+      "court_header": "IN THE HON'BLE [COURT NAME]\nAT [LOCATION]",
+      "case_number": "[Case Type] No._______/YYYY",
+      "parties": "Applicant/Plaintiff vs Respondent/Defendant details",
+      "title": "APPLICATION FOR [PURPOSE] (underlined, centered)",
+      "body": "Numbered paragraphs stating grounds for application",
+      "prayer": "It is therefore most respectfully prayed that this Hon'ble Court may be pleased to [specific relief sought]...",
+      "signature_block": "Place: [City]\nDate: ____/____/YYYY\n\nApplicant                    Advocate for the Applicant"
+    },
+    "format_guidelines": [
+      "State the purpose clearly in title",
+      "Reference main case/suit number",
+      "Provide grounds for the application",
+      "Be specific in prayer clause",
+      "Use respectful language for court"
+    ]
+  },
+  "contract": {
+    "description": "Contracts and agreements",
+    "agent": "ContractAgent",
+    "structure": {
+      "title": "[CONTRACT TYPE] AGREEMENT",
+      "parties": "This Agreement is made and entered into on this [date] day of [month], [year]\n\nBETWEEN:\n\n[Party 1 details] (hereinafter referred to as '[Role]')\n\nAND\n\n[Party 2 details] (hereinafter referred to as '[Role]')",
+      "recitals": "WHEREAS clauses explaining background and purpose",
+      "definitions": "1. DEFINITIONS\n'Agreement' means...\n'Confidential Information' means...",
+      "scope": "2. SCOPE OF [WORK/SERVICES/AGREEMENT]",
+      "term": "3. TERM AND TERMINATION",
+      "payment": "4. CONSIDERATION/PAYMENT TERMS (if applicable)",
+      "confidentiality": "5. CONFIDENTIALITY",
+      "ip_rights": "6. INTELLECTUAL PROPERTY RIGHTS",
+      "representations": "7. REPRESENTATIONS AND WARRANTIES",
+      "indemnification": "8. INDEMNIFICATION",
+      "limitation": "9. LIMITATION OF LIABILITY",
+      "force_majeure": "10. FORCE MAJEURE",
+      "dispute_resolution": "11. DISPUTE RESOLUTION\nArbitration under Arbitration and Conciliation Act, 1996",
+      "general": "12. GENERAL PROVISIONS (Notices, Amendments, Severability, Waiver, Entire Agreement)",
+      "execution": "IN WITNESS WHEREOF, the Parties have executed this Agreement...\n\n[Party 1 Signature Block]          [Party 2 Signature Block]\n\nWITNESSES:\n1.\n2."
+    },
+    "format_guidelines": [
+      "Use clear definitions for all key terms",
+      "Include governing law clause (Indian law)",
+      "Specify jurisdiction (Indian courts)",
+      "Include arbitration clause under Arbitration and Conciliation Act, 1996",
+      "Add stamp duty consideration note if relevant",
+      "Include witness signature blocks",
+      "Number all clauses and sub-clauses"
+    ]
+  }
+}

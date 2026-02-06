@@ -22,7 +22,7 @@ class Settings(BaseSettings):
 
     # LLM Configuration
     llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
-    llm_model: str = "gpt-4o"
+    llm_model: str = "gpt-4o-mini"  # Fast model for drafting
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
