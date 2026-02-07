@@ -2,8 +2,15 @@
 
 import logging
 from dataclasses import dataclass
+from typing import Annotated
 
-from pydantic_ai import Agent, RunContext
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.tools import tool
+from langgraph.graph import END, StateGraph
+from langgraph.graph.message import add_messages
+from langgraph.prebuilt import ToolNode, tools_condition
+from typing_extensions import TypedDict
 
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.models.documents import GeneratedDocument
@@ -51,47 +58,95 @@ accuracy and consistency with existing documents or precedents.
 Always structure your output with clear sections and proper formatting."""
 
 
+class DraftAgentState(TypedDict):
+    """State for the drafting agent graph."""
+
+    messages: Annotated[list[AnyMessage], add_messages]
+    document: GeneratedDocument | None
+
+
+def create_rag_tool(rag_client: RAGClient, file_ids: list[str]):
+    """Create a RAG query tool closed over runtime dependencies."""
+
+    @tool
+    async def query_reference_documents(query: str) -> str:
+        """Query reference documents for relevant context."""
+        if not file_ids:
+            logger.debug("No file_ids provided, skipping RAG query")
+            return "No reference documents provided."
+
+        logger.debug(f"RAG tool called with query: {query[:50]}...")
+        context = await rag_client.query(file_ids, query)
+
+        if not context:
+            logger.debug("RAG returned no context")
+            return "No relevant context found in the reference documents."
+
+        logger.debug(f"RAG returned {len(context)} chars of context")
+        return context
+
+    return query_reference_documents
+
+
 class BaseDraftingAgent:
     """Base class for all drafting agents."""
 
     system_prompt: str = BASE_SYSTEM_PROMPT
-    agent: Agent[DraftingDependencies, GeneratedDocument]
 
-    def __init__(self, model: str = "openai:gpt-4o"):
+    def __init__(self, model: str = "gpt-4o", provider: str = "openai"):
         """Initialize the drafting agent.
 
         Args:
-            model: The LLM model to use (e.g., 'openai:gpt-4o', 'anthropic:claude-3-opus')
+            model: The LLM model name (e.g., 'gpt-4o', 'claude-3-opus')
+            provider: The LangChain provider name (e.g., 'openai', 'anthropic', 'google-genai')
         """
-        self.agent = Agent(
-            model,
-            system_prompt=self.system_prompt,
-            output_type=GeneratedDocument,
-            deps_type=DraftingDependencies,
+        self.model_name = model
+        self.provider = provider
+
+    def _build_graph(self, tools: list):
+        """Build a LangGraph workflow for drafting."""
+        llm = init_chat_model(self.model_name, model_provider=self.provider)
+        llm_with_tools = llm.bind_tools(tools) if tools else llm
+        llm_structured = init_chat_model(
+            self.model_name, model_provider=self.provider
+        ).with_structured_output(GeneratedDocument)
+        system_msg = SystemMessage(content=self.system_prompt)
+
+        async def agent_node(state: DraftAgentState):
+            response = await llm_with_tools.ainvoke([system_msg] + state["messages"])
+            return {"messages": [response]}
+
+        async def output_node(state: DraftAgentState):
+            extraction_prompt = (
+                "Extract the document you just drafted into the required structured format. "
+                "Include the full draft text, title, document type, sections, and summary.\n\n"
+                "IMPORTANT for sections: Split the document into its NATURAL sections as they "
+                "appear in the actual document. For court filings, use sections like:\n"
+                "- 'Cause Title' (court header + party blocks + Vs.)\n"
+                "- 'Affidavit' or 'Petition' or 'Application' (opening statement + all numbered paragraphs)\n"
+                "- 'Prayer' (prayer/closing clause)\n"
+                "- 'Verification' (verification section)\n"
+                "DO NOT create artificial sections like 'Case Header', 'Party Details', 'Body', etc. "
+                "The section titles should match what appears in the document itself."
+            )
+            msgs = [system_msg] + state["messages"] + [HumanMessage(content=extraction_prompt)]
+            document = await llm_structured.ainvoke(msgs)
+            return {"document": document}
+
+        workflow = StateGraph(DraftAgentState)
+        workflow.add_node("agent", agent_node)
+        if tools:
+            workflow.add_node("tools", ToolNode(tools))
+        else:
+            workflow.add_node("tools", lambda s: s)
+        workflow.add_node("output", output_node)
+        workflow.set_entry_point("agent")
+        workflow.add_conditional_edges(
+            "agent", tools_condition, {"tools": "tools", "__end__": "output"}
         )
-        self._register_tools()
-
-    def _register_tools(self) -> None:
-        """Register common tools for the agent."""
-
-        @self.agent.tool
-        async def query_reference_documents(
-            ctx: RunContext[DraftingDependencies], query: str
-        ) -> str:
-            """Query reference documents for relevant context."""
-            if not ctx.deps.file_ids:
-                logger.debug("No file_ids provided, skipping RAG query")
-                return "No reference documents provided."
-
-            logger.debug(f"RAG tool called with query: {query[:50]}...")
-            context = await ctx.deps.rag_client.query(ctx.deps.file_ids, query)
-
-            if not context:
-                logger.debug("RAG returned no context")
-                return "No relevant context found in the reference documents."
-
-            logger.debug(f"RAG returned {len(context)} chars of context")
-            return context
+        workflow.add_edge("tools", "agent")
+        workflow.add_edge("output", END)
+        return workflow.compile()
 
     async def draft(self, deps: DraftingDependencies) -> GeneratedDocument:
         """Generate a legal document draft."""
@@ -152,6 +207,13 @@ relevant context before drafting.
 
 Generate a COMPLETE, court-ready document with EXACT formatting as described."""
 
-        result = await self.agent.run(prompt, deps=deps)
-        logger.debug(f"Draft completed: {result.output.document_type.value}")
-        return result.output
+        # Create tool with runtime deps
+        rag_tool = create_rag_tool(deps.rag_client, deps.file_ids)
+        tools = [rag_tool] if deps.file_ids else []
+
+        # Build and invoke graph
+        graph = self._build_graph(tools)
+        result = await graph.ainvoke({"messages": [HumanMessage(content=prompt)], "document": None})
+
+        logger.debug(f"Draft completed: {result['document'].document_type.value}")
+        return result["document"]

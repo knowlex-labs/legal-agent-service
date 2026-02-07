@@ -40,6 +40,12 @@ class Settings(BaseSettings):
     job_timeout_seconds: int = 300
     job_max_retries: int = 3
 
+    def get_langchain_provider(self) -> str:
+        """Map our provider names to LangChain provider names."""
+        return {"openai": "openai", "anthropic": "anthropic", "gemini": "google-genai"}.get(
+            self.llm_provider, self.llm_provider
+        )
+
     def get_llm_api_key(self) -> str | None:
         """Get the API key for the configured LLM provider."""
         if self.llm_provider == "openai":

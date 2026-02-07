@@ -49,5 +49,5 @@ class ContractAgent(BaseDraftingAgent):
 
     system_prompt = CONTRACT_SYSTEM_PROMPT
 
-    def __init__(self, model: str = "openai:gpt-4o"):
-        super().__init__(model)
+    def __init__(self, model: str = "gpt-4o", provider: str = "openai"):
+        super().__init__(model, provider)

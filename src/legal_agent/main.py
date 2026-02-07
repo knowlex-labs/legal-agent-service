@@ -38,16 +38,16 @@ from legal_agent.services.job_manager import JobManager
 
 
 def _setup_llm_environment() -> None:
-    """Set up LLM API keys as environment variables for pydantic-ai."""
+    """Set up LLM API keys as environment variables for LangChain."""
     settings = get_settings()
 
-    # Set API keys in environment so pydantic-ai can find them
+    # Set API keys in environment so LangChain provider packages can find them
     if settings.openai_api_key:
         os.environ.setdefault("OPENAI_API_KEY", settings.openai_api_key)
     if settings.anthropic_api_key:
         os.environ.setdefault("ANTHROPIC_API_KEY", settings.anthropic_api_key)
     if settings.gemini_api_key:
-        os.environ.setdefault("GEMINI_API_KEY", settings.gemini_api_key)
+        os.environ.setdefault("GOOGLE_API_KEY", settings.gemini_api_key)
 
 
 # Set up environment before anything else

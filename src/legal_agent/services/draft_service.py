@@ -16,6 +16,7 @@ from legal_agent.models.documents import DocumentType
 from legal_agent.models.requests import CreateDraftRequest
 from legal_agent.models.responses import DraftResult
 from legal_agent.services.content_preprocessor import (
+    assemble_config_text,
     preprocess_and_enhance,
     preprocess_title,
 )
@@ -38,22 +39,20 @@ class DraftService:
         self.rag_client = rag_client
 
         # Initialize agents based on settings
-        model = self._get_model_string()
+        model, provider = self._get_model_config()
         self._agents: dict[DocumentType, BaseDraftingAgent] = {
-            DocumentType.CONTRACT: ContractAgent(model),
-            DocumentType.AGREEMENT: ContractAgent(model),
-            DocumentType.LEGAL_NOTICE: NoticeAgent(model),
-            DocumentType.DEMAND_NOTICE: NoticeAgent(model),
-            DocumentType.PETITION: CourtFilingAgent(model),
-            DocumentType.AFFIDAVIT: CourtFilingAgent(model),
-            DocumentType.APPLICATION: CourtFilingAgent(model),
+            DocumentType.CONTRACT: ContractAgent(model, provider),
+            DocumentType.AGREEMENT: ContractAgent(model, provider),
+            DocumentType.LEGAL_NOTICE: NoticeAgent(model, provider),
+            DocumentType.DEMAND_NOTICE: NoticeAgent(model, provider),
+            DocumentType.PETITION: CourtFilingAgent(model, provider),
+            DocumentType.AFFIDAVIT: CourtFilingAgent(model, provider),
+            DocumentType.APPLICATION: CourtFilingAgent(model, provider),
         }
 
-    def _get_model_string(self) -> str:
-        """Get the model string for Pydantic AI."""
-        provider = self.settings.llm_provider
-        model = self.settings.llm_model
-        return f"{provider}:{model}"
+    def _get_model_config(self) -> tuple[str, str]:
+        """Get the model name and LangChain provider."""
+        return self.settings.llm_model, self.settings.get_langchain_provider()
 
     def _get_enhance_model_string(self) -> str:
         """Get a fast/cheap model string for content enhancement."""
@@ -104,9 +103,18 @@ class DraftService:
         # - Rule-based: fix spelling, standardize legal terms (instant)
         # - LLM-based: rewrite casual input into formal legal instructions
         cleaned_title = preprocess_title(request.title)
+
+        if request.config:
+            raw_instructions = assemble_config_text(
+                request.config, request.document_type.value
+            )
+        else:
+            assert request.body is not None  # guaranteed by model validator
+            raw_instructions = request.body
+
         enhance_model = self._get_enhance_model_string()
         cleaned_instructions = await preprocess_and_enhance(
-            request.body,
+            raw_instructions,
             document_type=request.document_type.value,
             model=enhance_model,
         )

@@ -1,10 +1,17 @@
 """Content preprocessor for fixing spelling, standardizing legal terminology,
 and enhancing casual user input into structured legal instructions via LLM."""
 
+from __future__ import annotations
+
 import logging
 import re
+from typing import TYPE_CHECKING
 
-from pydantic_ai import Agent
+from langchain.chat_models import init_chat_model
+from langchain_core.messages import HumanMessage, SystemMessage
+
+if TYPE_CHECKING:
+    from legal_agent.models.requests import DraftConfig
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +128,57 @@ LEGAL_STANDARDIZATIONS: dict[str, str] = {
     "article 226": "Article 226",
     "article 32": "Article 32",
 }
+
+
+def assemble_config_text(config: DraftConfig, document_type: str) -> str:
+    """
+    Convert a DraftConfig into a labeled text block for the LLM enhancement pipeline.
+
+    Labels are adjusted based on document type:
+    - Court filings: PLAINTIFF / PETITIONER, DEFENDANT / RESPONDENT
+    - Notices: SENDER / CLIENT, RECIPIENT
+    - Contracts: FIRST PARTY, SECOND PARTY
+
+    Args:
+        config: DraftConfig with populated fields
+        document_type: Raw document type value (e.g. "affidavit", "legal_notice")
+
+    Returns:
+        Assembled text with labeled sections for non-null fields
+    """
+    court_types = {"affidavit", "petition", "application"}
+    notice_types = {"legal_notice", "demand_notice"}
+
+    if document_type in court_types:
+        party_one_label = "PLAINTIFF / PETITIONER DETAILS"
+        party_two_label = "DEFENDANT / RESPONDENT DETAILS"
+    elif document_type in notice_types:
+        party_one_label = "SENDER / CLIENT DETAILS"
+        party_two_label = "RECIPIENT DETAILS"
+    else:
+        party_one_label = "FIRST PARTY DETAILS"
+        party_two_label = "SECOND PARTY DETAILS"
+
+    field_labels: list[tuple[str, str]] = [
+        ("party_one_details", party_one_label),
+        ("party_two_details", party_two_label),
+        ("court_details", "COURT DETAILS"),
+        ("property_details", "PROPERTY / SUBJECT MATTER"),
+        ("advocate_details", "ADVOCATE DETAILS"),
+        ("facts", "CHRONOLOGICAL FACTS"),
+        ("relief_sought", "RELIEF SOUGHT"),
+        ("terms", "KEY TERMS"),
+        ("special_clauses", "SPECIAL CLAUSES"),
+        ("additional_instructions", "ADDITIONAL INSTRUCTIONS"),
+    ]
+
+    sections: list[str] = []
+    for field_name, label in field_labels:
+        value = getattr(config, field_name, None)
+        if value:
+            sections.append(f"=== {label} ===\n{value}")
+
+    return "\n\n".join(sections)
 
 
 def preprocess_content(text: str) -> str:
@@ -311,13 +369,15 @@ async def enhance_content(
     )
 
     try:
-        enhancer = Agent(
-            model,
-            system_prompt=ENHANCE_SYSTEM_PROMPT,
-            output_type=str,
-        )
-        result = await enhancer.run(prompt)
-        enhanced = result.output
+        # Parse "provider:model" format
+        provider, model_name = model.split(":", 1)
+        provider_map = {"openai": "openai", "anthropic": "anthropic", "gemini": "google-genai"}
+        llm = init_chat_model(model_name, model_provider=provider_map.get(provider, provider))
+        result = await llm.ainvoke([
+            SystemMessage(content=ENHANCE_SYSTEM_PROMPT),
+            HumanMessage(content=prompt),
+        ])
+        enhanced = str(result.content)
 
         if enhanced and len(enhanced.strip()) > 0:
             logger.debug(
