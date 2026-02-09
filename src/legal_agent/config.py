@@ -36,6 +36,18 @@ class Settings(BaseSettings):
     service_port: int = 8001
     debug: bool = False
 
+    # PostgreSQL (shared by legal_retrieval + chat checkpointer)
+    postgres_host: str = "localhost"
+    postgres_port: int = 5432
+    postgres_db: str = "knowlex"
+    postgres_username: str = "postgres"
+    postgres_password: str = ""
+    legal_db_url: str | None = None  # overrides POSTGRES_* vars
+
+    # Chat LLM (separate from draft LLM)
+    chat_llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
+    chat_llm_model: str = "gpt-4o"
+
     # Job Configuration
     job_timeout_seconds: int = 300
     job_max_retries: int = 3
@@ -44,6 +56,12 @@ class Settings(BaseSettings):
         """Map our provider names to LangChain provider names."""
         return {"openai": "openai", "anthropic": "anthropic", "gemini": "google-genai"}.get(
             self.llm_provider, self.llm_provider
+        )
+
+    def get_chat_langchain_provider(self) -> str:
+        """Map chat provider names to LangChain provider names."""
+        return {"openai": "openai", "anthropic": "anthropic", "gemini": "google-genai"}.get(
+            self.chat_llm_provider, self.chat_llm_provider
         )
 
     def get_llm_api_key(self) -> str | None:

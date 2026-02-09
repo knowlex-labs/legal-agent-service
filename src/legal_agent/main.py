@@ -31,8 +31,13 @@ logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 
 from legal_agent.api.routes import router, set_services
+from legal_agent.chat.agent import ChatAgent
+from legal_agent.chat.routes import chat_router, set_chat_agent
 from legal_agent.clients.rag_client import HTTPRAGClient, MockRAGClient
 from legal_agent.config import get_settings
+from legal_agent.legal_retrieval import LegalCaseRetriever
+from legal_agent.legal_retrieval.config import get_legal_db_url
+from legal_agent.legal_retrieval.db import close_pool
 from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
 
@@ -56,12 +61,13 @@ _setup_llm_environment()
 # Global instances
 job_manager: JobManager | None = None
 rag_client: HTTPRAGClient | MockRAGClient | None = None
+chat_agent: ChatAgent | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Application lifespan handler for startup and shutdown."""
-    global job_manager, rag_client
+    global job_manager, rag_client, chat_agent
 
     settings = get_settings()
 
@@ -84,11 +90,27 @@ async def lifespan(app: FastAPI):
     )
 
     set_services(draft_service, job_manager)
+
+    # Initialize legal retrieval + chat agent
+    legal_retriever = LegalCaseRetriever()
+    db_url = get_legal_db_url()
+
+    chat_agent = ChatAgent(retriever=legal_retriever)
+    await chat_agent.initialize(db_url)
+    set_chat_agent(chat_agent)
+
+    logger.info(
+        f"Chat agent initialized (provider={settings.chat_llm_provider}, "
+        f"model={settings.chat_llm_model})"
+    )
     logger.info("Service initialized successfully")
 
     yield
 
     logger.info("Shutting down...")
+    if chat_agent:
+        await chat_agent.close()
+    close_pool()
     if job_manager:
         await job_manager.cleanup()
     if isinstance(rag_client, HTTPRAGClient):
@@ -118,6 +140,7 @@ def create_app() -> FastAPI:
 
     # Include API routes
     app.include_router(router, prefix="/api/v1", tags=["drafts"])
+    app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 
     # Add a root health check
     @app.get("/")
