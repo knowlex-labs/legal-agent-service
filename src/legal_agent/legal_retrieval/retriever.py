@@ -15,10 +15,13 @@ class LegalCaseRetriever:
 
     def search(self, query: str, filters: dict | None = None, top_k: int = DEFAULT_TOP_K) -> list[dict]:
         expanded = expand_query(query)
+        logger.info(f"[retriever] query='{query}' | expanded='{expanded}'")
+
         embedding = embed_query(expanded)
+        logger.info(f"[retriever] embedding generated (dim={len(embedding)})")
 
         results = execute_hybrid_search(embedding=embedding, fts_query=expanded, filters=filters, limit=HYBRID_LIMIT)
-        logger.debug(f"Hybrid search: {len(results)} results")
+        logger.info(f"[retriever] hybrid search: {len(results)} candidates")
         if not results:
             return []
 
@@ -29,7 +32,7 @@ class LegalCaseRetriever:
 
         results.sort(key=lambda r: r["rrf_score"], reverse=True)
         reranked = rerank(query=query, documents=results[:RERANK_CANDIDATES], top_k=top_k)
-        logger.debug(f"Reranked: {len(reranked)} results")
+        logger.info(f"[retriever] reranked: {len(reranked)} final results")
         return reranked
 
     def get_case_details(self, case_id: str) -> dict | None:

@@ -36,9 +36,12 @@ async def create_session() -> ChatSessionResponse:
 async def send_message(session_id: str, request: ChatMessageRequest):
     agent = _get_agent()
 
+    if request.enable_web:
+        logger.warning("enable_web requested but web search is not yet implemented")
+
     async def event_generator():
         try:
-            async for event in agent.stream_response(session_id, request.message):
+            async for event in agent.stream_response(session_id, request.message, enable_kb=request.enable_kb):
                 yield {"event": event["event"], "data": event["data"]}
         except Exception:
             logger.exception(f"Stream error for session {session_id}")

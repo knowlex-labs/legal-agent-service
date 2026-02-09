@@ -31,8 +31,10 @@ def create_legal_search_tool(retriever: LegalCaseRetriever):
             top_k: Number of results (default 5, max 10).
         """
         try:
+            logger.info(f"Tool called — query='{query}', court={court}, year={year_from}-{year_to}, judge={judge}")
             filters = {k: v for k, v in {"court": court, "year_from": year_from, "year_to": year_to, "judge": judge}.items() if v}
             results = retriever.search(query=query, filters=filters or None, top_k=min(top_k, 10))
+            logger.info(f"Search returned {len(results)} results")
 
             if not results:
                 return "No relevant cases found for the given query."
