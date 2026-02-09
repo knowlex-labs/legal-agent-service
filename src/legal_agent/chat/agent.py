@@ -1,4 +1,4 @@
-"""Chat agent using LangGraph ReAct with PostgresSaver for persistent sessions."""
+"""LangGraph ReAct chat agent with PostgresSaver for persistent sessions."""
 
 import json
 import logging
@@ -32,92 +32,51 @@ class ChatAgent:
     def __init__(self, retriever: LegalCaseRetriever | None = None):
         self.retriever = retriever
         self.checkpointer: AsyncPostgresSaver | None = None
-        self._checkpointer_cm = None  # async context manager handle
+        self._checkpointer_cm = None
         self.graph = None
 
     async def initialize(self, db_url: str):
-        """Set up PostgresSaver and compile the graph. Called once at startup."""
         self._checkpointer_cm = AsyncPostgresSaver.from_conn_string(db_url)
         self.checkpointer = await self._checkpointer_cm.__aenter__()
         await self.checkpointer.setup()
         self._compile_graph()
-        logger.info("ChatAgent initialized with PostgresSaver")
+        logger.info("ChatAgent initialized")
 
     def _compile_graph(self):
-        """Build and compile the LangGraph agent."""
         settings = get_settings()
-        llm = init_chat_model(
-            settings.chat_llm_model,
-            model_provider=settings.get_chat_langchain_provider(),
-        )
-        tools = []
-        if self.retriever:
-            tools.append(create_legal_search_tool(self.retriever))
-
-        self.graph = create_react_agent(
-            model=llm,
-            tools=tools,
-            checkpointer=self.checkpointer,
-            prompt=CHAT_SYSTEM_PROMPT,
-        )
+        llm = init_chat_model(settings.chat_llm_model, model_provider=settings.get_chat_langchain_provider())
+        tools = [create_legal_search_tool(self.retriever)] if self.retriever else []
+        self.graph = create_react_agent(model=llm, tools=tools, checkpointer=self.checkpointer, prompt=CHAT_SYSTEM_PROMPT)
 
     async def stream_response(self, session_id: str, message: str):
-        """Stream agent response as async generator of SSE events.
-
-        Yields dicts like:
-          {"event": "token", "data": "partial text..."}
-          {"event": "tool_call", "data": {"name": "...", "args": {...}}}
-          {"event": "tool_result", "data": "..."}
-          {"event": "end", "data": ""}
-        """
+        """Yield SSE event dicts: token, tool_call, tool_result, end."""
         config = {"configurable": {"thread_id": session_id}}
-        input_msg = {"messages": [HumanMessage(content=message)]}
 
-        async for event in self.graph.astream_events(
-            input_msg, config=config, version="v2"
-        ):
+        async for event in self.graph.astream_events({"messages": [HumanMessage(content=message)]}, config=config, version="v2"):
             kind = event["event"]
             if kind == "on_chat_model_stream":
                 token = event["data"]["chunk"].content
                 if token:
                     yield {"event": "token", "data": token}
             elif kind == "on_tool_start":
-                yield {
-                    "event": "tool_call",
-                    "data": json.dumps({
-                        "name": event["name"],
-                        "args": event["data"].get("input", {}),
-                    }),
-                }
+                yield {"event": "tool_call", "data": json.dumps({"name": event["name"], "args": event["data"].get("input", {})})}
             elif kind == "on_tool_end":
-                yield {
-                    "event": "tool_result",
-                    "data": event["data"].get("output", ""),
-                }
+                yield {"event": "tool_result", "data": event["data"].get("output", "")}
 
         yield {"event": "end", "data": ""}
 
     async def get_history(self, session_id: str) -> list[dict]:
-        """Get conversation history for a session from checkpoint."""
-        config = {"configurable": {"thread_id": session_id}}
-        state = await self.graph.aget_state(config)
+        state = await self.graph.aget_state({"configurable": {"thread_id": session_id}})
         if not state or not state.values:
             return []
-        messages = state.values.get("messages", [])
+
+        role_map = {HumanMessage: "human", AIMessage: "ai", ToolMessage: "tool"}
         return [
-            {
-                "role": (
-                    "human" if isinstance(m, HumanMessage) else
-                    "ai" if isinstance(m, AIMessage) else
-                    "tool" if isinstance(m, ToolMessage) else "system"
-                ),
-                "content": m.content,
-            }
-            for m in messages
+            {"role": role_map.get(type(m), "system"), "content": m.content}
+            for m in state.values.get("messages", [])
             if not isinstance(m, SystemMessage)
         ]
 
     async def close(self):
-        """Clean up checkpointer connection."""
         if self._checkpointer_cm:
             await self._checkpointer_cm.__aexit__(None, None, None)

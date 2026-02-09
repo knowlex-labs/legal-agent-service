@@ -2,37 +2,29 @@
 
 from legal_agent.config import get_settings
 
-# Embedding model
 EMBEDDING_MODEL = "BAAI/bge-m3"
 EMBEDDING_QUERY_PREFIX = "Represent this sentence for searching relevant passages: "
-
-# Reranker model
 RERANKER_MODEL = "BAAI/bge-reranker-v2-m3"
-
-# Device for model inference (cpu works well on Apple Silicon)
 MODEL_DEVICE = "cpu"
 
-# Reciprocal Rank Fusion weights
+# RRF weights
 SEMANTIC_WEIGHT = 0.7
 FTS_WEIGHT = 0.3
-K = 60  # RRF constant
+K = 60
 
-# Pipeline parameters
+# Pipeline
 HYBRID_LIMIT = 50
 RERANK_CANDIDATES = 20
 DEFAULT_TOP_K = 5
 CITATION_BOOST = 0.05
 
-# Connection pool settings
+# Pool
 POOL_MIN_SIZE = 1
 POOL_MAX_SIZE = 5
 
 
 def get_legal_db_url() -> str:
-    """Build the PostgreSQL connection URL from settings.
-
-    Uses LEGAL_DB_URL if set, otherwise builds from individual POSTGRES_* vars.
-    """
+    """Build PostgreSQL URL from settings, or use LEGAL_DB_URL override."""
     settings = get_settings()
     if settings.legal_db_url:
         return settings.legal_db_url

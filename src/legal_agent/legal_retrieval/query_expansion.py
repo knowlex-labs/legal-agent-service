@@ -32,11 +32,7 @@ LEGAL_ABBREVIATIONS = {
 
 
 def expand_query(query: str) -> str:
-    """Expand legal abbreviations in the query.
-
-    Appends the full form in parentheses after each recognized abbreviation,
-    using word-boundary matching to avoid false positives.
-    """
+    """Append full forms of recognized legal abbreviations in the query."""
     expanded = query
     for abbr, full_form in LEGAL_ABBREVIATIONS.items():
         pattern = r"\b" + re.escape(abbr) + r"\b"

@@ -10,14 +10,6 @@ logger = logging.getLogger(__name__)
 
 
 def create_legal_search_tool(retriever: LegalCaseRetriever):
-    """Create a LangChain tool that wraps the legal case retriever.
-
-    Args:
-        retriever: An initialized LegalCaseRetriever instance.
-
-    Returns:
-        A LangChain @tool function for searching legal cases.
-    """
 
     @tool
     def legal_case_search(
@@ -30,62 +22,36 @@ def create_legal_search_tool(retriever: LegalCaseRetriever):
     ) -> str:
         """Search Indian Supreme Court judgments for relevant case law.
 
-        Use this tool to find cases related to a legal question, statute,
-        or legal principle. You can filter by court, year range, or judge.
-
         Args:
-            query: The legal search query (e.g., "right to bail under Section 439 CrPC").
-            court: Filter by court name (optional).
-            year_from: Filter cases from this year onwards (optional).
-            year_to: Filter cases up to this year (optional).
-            judge: Filter by judge name on the bench (optional).
-            top_k: Number of results to return (default 5, max 10).
+            query: Legal search query (e.g., "right to bail under Section 439 CrPC").
+            court: Filter by court name.
+            year_from: Filter cases from this year onwards.
+            year_to: Filter cases up to this year.
+            judge: Filter by judge name on the bench.
+            top_k: Number of results (default 5, max 10).
         """
         try:
-            top_k = min(top_k, 10)
-            filters = {}
-            if court:
-                filters["court"] = court
-            if year_from:
-                filters["year_from"] = year_from
-            if year_to:
-                filters["year_to"] = year_to
-            if judge:
-                filters["judge"] = judge
-
-            results = retriever.search(
-                query=query,
-                filters=filters if filters else None,
-                top_k=top_k,
-            )
+            filters = {k: v for k, v in {"court": court, "year_from": year_from, "year_to": year_to, "judge": judge}.items() if v}
+            results = retriever.search(query=query, filters=filters or None, top_k=min(top_k, 10))
 
             if not results:
                 return "No relevant cases found for the given query."
 
-            output_parts = [f"Found {len(results)} relevant cases:\n"]
-            for i, result in enumerate(results, 1):
-                citation = result.get("citation", "N/A")
-                case_name = result.get("case_title", "Unknown")
-                court_name = result.get("court", "")
-                year = result.get("year", "")
-                para_num = result.get("paragraph_number", "")
-                text = result.get("text", "")
-
-                # Truncate long paragraphs
+            parts = [f"Found {len(results)} relevant cases:\n"]
+            for i, r in enumerate(results, 1):
+                text = r.get("text", "")
                 if len(text) > 800:
                     text = text[:800] + "..."
-
-                output_parts.append(
+                parts.append(
                     f"---\n"
-                    f"**Case {i}: {case_name}**\n"
-                    f"Citation: {citation} | Court: {court_name} | Year: {year}\n"
-                    f"Paragraph {para_num}:\n{text}\n"
+                    f"**Case {i}: {r.get('case_title', 'Unknown')}**\n"
+                    f"Citation: {r.get('citation', 'N/A')} | Court: {r.get('court', '')} | Year: {r.get('year', '')}\n"
+                    f"Paragraph {r.get('paragraph_number', '')}:\n{text}\n"
                 )
-
-            return "\n".join(output_parts)
+            return "\n".join(parts)
 
         except Exception as e:
-            logger.exception("Error in legal_case_search tool")
+            logger.exception("legal_case_search failed")
             return f"Error searching case law database: {e}"
 
     return legal_case_search
