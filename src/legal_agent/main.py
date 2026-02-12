@@ -57,7 +57,9 @@ async def lifespan(app: FastAPI):
     global job_manager, rag_client, chat_agent
 
     settings = get_settings()
-    logger.info(f"Starting legal-agent-service (draft={settings.llm_model}, chat={settings.chat_llm_model})")
+    chat_models = settings.get_chat_models()
+    models_str = ", ".join(f"{k}={v[0]}" for k, v in chat_models.items())
+    logger.info(f"Starting legal-agent-service (draft={settings.llm_model}, chat=[{models_str}])")
 
     job_manager = JobManager()
     rag_client = MockRAGClient() if settings.debug else HTTPRAGClient(settings)
