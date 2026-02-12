@@ -39,9 +39,10 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     legal_db_url: str | None = None
 
-    # Chat LLM
-    chat_llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
-    chat_llm_model: str = "gpt-4o"
+    # Chat LLM (two models, selected per-request)
+    chat_llm_openai_model: str = "gpt-4o-mini"
+    chat_llm_gemini_model: str = "gemini-2.0-flash"
+    chat_llm_default_provider: Literal["openai", "gemini"] = "openai"
 
     # Jobs
     job_timeout_seconds: int = 300
@@ -50,8 +51,12 @@ class Settings(BaseSettings):
     def get_langchain_provider(self) -> str:
         return _LANGCHAIN_PROVIDERS.get(self.llm_provider, self.llm_provider)
 
-    def get_chat_langchain_provider(self) -> str:
-        return _LANGCHAIN_PROVIDERS.get(self.chat_llm_provider, self.chat_llm_provider)
+    def get_chat_models(self) -> dict[str, tuple[str, str]]:
+        """Return {provider_key: (model_name, langchain_provider)} for chat."""
+        return {
+            "openai": (self.chat_llm_openai_model, "openai"),
+            "gemini": (self.chat_llm_gemini_model, "google-genai"),
+        }
 
     def get_llm_api_key(self) -> str | None:
         keys = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "gemini": self.gemini_api_key}

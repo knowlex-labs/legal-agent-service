@@ -41,7 +41,7 @@ async def send_message(session_id: str, request: ChatMessageRequest):
 
     async def event_generator():
         try:
-            async for event in agent.stream_response(session_id, request.message, enable_kb=request.enable_kb):
+            async for event in agent.stream_response(session_id, request.message, enable_kb=request.enable_kb, model=request.model, style=request.style):
                 yield {"event": event["event"], "data": event["data"]}
         except Exception:
             logger.exception(f"Stream error for session {session_id}")
