@@ -7,7 +7,7 @@ from fastapi import APIRouter
 from sse_starlette.sse import EventSourceResponse
 
 from legal_agent.chat.agent import ChatAgent
-from legal_agent.chat.models import ChatHistoryResponse, ChatMessageRequest, ChatSessionResponse
+from legal_agent.chat.models import ChatHistoryMessage, ChatHistoryResponse, ChatMessageRequest, ChatSessionListResponse, ChatSessionResponse, ChatSessionSummary
 
 logger = logging.getLogger(__name__)
 chat_router = APIRouter(prefix="/chat", tags=["chat"])
@@ -32,6 +32,13 @@ async def create_session() -> ChatSessionResponse:
     return ChatSessionResponse(session_id=session_id)
 
 
+@chat_router.get("/sessions", response_model=ChatSessionListResponse)
+async def list_sessions() -> ChatSessionListResponse:
+    raw = await _get_agent().list_sessions()
+    sessions = [ChatSessionSummary(**s) for s in raw]
+    return ChatSessionListResponse(sessions=sessions)
+
+
 @chat_router.post("/sessions/{session_id}/messages")
 async def send_message(session_id: str, request: ChatMessageRequest):
     agent = _get_agent()
@@ -52,11 +59,20 @@ async def send_message(session_id: str, request: ChatMessageRequest):
 
 @chat_router.get("/sessions/{session_id}/history", response_model=ChatHistoryResponse)
 async def get_history(session_id: str) -> ChatHistoryResponse:
-    messages = await _get_agent().get_history(session_id)
+    raw = await _get_agent().get_history(session_id)
+    messages = [ChatHistoryMessage(**m) for m in raw]
     return ChatHistoryResponse(session_id=session_id, messages=messages)
 
 
 @chat_router.delete("/sessions/{session_id}")
 async def delete_session(session_id: str):
-    logger.info(f"Session deleted: {session_id}")
+    agent = _get_agent()
+    await agent.clear_session(session_id)
     return {"status": "deleted"}
+
+
+@chat_router.delete("/sessions")
+async def clear_all_sessions():
+    agent = _get_agent()
+    await agent.clear_all_sessions()
+    return {"status": "all sessions cleared"}

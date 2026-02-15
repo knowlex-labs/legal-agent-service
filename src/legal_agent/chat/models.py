@@ -17,9 +17,25 @@ class ChatSessionResponse(BaseModel):
     session_id: str
 
 
+class ChatSessionSummary(BaseModel):
+    session_id: str
+    last_checkpoint_id: str
+
+
+class ChatSessionListResponse(BaseModel):
+    sessions: list[ChatSessionSummary]
+
+
+class ToolCallRecord(BaseModel):
+    name: str
+    args: dict = {}
+    result: str | None = None
+
+
 class ChatHistoryMessage(BaseModel):
-    role: str  # "human", "ai", "tool"
+    role: Literal["human", "ai"]
     content: str
+    tool_calls: list[ToolCallRecord] | None = None
 
 
 class ChatHistoryResponse(BaseModel):

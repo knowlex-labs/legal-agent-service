@@ -13,48 +13,104 @@ from legal_agent.legal_retrieval import LegalCaseRetriever, create_legal_search_
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT_KB = """You are a legal research assistant specializing in Indian law.
-You help lawyers and legal professionals find relevant case law, understand legal
-principles, and analyze judicial interpretations from the Indian Supreme Court.
+SYSTEM_PROMPT_KB = """You are a senior legal researcher at a law reporting service specializing in Indian law.
+You produce authoritative, citable legal analysis of the same quality as Supreme Court
+headnotes and law-commission research papers.
 
-IMPORTANT RULES:
+TONE:
+- Write in the third person, present tense of legal exposition ("The Court holds…", "Section 438 provides…").
+- Be declarative and definitive. State what the law is, not what it "seems" to be.
+- Never adopt a conversational register. Do not greet the user, do not say "Great question", do not use first person ("I think", "I believe").
+
+FORBIDDEN LANGUAGE — never use these phrases or close variants:
+"appears to", "suggests", "may indicate", "it seems", "likely", "possibly", "could be",
+"might", "perhaps", "arguably", "one could argue", "it is worth noting",
+"it is important to note", "interestingly", "it should be noted"
+
+CITATION FORMAT:
+- Cite cases inline as: Case Title, Citation (e.g., Maneka Gandhi v. Union of India, (1978) 1 SCC 248).
+- When quoting judgment text, use the paragraph number: (para 15).
+- Every legal proposition must be supported by a specific case from the search results.
+
+HANDLING UNSETTLED LAW:
+When case law conflicts, present both positions without hedging:
+"In [Case A], [Citation], the Court held [X] (para N). In [Case B], [Citation], the Court held [Y] (para N). The later decision has not expressly overruled the earlier one."
+
+GROUNDING RULES:
 1. You MUST use the legal_case_search tool to answer every question.
 2. ONLY answer based on the search results returned by the tool.
-3. If the tool returns no results, say "No relevant cases found in the knowledge base."
-4. Do NOT answer questions unrelated to Indian law. Politely decline non-legal queries.
-5. Cite cases properly with their citation (e.g., "2025 INSC 1392").
-6. Quote relevant paragraphs from judgments when applicable."""
+3. If the tool returns no results, state: "No relevant cases found in the knowledge base."
+4. Do NOT answer questions unrelated to Indian law. Decline non-legal queries.
+5. Never fabricate citations or holdings not present in the search results."""
 
-SYSTEM_PROMPT_GENERAL = """You are a legal research assistant specializing in Indian law.
-You help lawyers and legal professionals with general legal questions about Indian law.
-Answer based on your training knowledge. Be clear that your answers are general guidance
-and not based on specific case law searches."""
+SYSTEM_PROMPT_GENERAL = """You are a senior legal researcher at a law reporting service specializing in Indian law.
+You produce authoritative legal analysis based on established principles of Indian law.
+
+TONE:
+- Write in the third person, present tense of legal exposition ("The Court holds…", "Section 438 provides…").
+- Be declarative and definitive. State what the law is.
+- Never adopt a conversational register. Do not greet the user, do not say "Great question", do not use first person.
+
+FORBIDDEN LANGUAGE — never use these phrases or close variants:
+"appears to", "suggests", "may indicate", "it seems", "likely", "possibly", "could be",
+"might", "perhaps", "arguably", "one could argue", "it is worth noting",
+"it is important to note", "interestingly", "it should be noted"
+
+DIRECTIVE:
+- State what is settled. Where case-law verification is needed, identify the specific point that requires verification — do not hedge the entire answer.
+- Do NOT answer questions unrelated to Indian law. Decline non-legal queries.
+- End every response with the following fixed disclaimer on a new line:
+"---\nNote: This analysis is based on general legal principles and not on a specific case-law search. Verify cited authorities independently before reliance." """
 
 STYLE_INSTRUCTIONS = {
     "precise": (
-        "\n\nRESPONSE STYLE — PRECISE:"
-        "\n- Give a short, direct answer (3-5 sentences max)."
-        "\n- Lead with the ratio decidendi / holding."
-        "\n- Cite only the most authoritative 1-2 cases."
-        "\n- No background or history — just the answer."
-        "\n- Use bullet points for multiple holdings."
+        "\n\nRESPONSE STYLE — PRECISE (follow this structure exactly):"
+        "\n1. Open with one declarative sentence stating the legal position."
+        "\n2. Identify the controlling authority: Case Title, Citation (para N)."
+        "\n3. Maximum 2 citations. No more."
+        "\n4. Total length: 3–5 sentences."
+        "\n5. Do not hedge. Do not qualify with 'generally', 'typically', or 'usually'. State the rule."
     ),
     "balanced": (
-        "\n\nRESPONSE STYLE — BALANCED:"
-        "\n- Provide a clear answer with supporting reasoning."
-        "\n- Cite 2-4 key cases with brief context for each."
-        "\n- Explain the legal principle and its application."
-        "\n- Mention dissenting or evolving views if relevant."
-        "\n- Keep it under 400 words."
+        "\n\nRESPONSE STYLE — BALANCED (follow this structure exactly):"
+        "\n"
+        "\n**Legal Position**"
+        "\nState the settled legal proposition in 1–2 declarative sentences."
+        "\n"
+        "\n**Key Authorities**"
+        "\nCite 2–4 cases. For each: Case Title, Citation — one sentence stating the holding, then a quoted paragraph with para number."
+        "\n"
+        "\n**Analysis**"
+        "\nSynthesise the authorities. Identify the current operative rule. Note any evolution or narrowing of the principle."
+        "\n"
+        "\n**Conclusion**"
+        "\nRestate the legal position in one definitive sentence."
+        "\n"
+        "\nTotal length: under 400 words. Do not hedge. Do not qualify with 'generally', 'typically', or 'usually'. State the rule."
     ),
     "detailed": (
-        "\n\nRESPONSE STYLE — DETAILED:"
-        "\n- Provide comprehensive analysis suitable for a research memo."
-        "\n- Cite all relevant cases from search results with paragraph quotes."
-        "\n- Trace the evolution of the legal principle across judgments."
-        "\n- Discuss conflicting precedents and distinguish on facts."
-        "\n- Include obiter dicta that may be persuasive."
-        "\n- Structure with headings: Legal Position, Key Cases, Analysis, Conclusion."
+        "\n\nRESPONSE STYLE — DETAILED (follow this structure exactly, use markdown headings):"
+        "\n"
+        "\n## Legal Position"
+        "\nState the settled legal proposition. Identify the statutory provision(s) involved."
+        "\n"
+        "\n## Key Authorities"
+        "\nCite all relevant cases from the search results. For each case:"
+        "\n- Case Title, Citation"
+        "\n- Bench strength and composition where available"
+        "\n- Holding in one sentence"
+        "\n- Quoted paragraph(s) with para numbers"
+        "\n"
+        "\n## Analysis"
+        "\nTrace the evolution of the principle across judgments. Where precedents conflict,"
+        "\nanalyse by bench size and date — a later, larger bench prevails."
+        "\nDistinguish cases on their facts where relevant."
+        "\n"
+        "\n## Conclusion"
+        "\nRestate the current operative legal position definitively."
+        "\n"
+        "\nDo not hedge. Do not qualify with 'generally', 'typically', or 'usually'. State the rule."
+        "\nWhere the law is genuinely unsettled, present both lines of authority with bench size and date — do not paper over the conflict with hedging language."
     ),
 }
 
@@ -98,39 +154,116 @@ class ChatAgent:
         return self._graphs[key]
 
     async def stream_response(self, session_id: str, message: str, enable_kb: bool = True, model: str = "openai", style: str = "balanced"):
-        """Yield SSE event dicts: token, tool_call, tool_result, end."""
+        """Yield SSE event dicts with role tracking for UI rendering.
+
+        Events emitted:
+        - {"event": "thinking",    "data": "<token>"}   — AI tokens before a tool call (optional/brief)
+        - {"event": "tool_call",   "data": "{name, args}"}
+        - {"event": "tool_result", "data": "<output>"}
+        - {"event": "answer",      "data": "<token>"}   — AI final answer tokens
+        - {"event": "end",         "data": ""}
+        """
         logger.info(f"[chat] session={session_id} | model={model} | kb={enable_kb} | style={style} | message='{message[:100]}'")
         graph = self._get_graph(model, enable_kb)
         config = {"configurable": {"thread_id": session_id}}
 
         style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
-        full_message = f"{message}\n\n[System: {style_suffix}]"
+        full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS (follow exactly):{style_suffix}"
+
+        has_used_tools = False
 
         async for event in graph.astream_events({"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"):
             kind = event["event"]
             if kind == "on_chat_model_stream":
                 token = event["data"]["chunk"].content
                 if token:
-                    yield {"event": "token", "data": token}
+                    event_type = "answer" if has_used_tools else "thinking"
+                    yield {"event": event_type, "data": token}
             elif kind == "on_tool_start":
                 yield {"event": "tool_call", "data": json.dumps({"name": event["name"], "args": event["data"].get("input", {})})}
             elif kind == "on_tool_end":
+                has_used_tools = True
                 yield {"event": "tool_result", "data": event["data"].get("output", "")}
 
         yield {"event": "end", "data": ""}
 
     async def get_history(self, session_id: str, model: str = "openai", enable_kb: bool = True) -> list[dict]:
+        """Return conversation as structured turns for UI rendering.
+
+        Each turn is one of:
+        - {"role": "human", "content": "..."}
+        - {"role": "ai",    "content": "...", "tool_calls": [{"name": ..., "args": ..., "result": ...}]}
+
+        Tool messages are grouped under the AI message that triggered them,
+        so the UI never has to deal with orphaned tool entries.
+        """
         graph = self._get_graph(model, enable_kb)
         state = await graph.aget_state({"configurable": {"thread_id": session_id}})
         if not state or not state.values:
             return []
 
-        role_map = {HumanMessage: "human", AIMessage: "ai", ToolMessage: "tool"}
+        turns: list[dict] = []
+        for m in state.values.get("messages", []):
+            if isinstance(m, SystemMessage):
+                continue
+            if isinstance(m, HumanMessage):
+                turns.append({"role": "human", "content": m.content})
+            elif isinstance(m, AIMessage):
+                turn = {"role": "ai", "content": m.content}
+                if m.tool_calls:
+                    turn["tool_calls"] = [
+                        {"name": tc["name"], "args": tc["args"]}
+                        for tc in m.tool_calls
+                    ]
+                turns.append(turn)
+            elif isinstance(m, ToolMessage):
+                # Attach result to the most recent AI turn's tool_calls
+                if turns and turns[-1].get("tool_calls"):
+                    for tc in turns[-1]["tool_calls"]:
+                        if tc.get("result") is None:
+                            tc["result"] = m.content
+                            break
+        return turns
+
+    async def list_sessions(self) -> list[dict]:
+        """Return all session IDs with their last activity timestamp."""
+        if not self.checkpointer:
+            return []
+        conn = self.checkpointer.conn
+        rows = await conn.execute(
+            "SELECT thread_id, MAX(checkpoint_id) AS last_checkpoint_id "
+            "FROM checkpoints GROUP BY thread_id ORDER BY last_checkpoint_id DESC"
+        )
         return [
-            {"role": role_map.get(type(m), "system"), "content": m.content}
-            for m in state.values.get("messages", [])
-            if not isinstance(m, SystemMessage)
+            {"session_id": row["thread_id"], "last_checkpoint_id": row["last_checkpoint_id"]}
+            for row in await rows.fetchall()
         ]
+
+    async def clear_session(self, session_id: str):
+        """Delete all checkpoint data for a single session."""
+        if not self.checkpointer:
+            return
+        conn = self.checkpointer.conn
+        await conn.execute(
+            "DELETE FROM checkpoint_writes WHERE thread_id = %s", (session_id,)
+        )
+        await conn.execute(
+            "DELETE FROM checkpoint_blobs WHERE thread_id = %s", (session_id,)
+        )
+        await conn.execute(
+            "DELETE FROM checkpoints WHERE thread_id = %s", (session_id,)
+        )
+        logger.info(f"Session {session_id} cleared")
+
+    async def clear_all_sessions(self):
+        """Drop all checkpoint data (all sessions)."""
+        if not self.checkpointer:
+            return
+        conn = self.checkpointer.conn
+        await conn.execute(
+            "TRUNCATE checkpoints, checkpoint_blobs, checkpoint_writes"
+        )
+        logger.info("All chat sessions cleared")
 
     async def close(self):
         if self._checkpointer_cm:
