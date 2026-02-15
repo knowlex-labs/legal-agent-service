@@ -75,7 +75,7 @@ def build_filter_clause(filters: dict | None) -> tuple[str, dict]:
 
     clauses, params = [], {}
     filter_map = {
-        "court": "AND c.court = %(court)s",
+        "court": "AND c.court ILIKE %(court)s",
         "year_from": "AND c.year >= %(year_from)s",
         "year_to": "AND c.year <= %(year_to)s",
         "judge": "AND %(judge)s = ANY(c.bench)",

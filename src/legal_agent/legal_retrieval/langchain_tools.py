@@ -35,6 +35,8 @@ def create_legal_search_tool(retriever: LegalCaseRetriever):
         """
         try:
             logger.info(f"Tool called — query='{query}', court={court}, year={year_from}-{year_to}, judge={judge}")
+            if court:
+                court = f"%{court}%"
             filters = {k: v for k, v in {"court": court, "year_from": year_from, "year_to": year_to, "judge": judge}.items() if v}
             results = retriever.search(query=query, filters=filters or None, top_k=min(top_k, 10))
             logger.info(f"Search returned {len(results)} results")
