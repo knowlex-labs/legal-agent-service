@@ -174,23 +174,16 @@ class ChatAgent:
         else:
             full_message = message
 
-        has_used_tools = False
-        full_response: list[str] = []
-
         async for event in graph.astream_events({"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"):
             kind = event["event"]
             if kind == "on_chat_model_stream":
                 token = event["data"]["chunk"].content
                 if token:
-                    full_response.append(token)
                     yield {"event": "answer", "data": token}
             elif kind == "on_tool_start":
                 yield {"event": "tool_call", "data": json.dumps({"name": event["name"], "args": event["data"].get("input", {})})}
             elif kind == "on_tool_end":
-                has_used_tools = True
                 yield {"event": "tool_result", "data": event["data"].get("output", "")}
-
-        logger.info(f"[chat] session={session_id} | stream complete | tools_used={has_used_tools} | response='{''.join(full_response)}'")
 
         yield {"event": "end", "data": ""}
 

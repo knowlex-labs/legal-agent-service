@@ -67,10 +67,7 @@ async def lifespan(app: FastAPI):
     draft_service = DraftService(settings=settings, job_manager=job_manager, rag_client=rag_client)
     set_services(draft_service, job_manager)
 
-    retriever = LegalCaseRetriever()
-    retriever.warmup()
-
-    chat_agent = ChatAgent(retriever=retriever)
+    chat_agent = ChatAgent(retriever=LegalCaseRetriever())
     await chat_agent.initialize(get_legal_db_url())
     set_chat_agent(chat_agent)
 

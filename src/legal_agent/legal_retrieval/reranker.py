@@ -18,11 +18,6 @@ def _get_reranker():
     return _reranker
 
 
-def warmup():
-    """Pre-load the reranker model so the first request is fast."""
-    _get_reranker()
-
-
 def rerank(query: str, documents: list[dict], top_k: int) -> list[dict]:
     """Score query-document pairs with cross-encoder, return top_k sorted by score."""
     if not documents:
