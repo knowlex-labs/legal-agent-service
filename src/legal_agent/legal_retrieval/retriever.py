@@ -3,15 +3,25 @@
 import logging
 
 from legal_agent.legal_retrieval.config import CITATION_BOOST, DEFAULT_TOP_K, HYBRID_LIMIT, RERANK_CANDIDATES
-from legal_agent.legal_retrieval.db import execute_hybrid_search, get_case_by_id, get_filter_options, get_paragraphs_for_case
+from legal_agent.legal_retrieval.db import execute_hybrid_search, get_case_by_id, get_filter_options, get_paragraphs_for_case, get_pool
 from legal_agent.legal_retrieval.embeddings import embed_query
+from legal_agent.legal_retrieval.embeddings import warmup as _warmup_embeddings
 from legal_agent.legal_retrieval.query_expansion import expand_query
 from legal_agent.legal_retrieval.reranker import rerank
+from legal_agent.legal_retrieval.reranker import warmup as _warmup_reranker
 
 logger = logging.getLogger(__name__)
 
 
 class LegalCaseRetriever:
+
+    def warmup(self):
+        """Pre-load ML models and DB pool so the first request is fast."""
+        logger.info("[retriever] warming up models and DB pool...")
+        _warmup_embeddings()
+        _warmup_reranker()
+        get_pool()
+        logger.info("[retriever] warmup complete")
 
     def search(self, query: str, filters: dict | None = None, top_k: int = DEFAULT_TOP_K) -> list[dict]:
         expanded = expand_query(query)

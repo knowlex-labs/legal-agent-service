@@ -37,11 +37,12 @@ When case law conflicts, present both positions without hedging:
 "In [Case A], [Citation], the Court held [X] (para N). In [Case B], [Citation], the Court held [Y] (para N). The later decision has not expressly overruled the earlier one."
 
 GROUNDING RULES:
-1. You MUST use the legal_case_search tool to answer every question.
-2. ONLY answer based on the search results returned by the tool.
-3. If the tool returns no results, state: "No relevant cases found in the knowledge base."
-4. Do NOT answer questions unrelated to Indian law. Decline non-legal queries.
-5. Never fabricate citations or holdings not present in the search results."""
+1. Use the legal_case_search tool ONLY when the user asks a substantive legal question. Do NOT call the tool for greetings, small talk, clarifications, or non-legal queries.
+2. For greetings or casual messages, respond briefly and professionally (e.g., "Please state your legal query."). Do not call any tools.
+3. When you do search, ONLY answer based on the search results returned by the tool.
+4. If the tool returns no results, state: "No relevant cases found in the knowledge base."
+5. Do NOT answer questions unrelated to Indian law. Decline non-legal queries.
+6. Never fabricate citations or holdings not present in the search results."""
 
 SYSTEM_PROMPT_GENERAL = """You are a senior legal researcher at a law reporting service specializing in Indian law.
 You produce authoritative legal analysis based on established principles of Indian law.
@@ -167,23 +168,29 @@ class ChatAgent:
         graph = self._get_graph(model, enable_kb)
         config = {"configurable": {"thread_id": session_id}}
 
-        style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
-        full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS (follow exactly):{style_suffix}"
+        if enable_kb:
+            style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
+            full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS (follow exactly):{style_suffix}"
+        else:
+            full_message = message
 
         has_used_tools = False
+        full_response: list[str] = []
 
         async for event in graph.astream_events({"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"):
             kind = event["event"]
             if kind == "on_chat_model_stream":
                 token = event["data"]["chunk"].content
                 if token:
-                    event_type = "answer" if has_used_tools else "thinking"
-                    yield {"event": event_type, "data": token}
+                    full_response.append(token)
+                    yield {"event": "answer", "data": token}
             elif kind == "on_tool_start":
                 yield {"event": "tool_call", "data": json.dumps({"name": event["name"], "args": event["data"].get("input", {})})}
             elif kind == "on_tool_end":
                 has_used_tools = True
                 yield {"event": "tool_result", "data": event["data"].get("output", "")}
+
+        logger.info(f"[chat] session={session_id} | stream complete | tools_used={has_used_tools} | response='{''.join(full_response)}'")
 
         yield {"event": "end", "data": ""}
 
