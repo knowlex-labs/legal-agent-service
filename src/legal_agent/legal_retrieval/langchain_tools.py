@@ -22,6 +22,9 @@ def create_legal_search_tool(retriever: LegalCaseRetriever):
     ) -> str:
         """Search Indian Supreme Court judgments for relevant case law.
 
+        Every legal statement in your response must be traceable to a specific case
+        returned by this tool. Do not make legal claims that cannot be tied to a result.
+
         Args:
             query: Legal search query (e.g., "right to bail under Section 439 CrPC").
             court: Filter by court name.
@@ -32,6 +35,8 @@ def create_legal_search_tool(retriever: LegalCaseRetriever):
         """
         try:
             logger.info(f"Tool called — query='{query}', court={court}, year={year_from}-{year_to}, judge={judge}")
+            if court:
+                court = f"%{court}%"
             filters = {k: v for k, v in {"court": court, "year_from": year_from, "year_to": year_to, "judge": judge}.items() if v}
             results = retriever.search(query=query, filters=filters or None, top_k=min(top_k, 10))
             logger.info(f"Search returned {len(results)} results")
@@ -44,11 +49,15 @@ def create_legal_search_tool(retriever: LegalCaseRetriever):
                 text = r.get("text", "")
                 if len(text) > 800:
                     text = text[:800] + "..."
+                para_num = r.get("paragraph_number", "N/A")
                 parts.append(
                     f"---\n"
-                    f"**Case {i}: {r.get('case_title', 'Unknown')}**\n"
-                    f"Citation: {r.get('citation', 'N/A')} | Court: {r.get('court', '')} | Year: {r.get('year', '')}\n"
-                    f"Paragraph {r.get('paragraph_number', '')}:\n{text}\n"
+                    f"Result {i}:\n"
+                    f"Title: {r.get('case_title', 'Unknown')}\n"
+                    f"Citation: {r.get('citation', 'N/A')}\n"
+                    f"Court: {r.get('court', 'N/A')}\n"
+                    f"Year: {r.get('year', 'N/A')}\n"
+                    f"Relevant Paragraph (para {para_num}):\n\"{text}\"\n"
                 )
             return "\n".join(parts)
 

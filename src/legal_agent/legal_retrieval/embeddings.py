@@ -18,6 +18,11 @@ def _get_model():
     return _model
 
 
+def warmup():
+    """Pre-load the embedding model so the first request is fast."""
+    _get_model()
+
+
 def embed_query(query: str) -> list[float]:
     """Embed a query with BGE prefix and L2 normalization."""
     model = _get_model()
