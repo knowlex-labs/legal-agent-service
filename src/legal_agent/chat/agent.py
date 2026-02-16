@@ -6,6 +6,8 @@ import logging
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
+from psycopg import AsyncConnection
+from psycopg.rows import dict_row
 from langgraph.prebuilt import create_react_agent
 
 from legal_agent.config import get_settings
@@ -121,9 +123,11 @@ class ChatAgent:
         self.retriever = retriever
         self.checkpointer: AsyncPostgresSaver | None = None
         self._checkpointer_cm = None
+        self._db_url: str | None = None
         self._graphs: dict[str, object] = {}  # "openai_kb", "openai_general", "gemini_kb", etc.
 
     async def initialize(self, db_url: str):
+        self._db_url = db_url
         self._checkpointer_cm = AsyncPostgresSaver.from_conn_string(db_url)
         self.checkpointer = await self._checkpointer_cm.__aenter__()
         await self.checkpointer.setup()
@@ -227,42 +231,48 @@ class ChatAgent:
 
     async def list_sessions(self) -> list[dict]:
         """Return all session IDs with their last activity timestamp."""
-        if not self.checkpointer:
+        if not self._db_url:
             return []
-        conn = self.checkpointer.conn
-        rows = await conn.execute(
-            "SELECT thread_id, MAX(checkpoint_id) AS last_checkpoint_id "
-            "FROM checkpoints GROUP BY thread_id ORDER BY last_checkpoint_id DESC"
-        )
-        return [
-            {"session_id": row["thread_id"], "last_checkpoint_id": row["last_checkpoint_id"]}
-            for row in await rows.fetchall()
-        ]
+        async with await AsyncConnection.connect(
+            self._db_url, autocommit=True, row_factory=dict_row
+        ) as conn:
+            rows = await conn.execute(
+                "SELECT thread_id, MAX(checkpoint_id) AS last_checkpoint_id "
+                "FROM checkpoints GROUP BY thread_id ORDER BY last_checkpoint_id DESC"
+            )
+            return [
+                {"session_id": row["thread_id"], "last_checkpoint_id": row["last_checkpoint_id"]}
+                for row in await rows.fetchall()
+            ]
 
     async def clear_session(self, session_id: str):
         """Delete all checkpoint data for a single session."""
-        if not self.checkpointer:
+        if not self._db_url:
             return
-        conn = self.checkpointer.conn
-        await conn.execute(
-            "DELETE FROM checkpoint_writes WHERE thread_id = %s", (session_id,)
-        )
-        await conn.execute(
-            "DELETE FROM checkpoint_blobs WHERE thread_id = %s", (session_id,)
-        )
-        await conn.execute(
-            "DELETE FROM checkpoints WHERE thread_id = %s", (session_id,)
-        )
+        async with await AsyncConnection.connect(
+            self._db_url, autocommit=True
+        ) as conn:
+            await conn.execute(
+                "DELETE FROM checkpoint_writes WHERE thread_id = %s", (session_id,)
+            )
+            await conn.execute(
+                "DELETE FROM checkpoint_blobs WHERE thread_id = %s", (session_id,)
+            )
+            await conn.execute(
+                "DELETE FROM checkpoints WHERE thread_id = %s", (session_id,)
+            )
         logger.info(f"Session {session_id} cleared")
 
     async def clear_all_sessions(self):
         """Drop all checkpoint data (all sessions)."""
-        if not self.checkpointer:
+        if not self._db_url:
             return
-        conn = self.checkpointer.conn
-        await conn.execute(
-            "TRUNCATE checkpoints, checkpoint_blobs, checkpoint_writes"
-        )
+        async with await AsyncConnection.connect(
+            self._db_url, autocommit=True
+        ) as conn:
+            await conn.execute(
+                "TRUNCATE checkpoints, checkpoint_blobs, checkpoint_writes"
+            )
         logger.info("All chat sessions cleared")
 
     async def close(self):
