@@ -1,5 +1,6 @@
 """LangGraph ReAct chat agent with PostgresSaver for persistent sessions."""
 
+import asyncio
 import json
 import logging
 
@@ -132,30 +133,42 @@ class ChatAgent:
             conninfo=db_url,
             min_size=1,
             max_size=5,
+            open=False,
             kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
         )
         await self._pool.open()
         self.checkpointer = AsyncPostgresSaver(conn=self._pool)
         await self.checkpointer.setup()
-        self._compile_graphs()
-        logger.info("ChatAgent initialized")
+        self._compile_graphs_background()
+        logger.info("ChatAgent initialized (graphs compiling in background)")
 
-    def _compile_graphs(self):
-        settings = get_settings()
-        chat_models = settings.get_chat_models()
-        tools = [create_legal_search_tool(self.retriever)] if self.retriever else []
+    def _compile_graphs_background(self):
+        """Start graph compilation in a background thread to avoid blocking startup."""
+        import concurrent.futures
+        self._ready = asyncio.Event()
+        loop = asyncio.get_event_loop()
 
-        for provider_key, (model_name, langchain_provider) in chat_models.items():
-            llm = init_chat_model(model_name, model_provider=langchain_provider)
-            self._graphs[f"{provider_key}_kb"] = create_react_agent(
-                model=llm, tools=tools, checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT_KB,
-            )
-            self._graphs[f"{provider_key}_general"] = create_react_agent(
-                model=llm, tools=[], checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT_GENERAL,
-            )
-            logger.info(f"Compiled graphs for {provider_key} ({model_name})")
+        def _compile():
+            settings = get_settings()
+            chat_models = settings.get_chat_models()
+            tools = [create_legal_search_tool(self.retriever)] if self.retriever else []
+            for provider_key, (model_name, langchain_provider) in chat_models.items():
+                llm = init_chat_model(model_name, model_provider=langchain_provider)
+                self._graphs[f"{provider_key}_kb"] = create_react_agent(
+                    model=llm, tools=tools, checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT_KB,
+                )
+                self._graphs[f"{provider_key}_general"] = create_react_agent(
+                    model=llm, tools=[], checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT_GENERAL,
+                )
+                logger.info(f"Compiled graphs for {provider_key} ({model_name})")
+            loop.call_soon_threadsafe(self._ready.set)
+            logger.info("All graphs compiled and ready")
 
-    def _get_graph(self, model: str, enable_kb: bool):
+        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+        executor.submit(_compile)
+
+    async def _get_graph(self, model: str, enable_kb: bool):
+        await self._ready.wait()
         suffix = "kb" if enable_kb else "general"
         key = f"{model}_{suffix}"
         if key not in self._graphs:
@@ -175,7 +188,7 @@ class ChatAgent:
         - {"event": "end",         "data": ""}
         """
         logger.info(f"[chat] session={session_id} | model={model} | kb={enable_kb} | style={style} | message='{message[:100]}'")
-        graph = self._get_graph(model, enable_kb)
+        graph = await self._get_graph(model, enable_kb)
         config = {"configurable": {"thread_id": session_id}}
 
         if enable_kb:
@@ -207,7 +220,7 @@ class ChatAgent:
         Tool messages are grouped under the AI message that triggered them,
         so the UI never has to deal with orphaned tool entries.
         """
-        graph = self._get_graph(model, enable_kb)
+        graph = await self._get_graph(model, enable_kb)
         state = await graph.aget_state({"configurable": {"thread_id": session_id}})
         if not state or not state.values:
             return []
