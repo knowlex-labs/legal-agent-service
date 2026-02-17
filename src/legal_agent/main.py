@@ -1,5 +1,6 @@
 """FastAPI application entry point."""
 
+import asyncio
 import logging
 import os
 import sys
@@ -52,9 +53,21 @@ rag_client: HTTPRAGClient | MockRAGClient | None = None
 chat_agent: ChatAgent | None = None
 
 
+async def _init_chat_agent():
+    """Initialize chat agent in background so the server can start accepting requests."""
+    global chat_agent
+    try:
+        chat_agent = ChatAgent(retriever=LegalCaseRetriever())
+        await chat_agent.initialize(get_legal_db_url())
+        set_chat_agent(chat_agent)
+        logger.info("Chat agent fully initialized")
+    except Exception:
+        logger.exception("Failed to initialize chat agent")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global job_manager, rag_client, chat_agent
+    global job_manager, rag_client
 
     settings = get_settings()
     chat_models = settings.get_chat_models()
@@ -67,14 +80,16 @@ async def lifespan(app: FastAPI):
     draft_service = DraftService(settings=settings, job_manager=job_manager, rag_client=rag_client)
     set_services(draft_service, job_manager)
 
-    chat_agent = ChatAgent(retriever=LegalCaseRetriever())
-    await chat_agent.initialize(get_legal_db_url())
-    set_chat_agent(chat_agent)
+    # Start chat agent initialization in background to avoid blocking server startup
+    init_task = asyncio.create_task(_init_chat_agent())
 
     logger.info("Service ready")
     yield
 
     logger.info("Shutting down...")
+    # Wait for init to finish before cleanup
+    if not init_task.done():
+        init_task.cancel()
     if chat_agent:
         await chat_agent.close()
     close_pool()
