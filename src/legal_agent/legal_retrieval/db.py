@@ -109,6 +109,7 @@ def execute_hybrid_search(
     WITH semantic AS (
         SELECT p.id AS paragraph_id, p.case_id, p.paragraph_number,
                p.paragraph_text AS text,
+               p.embedding <=> %(embedding)s::vector AS cosine_distance,
                ROW_NUMBER() OVER (ORDER BY p.embedding <=> %(embedding)s::vector) AS rank
         FROM case_paragraphs p JOIN cases c ON c.id = p.case_id
         WHERE 1=1 {filter_sql}
@@ -130,6 +131,7 @@ def execute_hybrid_search(
             COALESCE(s.case_id, f.case_id) AS case_id,
             COALESCE(s.paragraph_number, f.paragraph_number) AS paragraph_number,
             COALESCE(s.text, f.text) AS text,
+            s.cosine_distance,
             ({SEMANTIC_WEIGHT} / ({K} + COALESCE(s.rank, 1000))
              + {FTS_WEIGHT} / ({K} + COALESCE(f.rank, 1000))) AS rrf_score
         FROM semantic s FULL OUTER JOIN fulltext f ON s.paragraph_id = f.paragraph_id

@@ -1,6 +1,8 @@
 """5-stage legal case retrieval pipeline: expand -> embed -> RRF -> citation boost -> rerank."""
 
+import contextvars
 import logging
+import math
 
 from legal_agent.legal_retrieval.config import CITATION_BOOST, DEFAULT_TOP_K, HYBRID_LIMIT, RERANK_CANDIDATES
 from legal_agent.legal_retrieval.db import execute_hybrid_search, get_case_by_id, get_filter_options, get_paragraphs_for_case
@@ -9,6 +11,32 @@ from legal_agent.legal_retrieval.query_expansion import expand_query
 from legal_agent.legal_retrieval.reranker import rerank
 
 logger = logging.getLogger(__name__)
+
+_citation_context: contextvars.ContextVar[list[dict]] = contextvars.ContextVar("_citation_context", default=[])
+
+
+def _sigmoid(x: float) -> float:
+    return 1.0 / (1.0 + math.exp(-x))
+
+
+def _compute_confidence(doc: dict) -> float:
+    """Blend rerank score (primary) with cosine similarity (secondary)."""
+    rerank_score = doc.get("rerank_score", 0.0)
+    sig = _sigmoid(rerank_score)
+
+    cosine_distance = doc.get("cosine_distance")
+    if cosine_distance is not None:
+        cosine_similarity = 1.0 - (float(cosine_distance) / 2.0)
+        confidence = 0.7 * sig + 0.3 * cosine_similarity
+    else:
+        confidence = sig
+
+    return round(min(max(confidence, 0.0), 1.0), 4)
+
+
+def get_last_citations() -> list[dict]:
+    """Read the most recent structured citations from the context."""
+    return _citation_context.get([])
 
 
 class LegalCaseRetriever:
