@@ -202,7 +202,8 @@ class ChatAgent:
             if kind == "on_chat_model_stream":
                 token = event["data"]["chunk"].content
                 if token:
-                    yield {"event": "answer", "data": token}
+                    escaped = token.replace("\n", "\\n")
+                    yield {"event": "answer", "data": escaped}
             elif kind == "on_tool_start":
                 yield {"event": "tool_call", "data": json.dumps({"name": event["name"], "args": event["data"].get("input", {})})}
             elif kind == "on_tool_end":
