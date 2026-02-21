@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 from fastapi.middleware.cors import CORSMiddleware
 
 from legal_agent.api.routes import router, set_services
+from legal_agent.case_agent import CaseAgent, case_agent_router, set_case_agent
 from legal_agent.chat.agent import ChatAgent
 from legal_agent.chat.routes import chat_router, set_chat_agent
 from legal_agent.clients.rag_client import HTTPRAGClient, MockRAGClient
@@ -51,6 +52,7 @@ _setup_llm_environment()
 job_manager: JobManager | None = None
 rag_client: HTTPRAGClient | MockRAGClient | None = None
 chat_agent: ChatAgent | None = None
+case_agent: CaseAgent | None = None
 
 
 async def _init_chat_agent():
@@ -63,6 +65,18 @@ async def _init_chat_agent():
         logger.info("Chat agent fully initialized")
     except Exception:
         logger.exception("Failed to initialize chat agent")
+
+
+async def _init_case_agent():
+    """Initialize case agent in background so the server can start accepting requests."""
+    global case_agent
+    try:
+        case_agent = CaseAgent(retriever=LegalCaseRetriever(), rag_client=rag_client)
+        await case_agent.initialize()
+        set_case_agent(case_agent)
+        logger.info("Case agent fully initialized")
+    except Exception:
+        logger.exception("Failed to initialize case agent")
 
 
 @asynccontextmanager
@@ -80,16 +94,18 @@ async def lifespan(app: FastAPI):
     draft_service = DraftService(settings=settings, job_manager=job_manager, rag_client=rag_client)
     set_services(draft_service, job_manager)
 
-    # Start chat agent initialization in background to avoid blocking server startup
+    # Start agent initialization in background to avoid blocking server startup
     init_task = asyncio.create_task(_init_chat_agent())
+    case_init_task = asyncio.create_task(_init_case_agent())
 
     logger.info("Service ready")
     yield
 
     logger.info("Shutting down...")
     # Wait for init to finish before cleanup
-    if not init_task.done():
-        init_task.cancel()
+    for task in (init_task, case_init_task):
+        if not task.done():
+            task.cancel()
     if chat_agent:
         await chat_agent.close()
     close_pool()
@@ -109,6 +125,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.include_router(router, prefix="/api/v1", tags=["drafts"])
     app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
+    app.include_router(case_agent_router, prefix="/api/v1", tags=["case-agent"])
 
     @app.get("/")
     async def root():
