@@ -29,7 +29,8 @@ class CreateDraftResponse(BaseModel):
 class DraftResult(BaseModel):
     """Result of a completed draft job."""
 
-    draft: str = Field(..., description="The generated document draft")
+    draft: str = Field(..., description="The generated document draft (markdown)")
+    content_format: str = Field(default="markdown", description="Format of draft field")
     sections: list[DocumentSection] = Field(
         default_factory=list, description="Structured sections if applicable"
     )

@@ -32,6 +32,7 @@ def load_examples() -> dict:
 def get_examples_for_document_type(
     document_type: str,
     subtype: str | None = None,
+    language: str = "english",
 ) -> dict:
     """
     Get examples and structure template for a specific document type.
@@ -54,6 +55,8 @@ def get_examples_for_document_type(
         "application": "application",
         "contract": "contract",
         "agreement": "contract",
+        "bail_application": "bail_application",
+        "criminal_appeal": "criminal_appeal",
     }
 
     example_key = type_mapping.get(document_type, document_type)
@@ -67,8 +70,19 @@ def get_examples_for_document_type(
     # If subtype specified and exists, return subtype-specific examples
     if subtype and "subtypes" in doc_examples:
         if subtype in doc_examples["subtypes"]:
-            return doc_examples["subtypes"][subtype]
-        logger.debug(f"Subtype '{subtype}' not found, using base examples")
+            doc_examples = doc_examples["subtypes"][subtype]
+        else:
+            logger.debug(f"Subtype '{subtype}' not found, using base examples")
+
+    # Check for language-specific variant (e.g., "languages": {"hindi": {...}})
+    if language != "english" and "languages" in doc_examples:
+        lang_variant = doc_examples["languages"].get(language)
+        if lang_variant:
+            # Merge: language variant overrides base, but base fills gaps
+            merged = {**doc_examples, **lang_variant}
+            merged.pop("languages", None)
+            return merged
+        logger.debug(f"No '{language}' variant found, using default examples")
 
     return doc_examples
 
@@ -154,17 +168,14 @@ def format_as_prompt_section(examples_data: dict) -> str:
     # Add full example document if available (preferred over snippet)
     if "example_full_document" in examples_data:
         sections.append("## COMPLETE EXAMPLE DOCUMENT")
-        sections.append("Use this as your reference for EXACT formatting and layout:")
-        sections.append("```")
+        sections.append("Use this as your reference for EXACT formatting and layout:\n")
         sections.append(examples_data["example_full_document"])
-        sections.append("```")
         sections.append("")
     # Fall back to example snippet if no full document
     elif "example_snippet" in examples_data:
         sections.append("## EXAMPLE FORMAT")
-        sections.append("```")
+        sections.append("Follow this markdown formatting:\n")
         sections.append(examples_data["example_snippet"])
-        sections.append("```")
         sections.append("")
 
     return "\n".join(sections)

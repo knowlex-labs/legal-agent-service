@@ -27,6 +27,7 @@ class DraftingDependencies:
     title: str
     instructions: str
     examples: str = ""
+    language: str = "english"
 
 
 # Base system prompt for all legal drafting agents
@@ -55,7 +56,22 @@ Key guidelines:
 When provided with reference documents via the RAG context, use that information to ensure
 accuracy and consistency with existing documents or precedents.
 
-Always structure your output with clear sections and proper formatting."""
+=== OUTPUT FORMAT: MARKDOWN ===
+You MUST output the document as clean, well-structured MARKDOWN.
+
+RULES:
+1. Use markdown pipe tables for ALL tabular data (always include header separator row):
+   | Header 1 | Header 2 |
+   |----------|----------|
+   | Data     | Data     |
+
+2. Use **bold** for names, headings, and emphasis
+3. Use # headings for major section titles (e.g., ## PRAYER, ## GROUNDS)
+4. Use --- for horizontal rules to separate major sections
+5. Do NOT output raw HTML tags (no <p>, <div>, <table>, <br>)
+6. Do NOT wrap output in ```code fences```
+7. Follow the EXACT template structure provided by your specialized prompt
+=== END OUTPUT FORMAT ==="""
 
 
 class DraftAgentState(TypedDict):
@@ -120,6 +136,9 @@ class BaseDraftingAgent:
             extraction_prompt = (
                 "Extract the document you just drafted into the required structured format. "
                 "Include the full draft text, title, document type, sections, and summary.\n\n"
+                "CRITICAL: The draft field and each section's content must preserve the MARKDOWN "
+                "exactly as generated. Do NOT strip formatting, convert to plain text, or remove "
+                "table syntax. Keep all **bold**, headings, tables, and --- separators intact.\n\n"
                 "IMPORTANT for sections: Split the document into its NATURAL sections as they "
                 "appear in the actual document. For court filings, use sections like:\n"
                 "- 'Cause Title' (court header + party blocks + Vs.)\n"
@@ -160,6 +179,37 @@ class BaseDraftingAgent:
 === END EXAMPLES ===
 """
 
+        language_section = ""
+        if deps.language == "hindi":
+            language_section = """
+=== LANGUAGE INSTRUCTIONS ===
+Draft this document ENTIRELY in Hindi (Devanagari script).
+Use formal legal Hindi terminology throughout:
+- आवेदक (Applicant), अनावेदक (Non-Applicant/Respondent)
+- विरुद्ध (Versus), अपीलार्थी (Appellant), प्रत्यर्थी (Respondent)
+- माननीय न्यायालय (Hon'ble Court), न्यायाधीश (Judge)
+- आदेश (Order), निर्णय (Judgment), याचिका (Petition)
+- प्रार्थना (Prayer), आधार (Grounds), तथ्य (Facts)
+- धारा (Section), अधिनियम (Act), संहिता (Code)
+- जमानत (Bail), अग्रिम जमानत (Anticipatory Bail)
+- प्रथम सूचना रिपोर्ट (FIR), अपराध क्रमांक (Crime Number)
+- दण्ड प्रक्रिया संहिता (CrPC), भारतीय न्याय सुरक्षा संहिता (BNSS)
+- भारतीय नागरिक सुरक्षा संहिता (BNS)
+Use Hindi numerals where appropriate but case numbers and section numbers may remain in English.
+=== END LANGUAGE INSTRUCTIONS ===
+"""
+        elif deps.language == "bilingual":
+            language_section = """
+=== LANGUAGE INSTRUCTIONS ===
+Draft this document in BILINGUAL format:
+- Section headers, court name, case numbers: in ENGLISH
+- Body text, facts, grounds, prayer: in HINDI (Devanagari script)
+- Legal section references: English with Hindi translation in parentheses
+- Party names: as provided (may be in either script)
+Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above).
+=== END LANGUAGE INSTRUCTIONS ===
+"""
+
         prompt = f"""Draft the following document using ONLY the information provided.
 
 Document Type: {deps.title}
@@ -171,41 +221,25 @@ Use these EXACT details - names, ages, addresses, amounts, dates - in your draft
 {deps.instructions}
 
 === END STRUCTURED INPUT ===
-{examples_section}
+{language_section}{examples_section}
 If reference documents are available, use the query_reference_documents tool to gather
 relevant context before drafting.
 
-=== CRITICAL FORMATTING REQUIREMENTS ===
+=== FORMATTING REMINDER ===
+- Output CLEAN MARKDOWN following your template exactly
+- Tables: Use markdown pipe syntax with header separators |---|
+- Bold: **text** for names, headings, emphasis
+- Numbered paragraphs: (1), (2), (3) or 1., 2., 3.
+- Roman numerals for grounds: (I), (II), (III)
+- Amounts: ALWAYS in figures AND words - Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only)
+- Dates: DD/MM/YYYY format
+- DO NOT use placeholders like [Name], [Date], _____, XXXX
+- Use descriptive alternatives if info missing ("the plaintiff", "the said property")
+- Do NOT output HTML tags. Do NOT use code fences.
+- Follow your specialized template EXACTLY.
+=== END FORMATTING ===
 
-1. PARTY BLOCKS LAYOUT:
-   - Plaintiff/Petitioner name in BOLD
-   - Each detail on SEPARATE lines (Age, Occupation, Address lines, Mobile)
-   - Role marker (………Plaintiff) RIGHT-ALIGNED on the mobile number line
-   - Address broken into multiple lines for readability
-
-2. DOCUMENT STRUCTURE:
-   - Court header: CENTERED, UNDERLINED
-   - Case number: RIGHT-ALIGNED
-   - Vs.: CENTERED between party blocks
-   - Document title: CENTERED, UNDERLINED, BOLD
-   - Body paragraphs: NUMBERED (1, 2, 3...), JUSTIFIED text
-   - Signature block: THREE-COLUMN layout (Place/Date | Plaintiff | Advocate)
-
-3. CONTENT RULES:
-   - First body paragraph: Start with "I say that..."
-   - Subsequent paragraphs: Start with "That..."
-   - Amounts: ALWAYS in figures AND words - Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only)
-   - Dates: DD/MM/YYYY format
-   - DO NOT use placeholders like [Name], [Date], _____, XXXX
-   - Use descriptive alternatives if info missing ("the plaintiff", "the said property")
-
-4. OUTPUT FORMAT:
-   The generated text should preserve the visual layout when rendered:
-   - Use proper line breaks for party blocks
-   - Maintain spacing between sections
-   - The ………Plaintiff marker should appear right-aligned (use spaces/tabs to position)
-
-Generate a COMPLETE, court-ready document with EXACT formatting as described."""
+Generate a COMPLETE, court-ready document following the EXACT markdown template from your specialized prompt."""
 
         # Create tool with runtime deps
         rag_tool = create_rag_tool(deps.rag_client, deps.file_ids)

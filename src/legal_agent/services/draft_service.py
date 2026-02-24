@@ -2,9 +2,11 @@
 
 import logging
 
+from legal_agent.agents.bail_agent import BailApplicationAgent
 from legal_agent.agents.base import BaseDraftingAgent, DraftingDependencies
 from legal_agent.agents.contract_agent import ContractAgent
 from legal_agent.agents.court_filing_agent import CourtFilingAgent
+from legal_agent.agents.criminal_appeal_agent import CriminalAppealAgent
 from legal_agent.agents.notice_agent import NoticeAgent
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import Settings
@@ -48,6 +50,8 @@ class DraftService:
             DocumentType.PETITION: CourtFilingAgent(model, provider),
             DocumentType.AFFIDAVIT: CourtFilingAgent(model, provider),
             DocumentType.APPLICATION: CourtFilingAgent(model, provider),
+            DocumentType.BAIL_APPLICATION: BailApplicationAgent(model, provider),
+            DocumentType.CRIMINAL_APPEAL: CriminalAppealAgent(model, provider),
         }
 
     def _get_model_config(self) -> tuple[str, str]:
@@ -112,11 +116,13 @@ class DraftService:
             assert request.body is not None  # guaranteed by model validator
             raw_instructions = request.body
 
+        language = request.language.value
         enhance_model = self._get_enhance_model_string()
         cleaned_instructions = await preprocess_and_enhance(
             raw_instructions,
             document_type=request.document_type.value,
             model=enhance_model,
+            language=language,
         )
         logger.debug(f"[{job_id}] Content preprocessed and enhanced")
 
@@ -124,6 +130,7 @@ class DraftService:
         examples_data = get_examples_for_document_type(
             request.document_type.value,
             subtype=request.metadata.get("subtype"),
+            language=language,
         )
         formatted_examples = format_as_prompt_section(examples_data)
         logger.debug(f"[{job_id}] Examples loaded: {len(formatted_examples)} chars")
@@ -138,6 +145,7 @@ class DraftService:
             title=cleaned_title,
             instructions=cleaned_instructions,
             examples=formatted_examples,
+            language=language,
         )
 
         logger.debug(f"[{job_id}] Calling agent.draft()")
@@ -146,6 +154,7 @@ class DraftService:
 
         return DraftResult(
             draft=document.draft,
+            content_format="markdown",
             sections=[
                 {"title": s.title, "content": s.content, "order": s.order}
                 for s in document.sections
