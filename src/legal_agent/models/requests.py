@@ -4,7 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field, model_validator
 
-from legal_agent.models.documents import DocumentType
+from legal_agent.models.documents import DocumentType, Language
 
 
 class DraftConfig(BaseModel):
@@ -40,6 +40,22 @@ class DraftConfig(BaseModel):
     additional_instructions: str | None = Field(
         None, description="Any other instructions"
     )
+    # Bail / Criminal appeal specific fields
+    criminal_history: str | None = Field(
+        None, description="Accused's criminal history / prior cases"
+    )
+    bail_history: str | None = Field(
+        None, description="Prior bail applications and their outcomes"
+    )
+    impugned_order: str | None = Field(
+        None, description="Details of the impugned/challenged order"
+    )
+    fir_details: str | None = Field(
+        None, description="FIR number, date, police station, sections invoked"
+    )
+    co_accused_details: str | None = Field(
+        None, description="Details of co-accused persons and their bail status"
+    )
 
 
 class CreateDraftRequest(BaseModel):
@@ -52,6 +68,10 @@ class CreateDraftRequest(BaseModel):
         min_length=10,
     )
     document_type: DocumentType = Field(..., description="Type of legal document to draft")
+    language: Language = Field(
+        Language.ENGLISH,
+        description="Language for the document: english, hindi, or bilingual",
+    )
     config: DraftConfig | None = Field(
         None, description="Structured config with labeled fields for drafting"
     )

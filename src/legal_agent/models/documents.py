@@ -5,6 +5,14 @@ from enum import Enum
 from pydantic import BaseModel, Field
 
 
+class Language(str, Enum):
+    """Language options for document drafting."""
+
+    ENGLISH = "english"
+    HINDI = "hindi"
+    BILINGUAL = "bilingual"
+
+
 class DocumentType(str, Enum):
     """Types of legal documents that can be drafted."""
 
@@ -15,6 +23,8 @@ class DocumentType(str, Enum):
     PETITION = "petition"
     AFFIDAVIT = "affidavit"
     APPLICATION = "application"
+    BAIL_APPLICATION = "bail_application"
+    CRIMINAL_APPEAL = "criminal_appeal"
 
 
 class DocumentSection(BaseModel):

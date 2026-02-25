@@ -148,8 +148,12 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
     """
     court_types = {"affidavit", "petition", "application"}
     notice_types = {"legal_notice", "demand_notice"}
+    bail_criminal_types = {"bail_application", "criminal_appeal"}
 
-    if document_type in court_types:
+    if document_type in bail_criminal_types:
+        party_one_label = "APPLICANT / APPELLANT DETAILS"
+        party_two_label = "NON-APPLICANT / RESPONDENT (STATE) DETAILS"
+    elif document_type in court_types:
         party_one_label = "PLAINTIFF / PETITIONER DETAILS"
         party_two_label = "DEFENDANT / RESPONDENT DETAILS"
     elif document_type in notice_types:
@@ -170,6 +174,11 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
         ("terms", "KEY TERMS"),
         ("special_clauses", "SPECIAL CLAUSES"),
         ("additional_instructions", "ADDITIONAL INSTRUCTIONS"),
+        ("fir_details", "FIR / CRIME DETAILS"),
+        ("criminal_history", "CRIMINAL HISTORY"),
+        ("bail_history", "PRIOR BAIL APPLICATIONS"),
+        ("impugned_order", "IMPUGNED ORDER DETAILS"),
+        ("co_accused_details", "CO-ACCUSED DETAILS"),
     ]
 
     sections: list[str] = []
@@ -181,12 +190,13 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
     return "\n\n".join(sections)
 
 
-def preprocess_content(text: str) -> str:
+def preprocess_content(text: str, language: str = "english") -> str:
     """
     Fix spelling mistakes and standardize legal terminology.
 
     Args:
         text: Raw user input text
+        language: Document language (english, hindi, bilingual)
 
     Returns:
         Cleaned text with spelling fixes and standardized terminology
@@ -195,6 +205,16 @@ def preprocess_content(text: str) -> str:
         return text
 
     result = text
+
+    # Skip English spelling corrections for Hindi input to avoid mangling Devanagari text
+    if language == "hindi":
+        # Only apply currency and legal standardizations, skip spelling corrections
+        for pattern, replacement in CURRENCY_PATTERNS:
+            result = re.sub(pattern, replacement, result, flags=re.IGNORECASE)
+        for term, standard in LEGAL_STANDARDIZATIONS.items():
+            pattern = rf'\b{re.escape(term)}\b'
+            result = re.sub(pattern, standard, result, flags=re.IGNORECASE)
+        return result.strip()
 
     # Step 1: Fix spelling mistakes (case-insensitive)
     for wrong, correct in SPELLING_CORRECTIONS.items():
@@ -328,6 +348,7 @@ async def enhance_content(
     text: str,
     document_type: str,
     model: str = "openai:gpt-4o-mini",
+    language: str = "english",
 ) -> str:
     """
     Use a fast LLM to enhance casual user input into structured legal instructions.
@@ -360,12 +381,27 @@ async def enhance_content(
         "application": "Court Application",
         "contract": "Contract / Agreement",
         "agreement": "Agreement",
+        "bail_application": "Bail Application (Criminal)",
+        "criminal_appeal": "Criminal Appeal",
     }
     doc_label = type_labels.get(document_type, document_type.replace("_", " ").title())
 
+    language_note = ""
+    if language == "hindi":
+        language_note = (
+            "\n\nIMPORTANT: The output document will be drafted in Hindi (Devanagari). "
+            "Preserve all Hindi text as-is. Structure the output using formal legal Hindi "
+            "terminology where the user has provided Hindi input."
+        )
+    elif language == "bilingual":
+        language_note = (
+            "\n\nIMPORTANT: The output document will be bilingual (English headers, Hindi body). "
+            "Preserve Hindi text as-is and structure appropriately."
+        )
+
     prompt = ENHANCE_PROMPT_TEMPLATE.format(
         document_type=doc_label,
-        user_input=text,
+        user_input=text + language_note,
     )
 
     try:
@@ -396,6 +432,7 @@ async def preprocess_and_enhance(
     text: str,
     document_type: str,
     model: str = "openai:gpt-4o-mini",
+    language: str = "english",
 ) -> str:
     """
     Full preprocessing pipeline: rule-based fixes + LLM enhancement.
@@ -404,14 +441,15 @@ async def preprocess_and_enhance(
         text: Raw user input
         document_type: Type of legal document
         model: LLM model for enhancement
+        language: Document language (english, hindi, bilingual)
 
     Returns:
         Cleaned and enhanced text
     """
     # Step 1: Rule-based fixes (spelling, formatting) - instant
-    cleaned = preprocess_content(text)
+    cleaned = preprocess_content(text, language=language)
 
     # Step 2: LLM enhancement (rewrite into legal language)
-    enhanced = await enhance_content(cleaned, document_type, model)
+    enhanced = await enhance_content(cleaned, document_type, model, language=language)
 
     return enhanced
