@@ -27,6 +27,8 @@ from legal_agent.chat.agent import ChatAgent
 from legal_agent.chat.routes import chat_router, set_chat_agent
 from legal_agent.clients.rag_client import HTTPRAGClient, MockRAGClient
 from legal_agent.config import get_settings
+from legal_agent.draft_chat.agent import DraftChatAgent
+from legal_agent.draft_chat.routes import draft_chat_router, set_draft_chat_agent
 from legal_agent.legal_retrieval import LegalCaseRetriever
 from legal_agent.legal_retrieval.config import get_legal_db_url
 from legal_agent.legal_retrieval.db import close_pool
@@ -51,6 +53,7 @@ _setup_llm_environment()
 job_manager: JobManager | None = None
 rag_client: HTTPRAGClient | MockRAGClient | None = None
 chat_agent: ChatAgent | None = None
+draft_chat_agent: DraftChatAgent | None = None
 
 
 async def _init_chat_agent():
@@ -63,6 +66,18 @@ async def _init_chat_agent():
         logger.info("Chat agent fully initialized")
     except Exception:
         logger.exception("Failed to initialize chat agent")
+
+
+async def _init_draft_chat_agent():
+    """Initialize draft chat agent in background."""
+    global draft_chat_agent
+    try:
+        draft_chat_agent = DraftChatAgent()
+        await draft_chat_agent.initialize(get_legal_db_url(), rag_client)
+        set_draft_chat_agent(draft_chat_agent)
+        logger.info("Draft chat agent fully initialized")
+    except Exception:
+        logger.exception("Failed to initialize draft chat agent")
 
 
 @asynccontextmanager
@@ -80,18 +95,22 @@ async def lifespan(app: FastAPI):
     draft_service = DraftService(settings=settings, job_manager=job_manager, rag_client=rag_client)
     set_services(draft_service, job_manager)
 
-    # Start chat agent initialization in background to avoid blocking server startup
-    init_task = asyncio.create_task(_init_chat_agent())
+    # Start agent initialization in background to avoid blocking server startup
+    chat_init_task = asyncio.create_task(_init_chat_agent())
+    draft_chat_init_task = asyncio.create_task(_init_draft_chat_agent())
 
     logger.info("Service ready")
     yield
 
     logger.info("Shutting down...")
     # Wait for init to finish before cleanup
-    if not init_task.done():
-        init_task.cancel()
+    for task in (chat_init_task, draft_chat_init_task):
+        if not task.done():
+            task.cancel()
     if chat_agent:
         await chat_agent.close()
+    if draft_chat_agent:
+        await draft_chat_agent.close()
     close_pool()
     if job_manager:
         await job_manager.cleanup()
@@ -109,6 +128,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.include_router(router, prefix="/api/v1", tags=["drafts"])
     app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
+    app.include_router(draft_chat_router, prefix="/api/v1", tags=["draft-chat"])
 
     @app.get("/")
     async def root():
