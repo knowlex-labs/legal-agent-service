@@ -74,7 +74,7 @@ class DraftService:
         """Get the appropriate agent for the document type."""
         return self._agents.get(document_type, self._agents[DocumentType.CONTRACT])
 
-    async def create_draft_job(self, request: CreateDraftRequest) -> str:
+    async def create_draft_job(self, request: CreateDraftRequest, user_id: str) -> str:
         """Create a new draft job and start processing."""
         job = await self.job_manager.create_job(
             metadata={
@@ -88,17 +88,18 @@ class DraftService:
             f"Created draft job {job.job_id}: "
             f"type={request.document_type.value}, "
             f"title='{request.title}', "
+            f"user={user_id}, "
             f"file_ids={request.file_ids}"
         )
 
         async def draft_task() -> DraftResult:
-            return await self._execute_draft(request, job.job_id)
+            return await self._execute_draft(request, job.job_id, user_id)
 
         await self.job_manager.run_job(job.job_id, draft_task)
         return job.job_id
 
     async def _execute_draft(
-        self, request: CreateDraftRequest, job_id: str
+        self, request: CreateDraftRequest, job_id: str, user_id: str
     ) -> DraftResult:
         """Execute the drafting task."""
         logger.debug(f"[{job_id}] Starting draft execution")
@@ -142,6 +143,7 @@ class DraftService:
         deps = DraftingDependencies(
             rag_client=self.rag_client,
             file_ids=request.file_ids,
+            user_id=user_id,
             title=cleaned_title,
             instructions=cleaned_instructions,
             examples=formatted_examples,

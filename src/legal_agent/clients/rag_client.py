@@ -10,21 +10,30 @@ from legal_agent.config import Settings
 logger = logging.getLogger(__name__)
 
 
+def _collection_for_user(user_id: str) -> str:
+    """Derive the Qdrant collection name from user ID."""
+    return f"user_{user_id}"
+
+
 class RAGClient(ABC):
     """Abstract interface for RAG engine clients."""
 
     @abstractmethod
-    async def query(self, file_ids: list[str], query: str) -> str:
+    async def query(
+        self,
+        file_ids: list[str],
+        query: str,
+        user_id: str,
+    ) -> str:
         """Query the RAG engine for relevant context."""
         pass
 
 
 class HTTPRAGClient(RAGClient):
-    """HTTP client for RAG engine /api/v1/retrieve endpoint."""
+    """HTTP client for RAG engine /api/v1/collections/{collection}/retrieve endpoint."""
 
     def __init__(self, settings: Settings):
         self.base_url = settings.rag_engine_base_url.rstrip("/")
-        self.user_id = settings.rag_engine_user_id
         self._client: httpx.AsyncClient | None = None
         logger.info(f"Initialized RAG client with base_url={self.base_url}")
 
@@ -32,18 +41,28 @@ class HTTPRAGClient(RAGClient):
         if self._client is None:
             self._client = httpx.AsyncClient(
                 base_url=self.base_url,
-                headers={"X-User-Id": self.user_id},
                 timeout=30.0,
             )
         return self._client
 
-    async def query(self, file_ids: list[str], query: str) -> str:
-        """Query RAG engine and return formatted context string."""
+    async def query(
+        self,
+        file_ids: list[str],
+        query: str,
+        user_id: str,
+    ) -> str:
+        """Query RAG engine and return formatted context string.
+
+        The collection is derived as 'user_{user_id}' to match the RAG engine's
+        physical Qdrant collection naming convention.
+        """
         if not query:
             logger.debug("Empty query, skipping RAG retrieval")
             return ""
 
+        collection = _collection_for_user(user_id)
         client = await self._get_client()
+        headers = {"X-User-Id": user_id}
 
         filters = None
         if file_ids:
@@ -51,10 +70,17 @@ class HTTPRAGClient(RAGClient):
 
         request_body = {"query": query, "filters": filters, "top_k": 10}
 
-        logger.debug(f"RAG request: query='{query[:50]}...' file_ids={file_ids}")
+        logger.debug(
+            f"RAG request: query='{query[:50]}...' user={user_id} "
+            f"collection={collection} file_ids={file_ids}"
+        )
 
         try:
-            response = await client.post("/api/v1/retrieve", json=request_body)
+            response = await client.post(
+                f"/api/v1/collections/{collection}/retrieve",
+                json=request_body,
+                headers=headers,
+            )
             response.raise_for_status()
             data = response.json()
 
@@ -115,12 +141,19 @@ class HTTPRAGClient(RAGClient):
 class MockRAGClient(RAGClient):
     """Mock RAG client for testing."""
 
-    async def query(self, file_ids: list[str], query: str) -> str:
+    async def query(
+        self,
+        file_ids: list[str],
+        query: str,
+        user_id: str,
+    ) -> str:
         if not file_ids:
             return ""
+        collection = _collection_for_user(user_id)
         return (
             f"[Mock RAG Context]\n"
             f"Query: {query}\n"
+            f"User: {user_id} | Collection: {collection}\n"
             f"Files: {', '.join(file_ids)}\n"
             f"This is placeholder context from mock RAG client."
         )

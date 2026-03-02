@@ -24,6 +24,7 @@ class DraftingDependencies:
 
     rag_client: RAGClient
     file_ids: list[str]
+    user_id: str
     title: str
     instructions: str
     examples: str = ""
@@ -81,7 +82,7 @@ class DraftAgentState(TypedDict):
     document: GeneratedDocument | None
 
 
-def create_rag_tool(rag_client: RAGClient, file_ids: list[str]):
+def create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
     """Create a RAG query tool closed over runtime dependencies."""
 
     @tool
@@ -91,8 +92,8 @@ def create_rag_tool(rag_client: RAGClient, file_ids: list[str]):
             logger.debug("No file_ids provided, skipping RAG query")
             return "No reference documents provided."
 
-        logger.debug(f"RAG tool called with query: {query[:50]}...")
-        context = await rag_client.query(file_ids, query)
+        logger.debug(f"RAG tool called with query: {query[:50]}... | user={user_id}")
+        context = await rag_client.query(file_ids, query, user_id=user_id)
 
         if not context:
             logger.debug("RAG returned no context")
@@ -242,7 +243,7 @@ relevant context before drafting.
 Generate a COMPLETE, court-ready document following the EXACT markdown template from your specialized prompt."""
 
         # Create tool with runtime deps
-        rag_tool = create_rag_tool(deps.rag_client, deps.file_ids)
+        rag_tool = create_rag_tool(deps.rag_client, deps.file_ids, deps.user_id)
         tools = [rag_tool] if deps.file_ids else []
 
         # Build and invoke graph

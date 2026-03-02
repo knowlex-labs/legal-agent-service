@@ -24,7 +24,6 @@ class Settings(BaseSettings):
 
     # RAG Engine
     rag_engine_base_url: str = "http://localhost:8000"
-    rag_engine_user_id: str = "legal-agent-service"
 
     # Service
     service_host: str = "0.0.0.0"
