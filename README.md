@@ -137,7 +137,7 @@ Response:
 ```json
 {
   "job_id": "uuid-here",
-  "status": "pending",
+  "status": "processing",
   "created_at": "2024-01-15T10:30:00Z"
 }
 ```
@@ -167,7 +167,6 @@ Response:
 ```
 
 **Job Statuses:**
-- `pending` - Job created, not yet started
 - `processing` - Job is being processed
 - `completed` - Job finished successfully
 - `failed` - Job failed (see error field)
@@ -178,14 +177,6 @@ Response:
 
 ```bash
 curl "http://localhost:8001/api/v1/drafts?limit=10&offset=0"
-```
-
-### 4. Cancel a Job
-
-**Endpoint:** `DELETE /api/v1/drafts/{job_id}`
-
-```bash
-curl -X DELETE http://localhost:8001/api/v1/drafts/{job_id}
 ```
 
 ## Document Types
@@ -366,11 +357,6 @@ ruff format src/
 - Check `RAG_ENGINE_BASE_URL` in `.env`
 - Enable `DEBUG=true` to see detailed logs
 - Test RAG endpoint directly: `curl -H "X-User-Id: test" http://localhost:8000/api/v1/health`
-
-### Jobs stuck in "pending"
-- Check logs for errors
-- Verify LLM API key is valid and has quota
-- Try with `DEBUG=true` to use MockRAGClient
 
 ### No context from RAG
 - Verify file IDs are correct and indexed

@@ -95,24 +95,6 @@ class JobManager:
             logger.debug(f"[{job_id}] Status: {old_status.value} -> {status.value}")
             return job
 
-    async def cancel_job(self, job_id: str) -> bool:
-        """Cancel a pending job."""
-        async with self._lock:
-            job = self._jobs.get(job_id)
-            if not job or job.status != JobStatus.PENDING:
-                return False
-
-            task = self._tasks.get(job_id)
-            if task and not task.done():
-                task.cancel()
-
-            job.status = JobStatus.FAILED
-            job.error = "Job cancelled by user"
-            job.completed_at = datetime.now(UTC)
-
-            logger.info(f"[{job_id}] Job cancelled")
-            return True
-
     async def run_job(
         self,
         job_id: str,

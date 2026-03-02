@@ -1,0 +1,37 @@
+version: 1
+disable_existing_loggers: false
+
+filters:
+  request_context:
+    (): legal_agent.logging_context.RequestContextFilter
+
+formatters:
+  standard:
+    format: "%(asctime)s [%(levelname)s] [trace=%(trace_id)s] [user=%(user_id)s] %(name)s - %(message)s"
+    datefmt: "%Y-%m-%d %H:%M:%S"
+
+handlers:
+  console:
+    class: logging.StreamHandler
+    stream: ext://sys.stdout
+    formatter: standard
+    filters:
+      - request_context
+
+root:
+  level: INFO
+  handlers:
+    - console
+
+loggers:
+  legal_agent:
+    level: INFO
+    propagate: true
+
+  # Suppress noisy libraries
+  httpx:
+    level: WARNING
+  httpcore:
+    level: WARNING
+  uvicorn.access:
+    level: WARNING

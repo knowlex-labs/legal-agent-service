@@ -2,7 +2,7 @@
 
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from legal_agent.models.requests import CreateDraftRequest
 
@@ -48,13 +48,14 @@ def get_job_manager() -> JobManager:
 @router.post("/drafts", response_model=CreateDraftResponse, status_code=201)
 async def create_draft(
     request: CreateDraftRequest,
+    x_user_id: str = Header(..., alias="X-User-Id"),
     draft_service: DraftService = Depends(get_draft_service),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> CreateDraftResponse:
     """Create a new draft job."""
-    logger.info(f"POST /drafts: type={request.document_type.value}, title='{request.title}'")
+    logger.info(f"POST /drafts: type={request.document_type.value}, title='{request.title}', user={x_user_id}")
 
-    job_id = await draft_service.create_draft_job(request)
+    job_id = await draft_service.create_draft_job(request, user_id=x_user_id)
     job = await job_manager.get_job(job_id)
 
     if not job:
@@ -115,32 +116,6 @@ async def list_drafts(
         ],
         total=total,
     )
-
-
-@router.delete("/drafts/{job_id}", status_code=204)
-async def cancel_draft(
-    job_id: str,
-    job_manager: JobManager = Depends(get_job_manager),
-) -> None:
-    """Cancel a pending draft job.
-
-    Only pending jobs can be cancelled. Jobs that are already processing
-    or completed cannot be cancelled.
-    """
-    job = await job_manager.get_job(job_id)
-
-    if not job:
-        raise HTTPException(status_code=404, detail="Job not found")
-
-    if job.status != JobStatus.PENDING:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Cannot cancel job with status '{job.status.value}'",
-        )
-
-    cancelled = await job_manager.cancel_job(job_id)
-    if not cancelled:
-        raise HTTPException(status_code=500, detail="Failed to cancel job")
 
 
 @router.get("/health")
