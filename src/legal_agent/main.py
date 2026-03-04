@@ -35,19 +35,17 @@ from legal_agent.api.routes import router, set_services
 from legal_agent.chat.agent import ChatAgent
 from legal_agent.chat.routes import chat_router, set_chat_agent
 from legal_agent.clients.rag_client import HTTPRAGClient, MockRAGClient
+from legal_agent.clients.s3_client import S3Client
 from legal_agent.config import get_settings
-from legal_agent.workspace_chat.agent import WorkspaceChatAgent
-from legal_agent.workspace_chat.routes import set_workspace_chat_agent, workspace_chat_router
-from legal_agent.summary.generator import SummaryGenerator
-from legal_agent.summary.routes import set_summary_services, summary_router
-from legal_agent.summary.store import CaseSummaryStore
 from legal_agent.legal_retrieval import LegalCaseRetriever
 from legal_agent.legal_retrieval.config import get_legal_db_url
 from legal_agent.legal_retrieval.db import close_pool
-from psycopg.rows import dict_row
-from psycopg_pool import AsyncConnectionPool
 from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
+from legal_agent.summary.generator import SummaryGenerator
+from legal_agent.summary.service import SummaryService
+from legal_agent.workspace_chat.agent import WorkspaceChatAgent
+from legal_agent.workspace_chat.routes import set_workspace_chat_agent, workspace_chat_router
 
 
 def _setup_llm_environment() -> None:
@@ -68,15 +66,13 @@ job_manager: JobManager | None = None
 rag_client: HTTPRAGClient | MockRAGClient | None = None
 chat_agent: ChatAgent | None = None
 workspace_chat_agent: WorkspaceChatAgent | None = None
-summary_store: CaseSummaryStore | None = None
-_summary_pool: AsyncConnectionPool | None = None
 
 
-async def _init_chat_agent():
+async def _init_chat_agent(retriever: LegalCaseRetriever | None):
     """Initialize chat agent in background so the server can start accepting requests."""
     global chat_agent
     try:
-        chat_agent = ChatAgent(retriever=LegalCaseRetriever())
+        chat_agent = ChatAgent(retriever=retriever or LegalCaseRetriever())
         await chat_agent.initialize(get_legal_db_url())
         set_chat_agent(chat_agent)
         logger.info("Chat agent fully initialized")
@@ -98,7 +94,7 @@ async def _init_workspace_chat_agent():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global job_manager, rag_client, _summary_pool
+    global job_manager, rag_client
 
     settings = get_settings()
     chat_models = settings.get_chat_models()
@@ -108,35 +104,34 @@ async def lifespan(app: FastAPI):
     job_manager = JobManager()
     rag_client = MockRAGClient() if settings.debug else HTTPRAGClient(settings)
 
-    draft_service = DraftService(settings=settings, job_manager=job_manager, rag_client=rag_client)
-    set_services(draft_service, job_manager)
-
-    # Initialize summary service (lightweight — no LangGraph, just DB store)
+    legal_retriever: LegalCaseRetriever | None = None
     try:
-        _summary_pool = AsyncConnectionPool(
-            conninfo=get_legal_db_url(),
-            min_size=1,
-            max_size=3,
-            open=False,
-            kwargs={"autocommit": True, "prepare_threshold": 0, "row_factory": dict_row},
-        )
-        await _summary_pool.open()
-        summary_store = CaseSummaryStore(_summary_pool)
-        await summary_store.setup()
-        set_summary_services(summary_store, SummaryGenerator(rag_client))
-        logger.info("Summary service initialized")
+        legal_retriever = LegalCaseRetriever()
+        logger.info("LegalCaseRetriever created (DB pool lazy-initialized on first query)")
     except Exception:
-        logger.exception("Failed to initialize summary service")
+        logger.warning("LegalCaseRetriever unavailable — drafts will not have case law tool")
+
+    s3_client = S3Client(settings)
+    draft_service = DraftService(
+        settings=settings,
+        job_manager=job_manager,
+        rag_client=rag_client,
+        s3_client=s3_client,
+        retriever=legal_retriever,
+    )
+    summary_service = SummaryService(
+        generator=SummaryGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
+    )
+    set_services(draft_service, summary_service, job_manager, s3_client)
 
     # Start agent initialization in background to avoid blocking server startup
-    chat_init_task = asyncio.create_task(_init_chat_agent())
+    chat_init_task = asyncio.create_task(_init_chat_agent(legal_retriever))
     workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent())
 
     logger.info("Service ready")
     yield
 
     logger.info("Shutting down...")
-    # Wait for init to finish before cleanup
     for task in (chat_init_task, workspace_chat_init_task):
         if not task.done():
             task.cancel()
@@ -144,8 +139,6 @@ async def lifespan(app: FastAPI):
         await chat_agent.close()
     if workspace_chat_agent:
         await workspace_chat_agent.close()
-    if _summary_pool:
-        await _summary_pool.close()
     close_pool()
     if job_manager:
         await job_manager.cleanup()
@@ -162,10 +155,9 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(RequestContextMiddleware)
-    app.include_router(router, prefix="/api/v1", tags=["drafts"])
+    app.include_router(router, prefix="/api/v1", tags=["jobs"])
     app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
     app.include_router(workspace_chat_router, prefix="/api/v1", tags=["workspace-chat"])
-    app.include_router(summary_router, prefix="/api/v1", tags=["summaries"])
 
     @app.get("/")
     async def root():

@@ -13,6 +13,8 @@ You are specialized in drafting bail applications under Indian criminal law. Thi
 - Bail in cases under special statutes (NDPS, PMLA, SC/ST Act, POCSO)
 
 ===== BAIL APPLICATION MARKDOWN TEMPLATE =====
+IMPORTANT: The markers like [Full Name], [Age], [Address] below are FORMAT GUIDES only.
+Replace EVERY [marker] with actual data from the input. NEVER output bracket markers in the final document.
 Follow this EXACT template. Fill in details from the provided input.
 Output clean markdown ONLY — no HTML, no code fences.
 
@@ -150,6 +152,8 @@ Dated: DD/MM/YYYY &emsp;&emsp;&emsp;&emsp;&emsp;&emsp; Humble applicant
 6. Include at minimum 8-10 substantive grounds with legal citations
 7. Cite relevant Supreme Court judgments: Arnesh Kumar v. State of Bihar, Sanjay Chandra v. CBI, Dataram Singh v. State of UP, etc.
 8. Fill ALL tables with actual data from input — leave NO placeholder rows if data is not available, omit the table or note "No prior history"
+9. Use legal_case_search for EACH bail ground — query "bail Section 439 grounds",
+   "anticipatory bail Section 438 criteria", "bail NDPS Act", etc. Only cite returned cases.
 """
 
 

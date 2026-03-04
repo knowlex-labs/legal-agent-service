@@ -4,118 +4,176 @@ import logging
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
-from legal_agent.models.requests import CreateDraftRequest
-
-logger = logging.getLogger(__name__)
+from legal_agent.clients.s3_client import S3Client
+from legal_agent.models.requests import CreateDraftJobRequest, CreateJobRequest
 from legal_agent.models.responses import (
-    CreateDraftResponse,
+    CreateJobResponse,
     JobListResponse,
     JobResponse,
     JobStatus,
+    JobType,
 )
 from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
+from legal_agent.summary.service import SummaryService
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
-
-# Dependency injection placeholders - will be set by main.py
+# Dependency injection placeholders - set by main.py
 _draft_service: DraftService | None = None
+_summary_service: SummaryService | None = None
 _job_manager: JobManager | None = None
+_s3_client: S3Client | None = None
 
 
-def set_services(draft_service: DraftService, job_manager: JobManager) -> None:
-    """Set the service instances for dependency injection."""
-    global _draft_service, _job_manager
+def set_services(
+    draft_service: DraftService,
+    summary_service: SummaryService,
+    job_manager: JobManager,
+    s3_client: S3Client,
+) -> None:
+    global _draft_service, _summary_service, _job_manager, _s3_client
     _draft_service = draft_service
+    _summary_service = summary_service
     _job_manager = job_manager
+    _s3_client = s3_client
 
 
 def get_draft_service() -> DraftService:
-    """Get the draft service instance."""
     if _draft_service is None:
         raise RuntimeError("Draft service not initialized")
     return _draft_service
 
 
+def get_summary_service() -> SummaryService:
+    if _summary_service is None:
+        raise RuntimeError("Summary service not initialized")
+    return _summary_service
+
+
 def get_job_manager() -> JobManager:
-    """Get the job manager instance."""
     if _job_manager is None:
         raise RuntimeError("Job manager not initialized")
     return _job_manager
 
 
-@router.post("/drafts", response_model=CreateDraftResponse, status_code=201)
-async def create_draft(
-    request: CreateDraftRequest,
+def get_s3_client() -> S3Client:
+    if _s3_client is None:
+        raise RuntimeError("S3 client not initialized")
+    return _s3_client
+
+
+@router.post("/jobs", response_model=CreateJobResponse, status_code=201)
+async def create_job(
+    request: CreateJobRequest,
     x_user_id: str = Header(..., alias="X-User-Id"),
     draft_service: DraftService = Depends(get_draft_service),
+    summary_service: SummaryService = Depends(get_summary_service),
     job_manager: JobManager = Depends(get_job_manager),
-) -> CreateDraftResponse:
-    """Create a new draft job."""
-    logger.info(f"POST /drafts: type={request.document_type.value}, title='{request.title}', user={x_user_id}")
+) -> CreateJobResponse:
+    """Create a new job (draft or summary)."""
+    if isinstance(request, CreateDraftJobRequest):
+        logger.info(
+            f"POST /jobs [draft]: type={request.document_type.value}, "
+            f"title='{request.title}', user={x_user_id}"
+        )
+        job_id = await draft_service.create_draft_job(request, user_id=x_user_id)
+    else:
+        logger.info(
+            f"POST /jobs [summary]: case_folder_id={request.case_folder_id}, user={x_user_id}"
+        )
+        job_id = await summary_service.create_summary_job(request, user_id=x_user_id)
 
-    job_id = await draft_service.create_draft_job(request, user_id=x_user_id)
     job = await job_manager.get_job(job_id)
-
     if not job:
-        logger.error("Failed to create job")
         raise HTTPException(status_code=500, detail="Failed to create job")
 
-    return CreateDraftResponse(
+    return CreateJobResponse(
         job_id=job.job_id,
+        type=job.job_type,
         status=job.status,
         created_at=job.created_at,
     )
 
 
-@router.get("/drafts/{job_id}", response_model=JobResponse)
-async def get_draft(
+@router.get("/jobs/{job_id}", response_model=JobResponse)
+async def get_job(
     job_id: str,
     job_manager: JobManager = Depends(get_job_manager),
+    s3_client: S3Client = Depends(get_s3_client),
 ) -> JobResponse:
-    """Get the status and result of a draft job."""
+    """Get the status of a job."""
     job = await job_manager.get_job(job_id)
-
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    logger.debug(f"GET /drafts/{job_id}: status={job.status.value}")
+    logger.debug(f"GET /jobs/{job_id}: status={job.status.value}")
+
+    signed_url: str | None = None
+    if job.s3_path:
+        try:
+            signed_url = await s3_client.signed_url(job.s3_path)
+        except Exception:
+            logger.warning(f"[{job_id}] Failed to generate signed URL", exc_info=True)
 
     return JobResponse(
         job_id=job.job_id,
+        type=job.job_type,
         status=job.status,
         created_at=job.created_at,
         completed_at=job.completed_at,
-        result=job.result,
+        s3_path=job.s3_path,
+        signed_url=signed_url,
+        metadata=job.metadata,
         error=job.error,
     )
 
 
-@router.get("/drafts", response_model=JobListResponse)
-async def list_drafts(
+@router.get("/jobs", response_model=JobListResponse)
+async def list_jobs(
+    type: JobType | None = Query(None, description="Filter by job type"),
     status: JobStatus | None = Query(None, description="Filter by job status"),
+    case_folder_id: str | None = Query(None, description="Filter by case folder ID"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of jobs to return"),
     offset: int = Query(0, ge=0, description="Number of jobs to skip"),
     job_manager: JobManager = Depends(get_job_manager),
+    s3_client: S3Client = Depends(get_s3_client),
 ) -> JobListResponse:
-    """List all draft jobs with optional filtering."""
-    jobs, total = await job_manager.list_jobs(status=status, limit=limit, offset=offset)
+    """List jobs with optional filtering."""
+    jobs, total = await job_manager.list_jobs(
+        job_type=type,
+        status=status,
+        case_folder_id=case_folder_id,
+        limit=limit,
+        offset=offset,
+    )
 
-    return JobListResponse(
-        jobs=[
+    job_responses = []
+    for job in jobs:
+        signed_url: str | None = None
+        if job.s3_path:
+            try:
+                signed_url = await s3_client.signed_url(job.s3_path)
+            except Exception:
+                logger.warning(f"[{job.job_id}] Failed to generate signed URL", exc_info=True)
+
+        job_responses.append(
             JobResponse(
                 job_id=job.job_id,
+                type=job.job_type,
                 status=job.status,
                 created_at=job.created_at,
                 completed_at=job.completed_at,
-                result=job.result,
+                s3_path=job.s3_path,
+                signed_url=signed_url,
+                metadata=job.metadata,
                 error=job.error,
             )
-            for job in jobs
-        ],
-        total=total,
-    )
+        )
+
+    return JobListResponse(jobs=job_responses, total=total)
 
 
 @router.get("/health")

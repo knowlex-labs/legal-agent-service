@@ -6,11 +6,9 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from legal_agent.models.documents import DocumentSection
-
 
 class JobStatus(str, Enum):
-    """Status of a drafting job."""
+    """Status of a job."""
 
     PENDING = "pending"
     PROCESSING = "processing"
@@ -18,33 +16,33 @@ class JobStatus(str, Enum):
     FAILED = "failed"
 
 
-class CreateDraftResponse(BaseModel):
-    """Response when a draft job is created."""
+class JobType(str, Enum):
+    """Type of job."""
+
+    DRAFT = "draft"
+    SUMMARY = "summary"
+
+
+class CreateJobResponse(BaseModel):
+    """Response when a job is created."""
 
     job_id: str = Field(..., description="Unique job identifier")
+    type: JobType = Field(..., description="Job type")
     status: JobStatus = Field(..., description="Current job status")
     created_at: datetime = Field(..., description="Job creation timestamp")
-
-
-class DraftResult(BaseModel):
-    """Result of a completed draft job."""
-
-    draft: str = Field(..., description="The generated document draft (markdown)")
-    content_format: str = Field(default="markdown", description="Format of draft field")
-    sections: list[DocumentSection] = Field(
-        default_factory=list, description="Structured sections if applicable"
-    )
-    metadata: dict[str, Any] = Field(default_factory=dict, description="Additional metadata")
 
 
 class JobResponse(BaseModel):
-    """Full job status and result response."""
+    """Full job status response."""
 
     job_id: str = Field(..., description="Unique job identifier")
+    type: JobType = Field(..., description="Job type")
     status: JobStatus = Field(..., description="Current job status")
     created_at: datetime = Field(..., description="Job creation timestamp")
     completed_at: datetime | None = Field(None, description="Job completion timestamp")
-    result: DraftResult | None = Field(None, description="Draft result if completed")
+    s3_path: str | None = Field(None, description="S3 key when completed")
+    signed_url: str | None = Field(None, description="Signed URL for downloading the result")
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Job metadata")
     error: str | None = Field(None, description="Error message if failed")
 
 

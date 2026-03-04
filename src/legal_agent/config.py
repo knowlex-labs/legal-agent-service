@@ -47,6 +47,13 @@ class Settings(BaseSettings):
     job_timeout_seconds: int = 300
     job_max_retries: int = 3
 
+    # S3
+    s3_access_key: str = ""
+    s3_secret_key: str = ""
+    s3_region_name: str = "ap-south-1"
+    s3_bucket_name: str = "knowlex-user-documents"
+    s3_signed_url_expiry: int = 3600
+
     def get_langchain_provider(self) -> str:
         return _LANGCHAIN_PROVIDERS.get(self.llm_provider, self.llm_provider)
 

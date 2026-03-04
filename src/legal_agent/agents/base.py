@@ -13,6 +13,8 @@ from langgraph.prebuilt import ToolNode, tools_condition
 from typing_extensions import TypedDict
 
 from legal_agent.clients.rag_client import RAGClient
+from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
+from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
 from legal_agent.models.documents import GeneratedDocument
 
 logger = logging.getLogger(__name__)
@@ -29,6 +31,7 @@ class DraftingDependencies:
     instructions: str
     examples: str = ""
     language: str = "english"
+    retriever: LegalCaseRetriever | None = None
 
 
 # Base system prompt for all legal drafting agents
@@ -72,7 +75,14 @@ RULES:
 5. Do NOT output raw HTML tags (no <p>, <div>, <table>, <br>)
 6. Do NOT wrap output in ```code fences```
 7. Follow the EXACT template structure provided by your specialized prompt
-=== END OUTPUT FORMAT ==="""
+=== END OUTPUT FORMAT ===
+
+GROUNDING RULE FOR LEGAL CITATIONS:
+When drafting grounds, prayer, or any section citing case law:
+1. Call legal_case_search BEFORE writing each legal ground that needs a citation
+2. Only cite cases returned by legal_case_search — never write citations from memory
+3. If no relevant case is found, write the ground without a citation rather than inventing one
+4. Make SEPARATE calls for different grounds (bail factors, precedent for anticipatory bail, etc.)"""
 
 
 class DraftAgentState(TypedDict):
@@ -226,6 +236,10 @@ Use these EXACT details - names, ages, addresses, amounts, dates - in your draft
 If reference documents are available, use the query_reference_documents tool to gather
 relevant context before drafting.
 
+If legal_case_search is available, use it for EACH ground requiring case law support.
+Query specifically: e.g., "anticipatory bail Section 438 factors", "bail default Section 167 right",
+"chain of circumstantial evidence reasonable doubt". Make targeted per-ground queries.
+
 === FORMATTING REMINDER ===
 - Output CLEAN MARKDOWN following your template exactly
 - Tables: Use markdown pipe syntax with header separators |---|
@@ -245,6 +259,8 @@ Generate a COMPLETE, court-ready document following the EXACT markdown template 
         # Create tool with runtime deps
         rag_tool = create_rag_tool(deps.rag_client, deps.file_ids, deps.user_id)
         tools = [rag_tool] if deps.file_ids else []
+        if deps.retriever:
+            tools.append(create_legal_search_tool(deps.retriever))
 
         # Build and invoke graph
         graph = self._build_graph(tools)

@@ -1,10 +1,11 @@
 """API request schemas."""
 
-from typing import Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, model_validator
 
 from legal_agent.models.documents import DocumentType, Language
+from legal_agent.summary.models import DraftContext
 
 
 class DraftConfig(BaseModel):
@@ -58,19 +59,21 @@ class DraftConfig(BaseModel):
     )
 
 
-class CreateDraftRequest(BaseModel):
-    """Request to create a new legal document draft."""
+class CreateDraftJobRequest(BaseModel):
+    """Request to create a new legal document draft job."""
 
+    type: Literal["draft"]
+    case_folder_id: str = Field(..., description="Case folder identifier")
     title: str = Field(..., description="Title of the document to draft", min_length=1)
-    body: str | None = Field(
-        None,
-        description="Detailed instructions for drafting the document",
-        min_length=10,
-    )
     document_type: DocumentType = Field(..., description="Type of legal document to draft")
     language: Language = Field(
         Language.ENGLISH,
         description="Language for the document: english, hindi, or bilingual",
+    )
+    body: str | None = Field(
+        None,
+        description="Detailed instructions for drafting the document",
+        min_length=10,
     )
     config: DraftConfig | None = Field(
         None, description="Structured config with labeled fields for drafting"
@@ -84,7 +87,34 @@ class CreateDraftRequest(BaseModel):
     )
 
     @model_validator(mode="after")
-    def require_body_or_config(self) -> "CreateDraftRequest":
+    def require_body_or_config(self) -> "CreateDraftJobRequest":
         if not self.body and not self.config:
             raise ValueError("Either 'body' or 'config' must be provided")
         return self
+
+
+class CreateSummaryJobRequest(BaseModel):
+    """Request to create a case summary job."""
+
+    type: Literal["summary"]
+    case_folder_id: str = Field(..., description="Case folder identifier")
+    file_ids: list[str] = Field(
+        default_factory=list,
+        description="File IDs to fetch from RAG engine",
+    )
+    drafts: list[DraftContext] = Field(
+        default_factory=list, description="Optional generated drafts to include"
+    )
+    chat_highlights: list[str] = Field(
+        default_factory=list, description="Key conversation points"
+    )
+    model: Literal["openai", "gemini"] = "openai"
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Optional extra context or parameters"
+    )
+
+
+CreateJobRequest = Annotated[
+    CreateDraftJobRequest | CreateSummaryJobRequest,
+    Field(discriminator="type"),
+]
