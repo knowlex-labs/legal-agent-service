@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable, Coroutine
 
+from legal_agent.config import get_settings
 from legal_agent.models.responses import JobStatus, JobType
 
 logger = logging.getLogger(__name__)
@@ -111,15 +112,22 @@ class JobManager:
         self,
         job_id: str,
         task_fn: Callable[[], Coroutine[Any, Any, str]],
+        timeout_seconds: int | None = None,
     ) -> None:
         """Run a job's task in the background. task_fn must return s3_path."""
+        if timeout_seconds is None:
+            timeout_seconds = get_settings().job_timeout_seconds
+
         await self.update_job_status(job_id, JobStatus.PROCESSING)
 
         async def _execute():
             try:
-                s3_path = await task_fn()
+                s3_path = await asyncio.wait_for(task_fn(), timeout=timeout_seconds)
                 await self.update_job_status(job_id, JobStatus.COMPLETED, s3_path=s3_path)
                 logger.info(f"[{job_id}] Job completed successfully, s3_path={s3_path}")
+            except asyncio.TimeoutError:
+                logger.error(f"[{job_id}] Job timed out after {timeout_seconds}s")
+                await self.update_job_status(job_id, JobStatus.FAILED, error=f"Job timed out after {timeout_seconds}s")
             except asyncio.CancelledError:
                 logger.warning(f"[{job_id}] Job cancelled")
             except Exception as e:

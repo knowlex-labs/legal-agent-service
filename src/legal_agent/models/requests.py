@@ -1,8 +1,9 @@
 """API request schemas."""
 
+import re
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from legal_agent.models.documents import DocumentType, Language
 from legal_agent.summary.models import DraftContext
@@ -65,6 +66,14 @@ class CreateDraftJobRequest(BaseModel):
     type: Literal["draft"]
     case_folder_id: str = Field(..., description="Case folder identifier")
     title: str = Field(..., description="Title of the document to draft", min_length=1)
+
+    @field_validator("case_folder_id")
+    @classmethod
+    def validate_case_folder_id(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError("case_folder_id must contain only alphanumeric characters, underscores, or dashes")
+        return v
+
     document_type: DocumentType = Field(..., description="Type of legal document to draft")
     language: Language = Field(
         Language.ENGLISH,
@@ -112,6 +121,13 @@ class CreateSummaryJobRequest(BaseModel):
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Optional extra context or parameters"
     )
+
+    @field_validator("case_folder_id")
+    @classmethod
+    def validate_case_folder_id(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError("case_folder_id must contain only alphanumeric characters, underscores, or dashes")
+        return v
 
 
 CreateJobRequest = Annotated[

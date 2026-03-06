@@ -4,6 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
+from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -46,6 +47,10 @@ class Settings(BaseSettings):
     # Jobs
     job_timeout_seconds: int = 300
     job_max_retries: int = 3
+
+    # CORS
+    cors_allowed_origins: list[str] = Field(default=["https://app.knowlex.ai"])
+    trust_forwarded_headers: bool = False
 
     # S3
     s3_access_key: str = ""

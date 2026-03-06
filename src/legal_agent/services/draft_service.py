@@ -81,7 +81,9 @@ class DraftService:
         return f"{provider}:{model}"
 
     def _get_agent(self, document_type: DocumentType) -> BaseDraftingAgent:
-        return self._agents.get(document_type, self._agents[DocumentType.CONTRACT])
+        if document_type not in self._agents:
+            raise ValueError(f"Unsupported document type: {document_type}. Supported: {[d.value for d in self._agents.keys()]}")
+        return self._agents[document_type]
 
     async def create_draft_job(self, request: CreateDraftJobRequest, user_id: str) -> str:
         """Create a new draft job and start processing. Returns job_id."""
