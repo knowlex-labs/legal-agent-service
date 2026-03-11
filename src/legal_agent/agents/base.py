@@ -63,18 +63,20 @@ accuracy and consistency with existing documents or precedents.
 === OUTPUT FORMAT: MARKDOWN ===
 You MUST output the document as clean, well-structured MARKDOWN.
 
-RULES:
-1. Use markdown pipe tables for ALL tabular data (always include header separator row):
+CRITICAL - SINGLE PAGE OUTPUT:
+1. The entire document must be OUTPUT AS A SINGLE CONTINUOUS BLOCK - do NOT separate sections with blank lines or extra newlines
+2. Use markdown pipe tables for ALL tabular data (always include header separator row):
    | Header 1 | Header 2 |
    |----------|----------|
    | Data     | Data     |
 
-2. Use **bold** for names, headings, and emphasis
-3. Use # headings for major section titles (e.g., ## PRAYER, ## GROUNDS)
-4. Use --- for horizontal rules to separate major sections
-5. Do NOT output raw HTML tags (no <p>, <div>, <table>, <br>)
-6. Do NOT wrap output in ```code fences```
-7. Follow the EXACT template structure provided by your specialized prompt
+3. Use **bold** for names, headings, and emphasis
+4. Use ## headings for major section titles (e.g., ## PRAYER, ## GROUNDS)
+5. Use --- (horizontal rule) ONLY between MAJOR sections (not between every paragraph)
+6. Do NOT output raw HTML tags (no <p>, <div>, <table>, <br>)
+7. Do NOT wrap output in ```code fences```
+8. Do NOT use page breaks, section dividers, or any markers that would cause the document to split
+9. Follow the EXACT template structure provided by your specialized prompt
 === END OUTPUT FORMAT ===
 
 GROUNDING RULE FOR LEGAL CITATIONS:
@@ -150,7 +152,12 @@ class BaseDraftingAgent:
                 "CRITICAL: The draft field and each section's content must preserve the MARKDOWN "
                 "exactly as generated. Do NOT strip formatting, convert to plain text, or remove "
                 "table syntax. Keep all **bold**, headings, tables, and --- separators intact.\n\n"
-                "IMPORTANT for sections: Split the document into its NATURAL sections as they "
+                "IMPORTANT - SINGLE CONTINUOUS OUTPUT:\n"
+                "- Combine all paragraphs and sections into a SINGLE CONTINUOUS draft field\n"
+                "- Do NOT add extra blank lines between paragraphs\n"
+                "- Use --- (horizontal rule) sparingly - only between major sections\n"
+                "- The document should flow as ONE continuous piece without page breaks\n\n"
+                "For sections: Split the document into its NATURAL sections as they "
                 "appear in the actual document. For court filings, use sections like:\n"
                 "- 'Cause Title' (court header + party blocks + Vs.)\n"
                 "- 'Affidavit' or 'Petition' or 'Application' (opening statement + all numbered paragraphs)\n"

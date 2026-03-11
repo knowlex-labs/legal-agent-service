@@ -4,7 +4,7 @@ import logging
 
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.models.requests import CreateSummaryJobRequest
-from legal_agent.models.responses import JobType
+from legal_agent.models.responses import JobStatus, JobType
 from legal_agent.services.job_manager import JobManager
 from legal_agent.summary.generator import SummaryGenerator
 
@@ -29,6 +29,9 @@ class SummaryService:
         job = await self._job_manager.create_job(
             job_type=JobType.SUMMARY,
             metadata={"case_folder_id": request.case_folder_id, **request.metadata},
+            title="Case Summary",
+            user_id=user_id,
+            legal_case_id=request.case_folder_id,
         )
 
         logger.info(
@@ -36,16 +39,16 @@ class SummaryService:
             f"case_folder_id={request.case_folder_id}, user={user_id}"
         )
 
-        async def task() -> str:
-            return await self._execute_summary(request, job.job_id, user_id)
+        async def task() -> None:
+            await self._execute_summary(request, job.job_id, user_id)
 
         await self._job_manager.run_job(job.job_id, task)
         return job.job_id
 
     async def _execute_summary(
         self, request: CreateSummaryJobRequest, job_id: str, user_id: str
-    ) -> str:
-        """Execute the summary generation task. Returns s3_path."""
+    ) -> None:
+        """Execute the summary generation task."""
         logger.debug(f"[{job_id}] Starting summary execution")
 
         summary_md = await self._generator.generate(
@@ -60,4 +63,14 @@ class SummaryService:
         await self._s3_client.upload_text(s3_path, summary_md)
         logger.info(f"[{job_id}] Summary uploaded to {s3_path}")
 
-        return s3_path
+        # Get signed URL and update job with file details
+        signed_url = await self._s3_client.signed_url(s3_path)
+        await self._job_manager.update_job_status(
+            job_id,
+            JobStatus.COMPLETED,
+            s3_path=s3_path,
+            storage_url=signed_url,
+            file_name="summary.md",
+            file_type="text/markdown",
+            indexing_status="pending",
+        )

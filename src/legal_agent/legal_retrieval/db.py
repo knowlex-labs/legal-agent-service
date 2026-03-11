@@ -110,7 +110,7 @@ def execute_hybrid_search(
         SELECT p.id AS paragraph_id, p.case_id, p.paragraph_number,
                p.paragraph_text AS text,
                ROW_NUMBER() OVER (ORDER BY p.embedding <=> %(embedding)s::vector) AS rank
-        FROM case_paragraphs p JOIN cases c ON c.id = p.case_id
+        FROM judgment_paragraphs p JOIN cases c ON c.id = p.case_id
         WHERE 1=1 {filter_sql}
         ORDER BY p.embedding <=> %(embedding)s::vector LIMIT 100
     ),
@@ -120,7 +120,7 @@ def execute_hybrid_search(
                ROW_NUMBER() OVER (
                    ORDER BY ts_rank(p.full_text_search, plainto_tsquery('english', %(fts_query)s)) DESC
                ) AS rank
-        FROM case_paragraphs p JOIN cases c ON c.id = p.case_id
+        FROM judgment_paragraphs p JOIN cases c ON c.id = p.case_id
         WHERE p.full_text_search @@ plainto_tsquery('english', %(fts_query)s) {filter_sql}
         LIMIT 100
     ),
@@ -151,13 +151,13 @@ def get_paragraphs_for_case(case_id: str, embedding: list[float] | None = None, 
         return _query(
             "SELECT id, paragraph_number, paragraph_text AS text, "
             "embedding <=> %(embedding)s::vector AS distance "
-            "FROM case_paragraphs WHERE case_id = %(case_id)s "
+            "FROM judgment_paragraphs WHERE case_id = %(case_id)s "
             "ORDER BY embedding <=> %(embedding)s::vector LIMIT %(limit)s",
             {"case_id": case_id, "embedding": embedding, "limit": limit},
         )
     return _query(
         "SELECT id, paragraph_number, paragraph_text AS text "
-        "FROM case_paragraphs WHERE case_id = %(case_id)s "
+        "FROM judgment_paragraphs WHERE case_id = %(case_id)s "
         "ORDER BY paragraph_number LIMIT %(limit)s",
         {"case_id": case_id, "limit": limit},
     )

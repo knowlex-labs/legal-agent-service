@@ -40,10 +40,23 @@ class JobResponse(BaseModel):
     status: JobStatus = Field(..., description="Current job status")
     created_at: datetime = Field(..., description="Job creation timestamp")
     completed_at: datetime | None = Field(None, description="Job completion timestamp")
+    updated_at: datetime | None = Field(None, description="Last update timestamp")
     s3_path: str | None = Field(None, description="S3 key when completed")
+    storage_url: str | None = Field(None, description="Full S3 URL for the file")
     signed_url: str | None = Field(None, description="Signed URL for downloading the result")
     metadata: dict[str, Any] = Field(default_factory=dict, description="Job metadata")
     error: str | None = Field(None, description="Error message if failed")
+
+    # Extended fields
+    title: str | None = Field(None, description="Document title")
+    subtype: str | None = Field(None, description="Document subtype")
+    user_id: str | None = Field(None, description="User who created the job")
+    legal_case_id: str | None = Field(None, description="Legal case/folder ID")
+    file_name: str | None = Field(None, description="File name")
+    file_type: str | None = Field(None, description="File type/MIME type")
+    indexing_status: str | None = Field(None, description="Indexing status")
+    version: int = Field(1, description="Document version")
+    original_filename: str | None = Field(None, description="Original uploaded filename")
 
 
 class JobListResponse(BaseModel):
