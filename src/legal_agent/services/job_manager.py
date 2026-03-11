@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import Any, Callable, Coroutine
 
+from legal_agent.config import get_settings
 from legal_agent.models.responses import JobStatus, JobType
 
 logger = logging.getLogger(__name__)
@@ -21,8 +22,22 @@ class Job:
     status: JobStatus
     created_at: datetime
     completed_at: datetime | None = None
+    updated_at: datetime | None = None
     s3_path: str | None = None
+    storage_url: str | None = None
     error: str | None = None
+
+    # Extended fields for DB persistence
+    subtype: str | None = None
+    title: str | None = None
+    user_id: str | None = None
+    legal_case_id: str | None = None
+    file_name: str | None = None
+    indexing_status: str | None = None
+    version: int = 1
+    original_filename: str | None = None
+    file_type: str | None = None
+
     metadata: dict[str, Any] = field(default_factory=dict)
 
 
@@ -38,6 +53,10 @@ class JobManager:
         self,
         job_type: JobType,
         metadata: dict[str, Any] | None = None,
+        title: str | None = None,
+        user_id: str | None = None,
+        legal_case_id: str | None = None,
+        subtype: str | None = None,
     ) -> Job:
         """Create a new pending job."""
         job_id = str(uuid.uuid4())
@@ -46,6 +65,10 @@ class JobManager:
             job_type=job_type,
             status=JobStatus.PENDING,
             created_at=datetime.now(UTC),
+            title=title,
+            user_id=user_id,
+            legal_case_id=legal_case_id,
+            subtype=subtype,
             metadata=metadata or {},
         )
         async with self._lock:
@@ -86,7 +109,11 @@ class JobManager:
         job_id: str,
         status: JobStatus,
         s3_path: str | None = None,
+        storage_url: str | None = None,
         error: str | None = None,
+        file_name: str | None = None,
+        file_type: str | None = None,
+        indexing_status: str | None = None,
     ) -> Job | None:
         """Update a job's status."""
         async with self._lock:
@@ -96,13 +123,22 @@ class JobManager:
 
             old_status = job.status
             job.status = status
+            job.updated_at = datetime.now(UTC)
 
             if status in (JobStatus.COMPLETED, JobStatus.FAILED):
                 job.completed_at = datetime.now(UTC)
             if s3_path:
                 job.s3_path = s3_path
+            if storage_url:
+                job.storage_url = storage_url
             if error:
                 job.error = error
+            if file_name:
+                job.file_name = file_name
+            if file_type:
+                job.file_type = file_type
+            if indexing_status:
+                job.indexing_status = indexing_status
 
             logger.debug(f"[{job_id}] Status: {old_status.value} -> {status.value}")
             return job
@@ -111,15 +147,21 @@ class JobManager:
         self,
         job_id: str,
         task_fn: Callable[[], Coroutine[Any, Any, str]],
+        timeout_seconds: int | None = None,
     ) -> None:
-        """Run a job's task in the background. task_fn must return s3_path."""
+        """Run a job's task in the background. task_fn must handle its own completion."""
+        if timeout_seconds is None:
+            timeout_seconds = get_settings().job_timeout_seconds
+
         await self.update_job_status(job_id, JobStatus.PROCESSING)
 
         async def _execute():
             try:
-                s3_path = await task_fn()
-                await self.update_job_status(job_id, JobStatus.COMPLETED, s3_path=s3_path)
-                logger.info(f"[{job_id}] Job completed successfully, s3_path={s3_path}")
+                await asyncio.wait_for(task_fn(), timeout=timeout_seconds)
+                logger.info(f"[{job_id}] Job completed successfully")
+            except asyncio.TimeoutError:
+                logger.error(f"[{job_id}] Job timed out after {timeout_seconds}s")
+                await self.update_job_status(job_id, JobStatus.FAILED, error=f"Job timed out after {timeout_seconds}s")
             except asyncio.CancelledError:
                 logger.warning(f"[{job_id}] Job cancelled")
             except Exception as e:

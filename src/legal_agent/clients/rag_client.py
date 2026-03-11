@@ -10,6 +10,12 @@ from legal_agent.config import Settings
 logger = logging.getLogger(__name__)
 
 
+class RAGClientError(Exception):
+    """Raised when RAG client fails to retrieve context."""
+
+    pass
+
+
 def _collection_for_user(user_id: str) -> str:
     """Derive the Qdrant collection name from user ID."""
     return f"user_{user_id}"
@@ -99,13 +105,13 @@ class HTTPRAGClient(RAGClient):
 
         except httpx.TimeoutException:
             logger.error(f"RAG request timed out for query: {query[:50]}...")
-            return ""
+            raise RAGClientError("RAG request timed out")
         except httpx.HTTPStatusError as e:
             logger.error(f"RAG HTTP error {e.response.status_code}: {e.response.text}")
-            return ""
+            raise RAGClientError(f"RAG HTTP error: {e.response.status_code}")
         except httpx.RequestError as e:
             logger.error(f"RAG request failed: {e}")
-            return ""
+            raise RAGClientError(f"RAG request failed: {e}")
 
     def _format_chunks(self, chunks: list[dict]) -> str:
         """Format RAG chunks into a context string for the LLM."""

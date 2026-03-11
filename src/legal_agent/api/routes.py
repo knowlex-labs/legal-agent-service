@@ -124,10 +124,21 @@ async def get_job(
         status=job.status,
         created_at=job.created_at,
         completed_at=job.completed_at,
+        updated_at=job.updated_at,
         s3_path=job.s3_path,
+        storage_url=job.storage_url,
         signed_url=signed_url,
         metadata=job.metadata,
         error=job.error,
+        title=job.title,
+        subtype=job.subtype,
+        user_id=job.user_id,
+        legal_case_id=job.legal_case_id,
+        file_name=job.file_name,
+        file_type=job.file_type,
+        indexing_status=job.indexing_status,
+        version=job.version,
+        original_filename=job.original_filename,
     )
 
 
@@ -138,6 +149,7 @@ async def list_jobs(
     case_folder_id: str | None = Query(None, description="Filter by case folder ID"),
     limit: int = Query(100, ge=1, le=1000, description="Maximum number of jobs to return"),
     offset: int = Query(0, ge=0, description="Number of jobs to skip"),
+    include_signed_url: bool = Query(False, description="Include signed URLs in response"),
     job_manager: JobManager = Depends(get_job_manager),
     s3_client: S3Client = Depends(get_s3_client),
 ) -> JobListResponse:
@@ -153,7 +165,7 @@ async def list_jobs(
     job_responses = []
     for job in jobs:
         signed_url: str | None = None
-        if job.s3_path:
+        if include_signed_url and job.s3_path:
             try:
                 signed_url = await s3_client.signed_url(job.s3_path)
             except Exception:
@@ -166,10 +178,21 @@ async def list_jobs(
                 status=job.status,
                 created_at=job.created_at,
                 completed_at=job.completed_at,
+                updated_at=job.updated_at,
                 s3_path=job.s3_path,
+                storage_url=job.storage_url,
                 signed_url=signed_url,
                 metadata=job.metadata,
                 error=job.error,
+                title=job.title,
+                subtype=job.subtype,
+                user_id=job.user_id,
+                legal_case_id=job.legal_case_id,
+                file_name=job.file_name,
+                file_type=job.file_type,
+                indexing_status=job.indexing_status,
+                version=job.version,
+                original_filename=job.original_filename,
             )
         )
 
@@ -177,6 +200,10 @@ async def list_jobs(
 
 
 @router.get("/health")
-async def health_check() -> dict:
+async def health_check(job_manager: JobManager = Depends(get_job_manager)) -> dict:
     """Health check endpoint."""
-    return {"status": "healthy", "service": "legal-agent-service"}
+    return {
+        "status": "healthy",
+        "service": "legal-agent-service",
+        "jobs_count": len(job_manager._jobs),
+    }

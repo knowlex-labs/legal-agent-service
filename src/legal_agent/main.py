@@ -147,13 +147,15 @@ async def lifespan(app: FastAPI):
 
 
 def create_app() -> FastAPI:
+    settings = get_settings()
     app = FastAPI(
         title="Legal Agent Service",
         description="AI-powered legal document drafting service for Indian legal firms",
         version="0.1.0",
         lifespan=lifespan,
     )
-    app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
+    origins = settings.cors_allowed_origins if not settings.debug else ["*"]
+    app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(RequestContextMiddleware)
     app.include_router(router, prefix="/api/v1", tags=["jobs"])
     app.include_router(chat_router, prefix="/api/v1", tags=["chat"])

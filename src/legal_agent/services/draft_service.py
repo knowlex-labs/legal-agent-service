@@ -19,7 +19,7 @@ from legal_agent.data.examples_loader import (
 )
 from legal_agent.models.documents import DocumentType
 from legal_agent.models.requests import CreateDraftJobRequest
-from legal_agent.models.responses import JobType
+from legal_agent.models.responses import JobStatus, JobType
 from legal_agent.services.content_preprocessor import (
     assemble_config_text,
     preprocess_and_enhance,
@@ -81,7 +81,9 @@ class DraftService:
         return f"{provider}:{model}"
 
     def _get_agent(self, document_type: DocumentType) -> BaseDraftingAgent:
-        return self._agents.get(document_type, self._agents[DocumentType.CONTRACT])
+        if document_type not in self._agents:
+            raise ValueError(f"Unsupported document type: {document_type}. Supported: {[d.value for d in self._agents.keys()]}")
+        return self._agents[document_type]
 
     async def create_draft_job(self, request: CreateDraftJobRequest, user_id: str) -> str:
         """Create a new draft job and start processing. Returns job_id."""
@@ -89,11 +91,14 @@ class DraftService:
             job_type=JobType.DRAFT,
             metadata={
                 "case_folder_id": request.case_folder_id,
-                "title": request.title,
                 "document_type": request.document_type.value,
                 "file_ids": request.file_ids,
                 **request.metadata,
             },
+            title=request.title,
+            user_id=user_id,
+            legal_case_id=request.case_folder_id,
+            subtype=request.metadata.get("subtype"),
         )
 
         logger.info(
@@ -166,8 +171,22 @@ class DraftService:
         logger.info(f"[{job_id}] Draft completed: {len(document.sections)} sections")
 
         # Step 4: Upload to S3
-        slug = _slugify(document.title)
+        # Use request title for proper naming (user-provided title)
+        slug = _slugify(request.title)
         s3_path = f"{request.case_folder_id}/drafts/{slug}.md"
         await self.s3_client.upload_text(s3_path, document.draft)
+
+        # Get signed URL and update job with file details
+        signed_url = await self.s3_client.signed_url(s3_path)
+        file_name = f"{slug}.md"
+        await self.job_manager.update_job_status(
+            job_id,
+            JobStatus.COMPLETED,
+            s3_path=s3_path,
+            storage_url=signed_url,
+            file_name=file_name,
+            file_type="text/markdown",
+            indexing_status="pending",
+        )
 
         return s3_path

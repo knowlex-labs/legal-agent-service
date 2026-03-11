@@ -8,7 +8,9 @@
       "Document must be complete and ready to file - NO blanks",
       "Output CLEAN MARKDOWN only — no HTML tags, no code fences",
       "Use markdown pipe tables with |---| separator for ALL tabular data",
-      "Use **bold** for names and emphasis, ## headings for sections"
+      "Use **bold** for names and emphasis, ## headings for sections",
+      "MINIMIZE horizontal rules (---) - use ONLY between major sections, never between paragraphs",
+      "Output as SINGLE CONTINUOUS document without page breaks or section dividers"
     ]
   },
   "legal_notice": {
