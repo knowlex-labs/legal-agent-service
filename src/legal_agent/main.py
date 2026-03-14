@@ -51,7 +51,7 @@ def _setup_llm_environment() -> None:
     env_keys = {
         "OPENAI_API_KEY": settings.openai_api_key,
         "ANTHROPIC_API_KEY": settings.anthropic_api_key,
-        "GOOGLE_API_KEY": settings.gemini_api_key,
+        "GEMINI_API_KEY": settings.gemini_api_key,
     }
     for var, val in env_keys.items():
         if val:
