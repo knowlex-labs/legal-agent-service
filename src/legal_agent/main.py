@@ -65,12 +65,12 @@ rag_client: HTTPRAGClient | MockRAGClient | None = None
 workspace_chat_agent: WorkspaceChatAgent | None = None
 
 
-async def _init_workspace_chat_agent(retriever: LegalCaseRetriever | None):
+async def _init_workspace_chat_agent():
     """Initialize workspace chat agent in background."""
     global workspace_chat_agent
     try:
         workspace_chat_agent = WorkspaceChatAgent()
-        await workspace_chat_agent.initialize(get_legal_db_url(), rag_client, retriever)
+        await workspace_chat_agent.initialize(get_legal_db_url(), rag_client, None)
         set_workspace_chat_agent(workspace_chat_agent)
         logger.info("Workspace chat agent fully initialized")
     except Exception:
@@ -107,7 +107,7 @@ async def lifespan(app: FastAPI):
     )
     set_services(draft_service, summary_service, job_manager, s3_client)
 
-    workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent(legal_retriever))
+    workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent())
 
     logger.info("Service ready")
     yield

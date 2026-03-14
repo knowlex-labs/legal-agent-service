@@ -105,7 +105,7 @@ class WorkspaceChatAgent:
         self._google_search_tool = None
         self._llms: dict = {}
 
-    async def initialize(self, db_url: str, rag_client: RAGClient, retriever: LegalCaseRetriever | None = None):
+    async def initialize(self, db_url: str, rag_client: RAGClient | None, retriever: LegalCaseRetriever | None = None):
         self._rag_client = rag_client
         self._pool = AsyncConnectionPool(
             conninfo=db_url,
