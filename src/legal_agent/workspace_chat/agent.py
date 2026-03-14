@@ -104,6 +104,7 @@ class WorkspaceChatAgent:
         self._legal_search_tool = None
         self._google_search_tool = None
         self._llms: dict = {}
+        self._base_graphs: dict = {}  # cached per model_id, no per-request tools
 
     async def initialize(self, db_url: str, rag_client: RAGClient | None, retriever: LegalCaseRetriever | None = None):
         self._rag_client = rag_client
@@ -134,8 +135,25 @@ class WorkspaceChatAgent:
             self._llms[model_id] = init_chat_model(model_id, model_provider=provider)
         return self._llms[model_id]
 
+    def _get_base_graph(self, model_id: str):
+        """Cached graph with static tools only — used for history reads."""
+        if model_id not in self._base_graphs:
+            llm = self._get_llm(model_id)
+            tools = []
+            if self._legal_search_tool:
+                tools.append(self._legal_search_tool)
+            if self._google_search_tool:
+                tools.append(self._google_search_tool)
+            self._base_graphs[model_id] = create_react_agent(
+                llm, tools=tools, checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT
+            )
+        return self._base_graphs[model_id]
+
     def _get_graph(self, model: str, file_ids: list[str], user_id: str = ""):
-        llm = self._get_llm(model or get_settings().chat_llm_default_model)
+        model_id = model or get_settings().chat_llm_default_model
+        if not file_ids:
+            return self._get_base_graph(model_id)
+        llm = self._get_llm(model_id)
         rag_tool = _create_rag_tool(self._rag_client, file_ids, user_id)
         tools = [rag_tool]
         if self._legal_search_tool:
@@ -201,7 +219,7 @@ class WorkspaceChatAgent:
         """Return conversation history as structured turns."""
         # Use any cached LLM (or default) — the LLM is never called, only the checkpointer is read
         model_id = next(iter(self._llms), None) or get_settings().chat_llm_default_model
-        graph = self._get_graph(model_id, [])
+        graph = self._get_base_graph(model_id)
         state = await graph.aget_state({"configurable": {"thread_id": session_id}})
         if not state or not state.values:
             return []
