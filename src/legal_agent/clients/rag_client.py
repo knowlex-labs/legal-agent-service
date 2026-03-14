@@ -105,13 +105,16 @@ class HTTPRAGClient(RAGClient):
 
         except httpx.TimeoutException:
             logger.error(f"RAG request timed out for query: {query[:50]}...")
-            raise RAGClientError("RAG request timed out")
+            return ""
         except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                logger.info(f"RAG collection not found for user {user_id}, skipping retrieval")
+                return ""
             logger.error(f"RAG HTTP error {e.response.status_code}: {e.response.text}")
-            raise RAGClientError(f"RAG HTTP error: {e.response.status_code}")
+            return ""
         except httpx.RequestError as e:
             logger.error(f"RAG request failed: {e}")
-            raise RAGClientError(f"RAG request failed: {e}")
+            return ""
 
     def _format_chunks(self, chunks: list[dict]) -> str:
         """Format RAG chunks into a context string for the LLM."""
