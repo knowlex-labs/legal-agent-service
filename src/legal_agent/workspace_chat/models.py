@@ -5,7 +5,17 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from legal_agent.chat.models import ChatHistoryMessage
+
+class ToolCallRecord(BaseModel):
+    name: str
+    args: dict = {}
+    result: str | None = None
+
+
+class ChatHistoryMessage(BaseModel):
+    role: Literal["human", "ai"]
+    content: str
+    tool_calls: list[ToolCallRecord] | None = None
 
 
 class WorkspaceChatMessageRequest(BaseModel):
@@ -17,7 +27,7 @@ class WorkspaceChatMessageRequest(BaseModel):
         default="balanced", description="Response detail level"
     )
     file_ids: list[str] = Field(default_factory=list, description="File IDs for RAG scope")
-    model: Literal["openai", "gemini"] = Field(default="openai", description="LLM provider")
+    model: str = Field(default="gpt-5-mini-2025-08-07", description="Model ID to use")
 
 
 class WorkspaceChatConfigUpdate(BaseModel):

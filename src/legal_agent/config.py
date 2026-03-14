@@ -39,10 +39,8 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     legal_db_url: str | None = None
 
-    # Chat LLM (two models, selected per-request)
-    chat_llm_openai_model: str = "gpt-4o-mini"
-    chat_llm_gemini_model: str = "gemini-2.0-flash"
-    chat_llm_default_provider: Literal["openai", "gemini"] = "openai"
+    # Chat LLM default (frontend sends model ID directly)
+    chat_llm_default_model: str = "gpt-5-mini-2025-08-07"
 
     # Jobs
     job_timeout_seconds: int = 300
@@ -62,12 +60,12 @@ class Settings(BaseSettings):
     def get_langchain_provider(self) -> str:
         return _LANGCHAIN_PROVIDERS.get(self.llm_provider, self.llm_provider)
 
-    def get_chat_models(self) -> dict[str, tuple[str, str]]:
-        """Return {provider_key: (model_name, langchain_provider)} for chat."""
-        return {
-            "openai": (self.chat_llm_openai_model, "openai"),
-            "gemini": (self.chat_llm_gemini_model, "google-genai"),
-        }
+    @staticmethod
+    def get_langchain_provider_for_model(model_id: str) -> str:
+        """Infer LangChain provider from model ID string."""
+        if model_id.startswith("gemini"):
+            return "google-genai"
+        return "openai"
 
     def get_llm_api_key(self) -> str | None:
         keys = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "gemini": self.gemini_api_key}

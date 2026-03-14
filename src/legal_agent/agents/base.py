@@ -57,8 +57,8 @@ Key guidelines:
 5. Ensure the document is complete, well-structured, and ready for review
 6. Use proper Indian legal terminology and citation formats
 
-When provided with reference documents via the RAG context, use that information to ensure
-accuracy and consistency with existing documents or precedents.
+When querying reference documents returns no results, proceed using your legal knowledge
+and any case law from legal_case_search. Never write "no documents found" in the draft.
 
 === OUTPUT FORMAT: MARKDOWN ===
 You MUST output the document as clean, well-structured MARKDOWN.
@@ -100,10 +100,6 @@ def create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
     @tool
     async def query_reference_documents(query: str) -> str:
         """Query reference documents for relevant context."""
-        if not file_ids:
-            logger.debug("No file_ids provided, skipping RAG query")
-            return "No reference documents provided."
-
         logger.debug(f"RAG tool called with query: {query[:50]}... | user={user_id}")
         context = await rag_client.query(file_ids, query, user_id=user_id)
 
@@ -265,7 +261,7 @@ Generate a COMPLETE, court-ready document following the EXACT markdown template 
 
         # Create tool with runtime deps
         rag_tool = create_rag_tool(deps.rag_client, deps.file_ids, deps.user_id)
-        tools = [rag_tool] if deps.file_ids else []
+        tools = [rag_tool]
         if deps.retriever:
             tools.append(create_legal_search_tool(deps.retriever))
 

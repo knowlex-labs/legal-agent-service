@@ -1,6 +1,5 @@
 """LangGraph ReAct agent for workspace chat with persistent sessions."""
 
-import asyncio
 import json
 import logging
 
@@ -12,8 +11,11 @@ from langgraph.prebuilt import create_react_agent
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from legal_agent.clients.google_search_client import create_google_legal_search_tool
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import get_settings
+from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
+from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
 from legal_agent.workspace_chat.session_store import WorkspaceChatSessionStore
 
 logger = logging.getLogger(__name__)
@@ -23,18 +25,17 @@ document drafting workspace. You help lawyers edit drafts, understand case files
 legal questions in the context of the case they are working on.
 
 CAPABILITIES:
-1. Read and analyse case files using the search tool when file IDs are provided.
+1. Read and analyse case files using query_case_documents.
 2. Suggest edits, improvements, and additions to legal drafts.
 3. Answer questions about legal provisions, case law, and procedures relevant to the case.
 4. Explain legal concepts in context of the documents at hand.
 
 GROUNDING RULES:
-1. Use the query_case_documents tool to search case files when the user asks about document
-   content, facts, or needs information from uploaded files.
-2. Only answer based on information from search results when referencing case files.
-3. For general legal questions (not about specific documents), answer from your legal knowledge.
-4. Do NOT fabricate case citations or document content not present in search results.
-5. If the tool returns no results, say so clearly.
+1. Always call query_case_documents to search case files first.
+2. If case document search returns no results, use google_legal_search and your legal knowledge.
+3. Never tell the user "no documents found" — draft or answer using available context.
+4. For legal citations, use legal_case_search for verified case law.
+5. Do NOT fabricate citations not found via tools.
 
 OUTPUT FORMAT:
 - Use markdown for formatting.
@@ -81,21 +82,14 @@ STYLE_INSTRUCTIONS = {
 
 
 def _create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
-    """Create a RAG tool scoped to the given file IDs and user."""
-
     @tool
     async def query_case_documents(query: str) -> str:
         """Search case documents for relevant content. Use this when the user asks
         about facts, clauses, or content from their uploaded case files."""
-        if not file_ids:
-            return "No case files provided for this query."
-
-        logger.debug(f"[workspace_chat] RAG query: {query[:80]}... | user={user_id} | files={file_ids}")
+        logger.debug(f"[workspace_chat] RAG query: {query[:80]}... | user={user_id} | files={file_ids or 'all'}")
         context = await rag_client.query(file_ids, query, user_id=user_id)
-
         if not context:
             return "No relevant content found in the case files."
-
         return context
 
     return query_case_documents
@@ -107,10 +101,11 @@ class WorkspaceChatAgent:
         self.checkpointer: AsyncPostgresSaver | None = None
         self.session_store: WorkspaceChatSessionStore | None = None
         self._rag_client: RAGClient | None = None
-        self._graphs: dict[str, object] = {}
-        self._ready = asyncio.Event()
+        self._legal_search_tool = None
+        self._google_search_tool = None
+        self._llms: dict = {}
 
-    async def initialize(self, db_url: str, rag_client: RAGClient):
+    async def initialize(self, db_url: str, rag_client: RAGClient, retriever: LegalCaseRetriever | None = None):
         self._rag_client = rag_client
         self._pool = AsyncConnectionPool(
             conninfo=db_url,
@@ -127,57 +122,27 @@ class WorkspaceChatAgent:
         self.session_store = WorkspaceChatSessionStore(self._pool)
         await self.session_store.setup()
 
-        self._compile_graphs_background()
-        logger.info("WorkspaceChatAgent initialized (graphs compiling in background)")
+        self._legal_search_tool = create_legal_search_tool(retriever) if retriever else None
+        settings = get_settings()
+        if settings.gemini_api_key:
+            self._google_search_tool = create_google_legal_search_tool(settings.gemini_api_key)
+        logger.info("WorkspaceChatAgent initialized")
 
-    def _compile_graphs_background(self):
-        """Compile LangGraph graphs in a background thread."""
-        import concurrent.futures
+    def _get_llm(self, model_id: str):
+        if model_id not in self._llms:
+            provider = get_settings().get_langchain_provider_for_model(model_id)
+            self._llms[model_id] = init_chat_model(model_id, model_provider=provider)
+        return self._llms[model_id]
 
-        loop = asyncio.get_event_loop()
-
-        def _compile():
-            settings = get_settings()
-            chat_models = settings.get_chat_models()
-            for provider_key, (model_name, langchain_provider) in chat_models.items():
-                llm = init_chat_model(model_name, model_provider=langchain_provider)
-                self._graphs[provider_key] = create_react_agent(
-                    model=llm,
-                    tools=[],
-                    checkpointer=self.checkpointer,
-                    prompt=SYSTEM_PROMPT,
-                )
-                logger.info(f"[workspace_chat] Compiled graph for {provider_key} ({model_name})")
-            loop.call_soon_threadsafe(self._ready.set)
-            logger.info("[workspace_chat] All graphs compiled and ready")
-
-        executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
-        executor.submit(_compile)
-
-    async def _get_graph(self, model: str, file_ids: list[str], user_id: str = ""):
-        """Get or create a graph for the given model and file_ids."""
-        await self._ready.wait()
-
-        if file_ids and self._rag_client:
-            settings = get_settings()
-            chat_models = settings.get_chat_models()
-            provider_key = model if model in chat_models else settings.chat_llm_default_provider
-            model_name, langchain_provider = chat_models[provider_key]
-            llm = init_chat_model(model_name, model_provider=langchain_provider)
-            rag_tool = _create_rag_tool(self._rag_client, file_ids, user_id)
-            return create_react_agent(
-                model=llm,
-                tools=[rag_tool],
-                checkpointer=self.checkpointer,
-                prompt=SYSTEM_PROMPT,
-            )
-
-        key = model
-        if key not in self._graphs:
-            settings = get_settings()
-            logger.warning(f"[workspace_chat] Graph '{key}' not found, falling back to {settings.chat_llm_default_provider}")
-            key = settings.chat_llm_default_provider
-        return self._graphs[key]
+    def _get_graph(self, model: str, file_ids: list[str], user_id: str = ""):
+        llm = self._get_llm(model or get_settings().chat_llm_default_model)
+        rag_tool = _create_rag_tool(self._rag_client, file_ids, user_id)
+        tools = [rag_tool]
+        if self._legal_search_tool:
+            tools.append(self._legal_search_tool)
+        if self._google_search_tool:
+            tools.append(self._google_search_tool)
+        return create_react_agent(llm, tools=tools, checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT)
 
     async def stream_response(
         self,
@@ -187,7 +152,7 @@ class WorkspaceChatAgent:
         style: str = "balanced",
         file_ids: list[str] | None = None,
         user_id: str = "",
-        model: str = "openai",
+        model: str = "",
     ):
         """Yield SSE event dicts for streaming response."""
         logger.info(
@@ -195,21 +160,12 @@ class WorkspaceChatAgent:
             f"style={style} | user={user_id} | "
             f"files={len(file_ids or [])} | msg='{message[:100]}'"
         )
-        graph = await self._get_graph(model, file_ids or [], user_id)
+        graph = self._get_graph(model, file_ids or [], user_id)
         config = {"configurable": {"thread_id": session_id}}
 
         tone_suffix = TONE_INSTRUCTIONS.get(tone, TONE_INSTRUCTIONS["formal"])
         style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
-
-        files_hint = ""
-        if file_ids:
-            files_hint = (
-                f"\n\nCONTEXT: {len(file_ids)} case file(s) are loaded in this session. "
-                "Use the query_case_documents tool to search them before answering. "
-                "Do NOT ask the user to provide files — they are already available."
-            )
-
-        full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS:{files_hint}{tone_suffix}{style_suffix}"
+        full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS:{tone_suffix}{style_suffix}"
 
         async for event in graph.astream_events(
             {"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"
@@ -217,9 +173,10 @@ class WorkspaceChatAgent:
             kind = event["event"]
             if kind == "on_chat_model_stream":
                 token = event["data"]["chunk"].content
+                if isinstance(token, list):
+                    token = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in token)
                 if token:
-                    escaped = token.replace("\n", "\\n")
-                    yield {"event": "answer", "data": escaped}
+                    yield {"event": "answer", "data": token.replace("\n", "\\n")}
             elif kind == "on_tool_start":
                 yield {
                     "event": "tool_call",
@@ -230,9 +187,21 @@ class WorkspaceChatAgent:
 
         yield {"event": "end", "data": ""}
 
-    async def get_history(self, session_id: str, model: str = "openai") -> list[dict]:
+    def _normalize_content(self, content) -> str:
+        """Normalize message content to a plain string (Gemini returns list of dicts)."""
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+            )
+        return str(content)
+
+    async def get_history(self, session_id: str) -> list[dict]:
         """Return conversation history as structured turns."""
-        graph = await self._get_graph(model, [])
+        # Use any cached LLM (or default) — the LLM is never called, only the checkpointer is read
+        model_id = next(iter(self._llms), None) or get_settings().chat_llm_default_model
+        graph = self._get_graph(model_id, [])
         state = await graph.aget_state({"configurable": {"thread_id": session_id}})
         if not state or not state.values:
             return []
@@ -242,9 +211,9 @@ class WorkspaceChatAgent:
             if isinstance(m, SystemMessage):
                 continue
             if isinstance(m, HumanMessage):
-                turns.append({"role": "human", "content": m.content})
+                turns.append({"role": "human", "content": self._normalize_content(m.content)})
             elif isinstance(m, AIMessage):
-                turn = {"role": "ai", "content": m.content}
+                turn = {"role": "ai", "content": self._normalize_content(m.content)}
                 if m.tool_calls:
                     turn["tool_calls"] = [
                         {"name": tc["name"], "args": tc["args"]} for tc in m.tool_calls
@@ -254,7 +223,7 @@ class WorkspaceChatAgent:
                 if turns and turns[-1].get("tool_calls"):
                     for tc in turns[-1]["tool_calls"]:
                         if tc.get("result") is None:
-                            tc["result"] = m.content
+                            tc["result"] = self._normalize_content(m.content)
                             break
         return turns
 

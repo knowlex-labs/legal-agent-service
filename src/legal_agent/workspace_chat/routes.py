@@ -5,9 +5,9 @@ import logging
 from fastapi import APIRouter, Header, HTTPException
 from sse_starlette.sse import EventSourceResponse
 
-from legal_agent.chat.models import ChatHistoryMessage
 from legal_agent.workspace_chat.agent import WorkspaceChatAgent
 from legal_agent.workspace_chat.models import (
+    ChatHistoryMessage,
     CreateSessionRequest,
     WorkspaceChatConfigUpdate,
     WorkspaceChatHistoryResponse,

@@ -32,8 +32,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from legal_agent.middleware import RequestContextMiddleware
 
 from legal_agent.api.routes import router, set_services
-from legal_agent.chat.agent import ChatAgent
-from legal_agent.chat.routes import chat_router, set_chat_agent
 from legal_agent.clients.rag_client import HTTPRAGClient, MockRAGClient
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.config import get_settings
@@ -64,28 +62,15 @@ _setup_llm_environment()
 
 job_manager: JobManager | None = None
 rag_client: HTTPRAGClient | MockRAGClient | None = None
-chat_agent: ChatAgent | None = None
 workspace_chat_agent: WorkspaceChatAgent | None = None
 
 
-async def _init_chat_agent(retriever: LegalCaseRetriever | None):
-    """Initialize chat agent in background so the server can start accepting requests."""
-    global chat_agent
-    try:
-        chat_agent = ChatAgent(retriever=retriever or LegalCaseRetriever())
-        await chat_agent.initialize(get_legal_db_url())
-        set_chat_agent(chat_agent)
-        logger.info("Chat agent fully initialized")
-    except Exception:
-        logger.exception("Failed to initialize chat agent")
-
-
-async def _init_workspace_chat_agent():
+async def _init_workspace_chat_agent(retriever: LegalCaseRetriever | None):
     """Initialize workspace chat agent in background."""
     global workspace_chat_agent
     try:
         workspace_chat_agent = WorkspaceChatAgent()
-        await workspace_chat_agent.initialize(get_legal_db_url(), rag_client)
+        await workspace_chat_agent.initialize(get_legal_db_url(), rag_client, retriever)
         set_workspace_chat_agent(workspace_chat_agent)
         logger.info("Workspace chat agent fully initialized")
     except Exception:
@@ -97,9 +82,7 @@ async def lifespan(app: FastAPI):
     global job_manager, rag_client
 
     settings = get_settings()
-    chat_models = settings.get_chat_models()
-    models_str = ", ".join(f"{k}={v[0]}" for k, v in chat_models.items())
-    logger.info(f"Starting legal-agent-service (draft={settings.llm_model}, chat=[{models_str}])")
+    logger.info(f"Starting legal-agent-service (draft={settings.llm_model}, chat_default={settings.chat_llm_default_model})")
 
     job_manager = JobManager()
     rag_client = MockRAGClient() if settings.debug else HTTPRAGClient(settings)
@@ -124,19 +107,14 @@ async def lifespan(app: FastAPI):
     )
     set_services(draft_service, summary_service, job_manager, s3_client)
 
-    # Start agent initialization in background to avoid blocking server startup
-    chat_init_task = asyncio.create_task(_init_chat_agent(legal_retriever))
-    workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent())
+    workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent(legal_retriever))
 
     logger.info("Service ready")
     yield
 
     logger.info("Shutting down...")
-    for task in (chat_init_task, workspace_chat_init_task):
-        if not task.done():
-            task.cancel()
-    if chat_agent:
-        await chat_agent.close()
+    if not workspace_chat_init_task.done():
+        workspace_chat_init_task.cancel()
     if workspace_chat_agent:
         await workspace_chat_agent.close()
     close_pool()
@@ -158,7 +136,6 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(RequestContextMiddleware)
     app.include_router(router, prefix="/api/v1", tags=["jobs"])
-    app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
     app.include_router(workspace_chat_router, prefix="/api/v1", tags=["workspace-chat"])
 
     @app.get("/")
