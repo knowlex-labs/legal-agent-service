@@ -42,6 +42,9 @@ class Settings(BaseSettings):
     # Chat LLM default (frontend sends model ID directly)
     chat_llm_default_model: str = "gpt-5-mini-2025-08-07"
 
+    # Web search (Serper API)
+    serper_api_key: str = ""
+
     # Jobs
     job_timeout_seconds: int = 300
     job_max_retries: int = 3
