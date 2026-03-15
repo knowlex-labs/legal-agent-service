@@ -9,7 +9,6 @@ from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, Tool
 from langchain_core.tools import tool
 from langgraph.checkpoint.postgres.aio import AsyncPostgresSaver
 from langgraph.prebuilt import create_react_agent
-from pydantic import BaseModel, Field
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
@@ -82,21 +81,6 @@ STYLE_INSTRUCTIONS = {
         "\n- Trace reasoning step by step."
     ),
 }
-
-
-class CitationDecision(BaseModel):
-    """Whether the response needs external legal citations."""
-    needs_citations: bool = Field(
-        description="True if the answer makes legal claims, references statutes/case law, "
-        "or discusses legal principles that should be backed by authoritative sources. "
-        "False for document edits, summaries, formatting, greetings, or factual answers "
-        "derived purely from uploaded case files."
-    )
-    citation_query: str = Field(
-        default="",
-        description="If needs_citations is true, a concise search query to find "
-        "supporting legal sources. Empty string if needs_citations is false."
-    )
 
 
 def _create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
@@ -224,7 +208,7 @@ class WorkspaceChatAgent:
         full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS:{tone_suffix}{style_suffix}"
 
         web_search_output: str | None = None
-        final_answer_parts: list[str] = []
+        used_legal_tools = False  # track if agent used legal research tools
 
         async for event in graph.astream_events(
             {"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"
@@ -235,12 +219,14 @@ class WorkspaceChatAgent:
                 if isinstance(token, list):
                     token = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in token)
                 if token:
-                    final_answer_parts.append(token)
                     yield {"event": "answer", "data": token.replace("\n", "\\n")}
             elif kind == "on_tool_start":
+                tool_name = event["name"]
+                if tool_name in ("query_case_documents", "legal_case_search"):
+                    used_legal_tools = True
                 yield {
                     "event": "tool_call",
-                    "data": json.dumps({"name": event["name"], "args": event["data"].get("input", {})}),
+                    "data": json.dumps({"name": tool_name, "args": event["data"].get("input", {})}),
                 }
             elif kind == "on_tool_end":
                 output = event["data"].get("output", "")
@@ -248,26 +234,18 @@ class WorkspaceChatAgent:
                     web_search_output = str(output)
                 yield {"event": "tool_result", "data": output}
 
-        # If agent didn't call web search, classify whether citations are needed
-        if not web_search_output and self._web_search_tool:
-            final_answer = "".join(final_answer_parts)
-            if len(final_answer) > 50:
-                try:
-                    model_id = model or get_settings().chat_llm_default_model
-                    classifier = self._get_llm(model_id).with_structured_output(CitationDecision)
-                    decision = await classifier.ainvoke(
-                        f"User question: {message[:300]}\n\nAssistant answer (truncated): {final_answer[:500]}"
-                    )
-                    if decision and decision.needs_citations and decision.citation_query:
-                        search_query = decision.citation_query
-                        yield {
-                            "event": "tool_call",
-                            "data": json.dumps({"name": "legal_web_search", "args": {"query": search_query}}),
-                        }
-                        web_search_output = await self._web_search_tool.ainvoke({"query": search_query})
-                        yield {"event": "tool_result", "data": web_search_output}
-                except Exception as e:
-                    logger.warning(f"[workspace_chat] Citation classifier failed: {e}")
+        # Force citation search if agent used legal tools but skipped web search
+        if not web_search_output and used_legal_tools and self._web_search_tool:
+            try:
+                search_query = message[:200]
+                yield {
+                    "event": "tool_call",
+                    "data": json.dumps({"name": "legal_web_search", "args": {"query": search_query}}),
+                }
+                web_search_output = await self._web_search_tool.ainvoke({"query": search_query})
+                yield {"event": "tool_result", "data": web_search_output}
+            except Exception as e:
+                logger.warning(f"[workspace_chat] Forced citation search failed: {e}")
 
         # Emit structured citations from web search results
         if web_search_output:
