@@ -97,24 +97,40 @@ def _create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
     return query_case_documents
 
 
-_WEB_CITATION_RE = re.compile(
-    r'\[(\d+)\]\s*(.+?)\n'
-    r'Source:\s*(.+?)\n'
-    r'URL:\s*(.+?)\n'
-    r'Snippet:\s*(.+?)\n',
-)
+_BLOCK_SPLIT_RE = re.compile(r'(?=\[\d+\]\s)')
 
 
 def _parse_web_citations(tool_output: str) -> list[dict]:
-    """Extract structured citations from legal_web_search tool output."""
+    """Extract structured citations from legal_web_search tool output using block-based parsing."""
+    blocks = _BLOCK_SPLIT_RE.split(tool_output)
     results = []
-    for m in _WEB_CITATION_RE.finditer(tool_output):
+    for block in blocks:
+        block = block.strip()
+        id_m = re.match(r'\[(\d+)\]\s*(.+)', block)
+        if not id_m:
+            continue
+        cid = int(id_m.group(1))
+        case_name = id_m.group(2).strip()
+
+        def _field(name: str) -> str | None:
+            m = re.search(rf'^{name}:\s*(.+)', block, re.MULTILINE)
+            return m.group(1).strip() if m else None
+
+        source = _field("Source") or "Web"
+        url = _field("URL") or ""
+        snippet = _field("Snippet")
+        citation = _field("Citation")
+        year_str = _field("Year")
+        year = int(year_str) if year_str and year_str.isdigit() else None
+
         results.append({
-            "id": int(m.group(1)),
-            "case_name": m.group(2).strip(),
-            "source": m.group(3).strip(),
-            "url": m.group(4).strip(),
-            "snippet": m.group(5).strip(),
+            "id": cid,
+            "case_name": case_name,
+            "source": source,
+            "url": url,
+            "snippet": snippet,
+            "citation": citation,
+            "year": year,
         })
     return results
 
@@ -208,7 +224,8 @@ class WorkspaceChatAgent:
         full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS:{tone_suffix}{style_suffix}"
 
         web_search_output: str | None = None
-        used_legal_tools = False  # track if agent used legal research tools
+        used_legal_tools = False
+        legal_search_queries: list[str] = []
 
         async for event in graph.astream_events(
             {"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"
@@ -224,6 +241,10 @@ class WorkspaceChatAgent:
                 tool_name = event["name"]
                 if tool_name in ("query_case_documents", "legal_case_search"):
                     used_legal_tools = True
+                if tool_name == "legal_case_search":
+                    q = event["data"].get("input", {}).get("query", "")
+                    if q:
+                        legal_search_queries.append(q)
                 yield {
                     "event": "tool_call",
                     "data": json.dumps({"name": tool_name, "args": event["data"].get("input", {})}),
@@ -237,7 +258,7 @@ class WorkspaceChatAgent:
         # Force citation search if agent used legal tools but skipped web search
         if not web_search_output and used_legal_tools and self._web_search_tool:
             try:
-                search_query = message[:200]
+                search_query = legal_search_queries[-1] if legal_search_queries else message[:200]
                 yield {
                     "event": "tool_call",
                     "data": json.dumps({"name": "legal_web_search", "args": {"query": search_query}}),

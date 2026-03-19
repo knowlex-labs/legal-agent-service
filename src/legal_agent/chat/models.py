@@ -50,3 +50,4 @@ class Citation(BaseModel):
     year: int | None = None
     url: str
     source: str  # "indiankanoon.org", "indiankanoon.org (search)", or "web"
+    snippet: str | None = None

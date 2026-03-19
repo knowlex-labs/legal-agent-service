@@ -5,6 +5,7 @@ databases (SCC Online, Manupatra first, Indian Kanoon as fallback).
 """
 
 import logging
+import re
 
 import httpx
 from langchain_core.tools import tool
@@ -12,6 +13,41 @@ from langchain_core.tools import tool
 from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
+
+_INDIAN_CITE_RE = re.compile(
+    r'(?:'
+    r'\(\d{4}\)\s+\d+\s+SCC(?:\s*\(Cri\))?\s+\d+'       # (2014) 8 SCC 273 / SCC (Cri)
+    r'|AIR\s+\d{4}\s+\w+\s+\d+'                            # AIR 2019 SC 1234
+    r'|\d{4}\s+CrLJ\s+\d+'                                 # 2020 CrLJ 456
+    r'|\d{4}\s+SCR\s+\d+'                                   # 2018 SCR 100
+    r'|\d{4}\s+Bom\s*CR\s+\d+'                              # 2021 Bom CR 789
+    r'|\d{4}\s+SCC\s+OnLine\s+\w+\s+\d+'                   # 2022 SCC OnLine SC 100
+    r')',
+    re.IGNORECASE,
+)
+_YEAR_RE = re.compile(r'\b((?:19|20)\d{2})\b')
+
+_BLOG_URL_SEGMENTS = ('/blog', '/article', '/column', '/news', '/newsline')
+_BLOG_TITLE_KEYWORDS = ('blog', 'editorial', 'opinion piece')
+
+
+def _extract_indian_citation(title: str, snippet: str) -> tuple[str | None, int | None]:
+    combined = f"{title} {snippet}"
+    cite_match = _INDIAN_CITE_RE.search(combined)
+    citation = cite_match.group(0).strip() if cite_match else None
+    year_match = _YEAR_RE.search(combined)
+    year = int(year_match.group(1)) if year_match else None
+    return citation, year
+
+
+def _is_judgment_url(url: str, title: str) -> bool:
+    url_lower = url.lower()
+    if any(seg in url_lower for seg in _BLOG_URL_SEGMENTS):
+        return False
+    title_lower = title.lower()
+    if any(kw in title_lower for kw in _BLOG_TITLE_KEYWORDS):
+        return False
+    return True
 
 # Priority order: SCC Online and Manupatra first, Indian Kanoon as fallback
 SITE_SCOPED_SOURCES = [
@@ -71,9 +107,14 @@ def create_web_search_tool():
                 is_high = domain in ("scconline.com", "manupatra.com")
                 for r in results:
                     url = r.get("link", "")
-                    if url and url not in seen_urls:
+                    title = r.get("title", "")
+                    if url and url not in seen_urls and _is_judgment_url(url, title):
                         seen_urls.add(url)
                         r["_source"] = source_name
+                        snippet = r.get("snippet", "")
+                        citation, year = _extract_indian_citation(title, snippet)
+                        r["_citation"] = citation
+                        r["_year"] = year
                         (high if is_high else low).append(r)
 
         # High-priority (SCC/Manupatra) first, then low-priority
@@ -84,12 +125,17 @@ def create_web_search_tool():
 
         parts = [f"Found {len(selected)} sources:\n"]
         for i, r in enumerate(selected, 1):
-            parts.append(
+            block = (
                 f"[{i}] {r.get('title', 'Untitled')}\n"
                 f"Source: {r.get('_source', 'Web')}\n"
                 f"URL: {r.get('link', '')}\n"
                 f"Snippet: {r.get('snippet', '')}\n"
             )
+            if r.get("_citation"):
+                block += f"Citation: {r['_citation']}\n"
+            if r.get("_year"):
+                block += f"Year: {r['_year']}\n"
+            parts.append(block)
 
         parts.append(
             "\n---\nCite sources using [1], [2], etc. "
