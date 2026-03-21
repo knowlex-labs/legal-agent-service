@@ -112,10 +112,10 @@ class BaseDraftingAgent:
 
     def _build_graph(self, tools: list):
         """Build a LangGraph workflow for drafting."""
-        llm = init_chat_model(self.model_name, model_provider=self.provider)
+        llm = init_chat_model(self.model_name, model_provider=self.provider, max_tokens=8192)
         llm_with_tools = llm.bind_tools(tools) if tools else llm
         llm_structured = init_chat_model(
-            self.model_name, model_provider=self.provider
+            self.model_name, model_provider=self.provider, max_tokens=8192
         ).with_structured_output(GeneratedDocument)
         system_msg = SystemMessage(content=self.system_prompt)
 
@@ -165,7 +165,7 @@ class BaseDraftingAgent:
 
     async def draft(self, deps: DraftingDependencies) -> GeneratedDocument:
         """Generate a legal document draft."""
-        logger.debug(f"Starting draft: title='{deps.title}', file_ids={deps.file_ids}")
+        logger.info(f"[draft] Starting: title='{deps.title}' | agent={self.__class__.__name__} | files={len(deps.file_ids)}")
 
         examples_section = ""
         if deps.examples:
@@ -220,7 +220,8 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
 {rag_context}
 === END REFERENCE DOCUMENTS CONTEXT ===
 """
-                logger.debug(f"Pre-fetched RAG context: {len(rag_context)} chars for {len(deps.file_ids)} files")
+            else:
+                logger.warning(f"[draft] RAG returned empty context for file_ids={deps.file_ids}")
 
         prompt = f"""Draft the following document using ONLY the information provided.
 
@@ -259,9 +260,6 @@ Generate a COMPLETE, court-ready document following the EXACT markdown template 
         if deps.retriever:
             tools.append(create_legal_search_tool(deps.retriever))
 
-        # Build and invoke graph
         graph = self._build_graph(tools)
         result = await graph.ainvoke({"messages": [HumanMessage(content=prompt)], "document": None})
-
-        logger.debug(f"Draft completed: {result['document'].document_type.value}")
         return result["document"]
