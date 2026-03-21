@@ -70,9 +70,8 @@ class SummaryGenerator:
     ) -> str:
         """Fetch document context from RAG, assemble with drafts/highlights, call LLM."""
         settings = get_settings()
-        chat_models = settings.get_chat_models()
-        provider_key = model if model in chat_models else settings.chat_llm_default_provider
-        model_name, langchain_provider = chat_models[provider_key]
+        model_id = model if model else settings.chat_llm_default_model
+        langchain_provider = settings.get_langchain_provider_for_model(model_id)
 
         # Step 1: Retrieve document context from RAG engine
         document_context = ""
@@ -90,10 +89,10 @@ class SummaryGenerator:
         context = self._assemble_context(document_context, drafts, chat_highlights)
 
         # Step 3: Call LLM
-        llm = init_chat_model(model_name, model_provider=langchain_provider)
+        llm = init_chat_model(model_id, model_provider=langchain_provider)
 
         logger.info(
-            f"[summary] Generating summary | model={provider_key} ({model_name}) | "
+            f"[summary] Generating summary | model={model_id} | "
             f"files={len(file_ids)} drafts={len(drafts)} highlights={len(chat_highlights)}"
         )
 
@@ -102,7 +101,10 @@ class SummaryGenerator:
             HumanMessage(content=context),
         ])
 
-        return response.content
+        content = response.content
+        if isinstance(content, list):
+            return "".join(part if isinstance(part, str) else part.get("text", "") for part in content)
+        return content
 
     def _assemble_context(
         self,

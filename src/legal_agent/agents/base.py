@@ -6,7 +6,6 @@ from typing import Annotated
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
-from langchain_core.tools import tool
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
@@ -94,23 +93,6 @@ class DraftAgentState(TypedDict):
     document: GeneratedDocument | None
 
 
-def create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
-    """Create a RAG query tool closed over runtime dependencies."""
-
-    @tool
-    async def query_reference_documents(query: str) -> str:
-        """Query reference documents for relevant context."""
-        logger.debug(f"RAG tool called with query: {query[:50]}... | user={user_id}")
-        context = await rag_client.query(file_ids, query, user_id=user_id)
-
-        if not context:
-            logger.debug("RAG returned no context")
-            return "No relevant context found in the reference documents."
-
-        logger.debug(f"RAG returned {len(context)} chars of context")
-        return context
-
-    return query_reference_documents
 
 
 class BaseDraftingAgent:
@@ -224,6 +206,22 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
 === END LANGUAGE INSTRUCTIONS ===
 """
 
+        # Pre-fetch RAG context deterministically — no tool call needed
+        rag_section = ""
+        if deps.file_ids:
+            rag_context = await deps.rag_client.query(
+                file_ids=deps.file_ids,
+                query=f"facts parties dates amounts terms relevant to: {deps.title}",
+                user_id=deps.user_id,
+            )
+            if rag_context:
+                rag_section = f"""
+=== REFERENCE DOCUMENTS CONTEXT ===
+{rag_context}
+=== END REFERENCE DOCUMENTS CONTEXT ===
+"""
+                logger.debug(f"Pre-fetched RAG context: {len(rag_context)} chars for {len(deps.file_ids)} files")
+
         prompt = f"""Draft the following document using ONLY the information provided.
 
 Document Type: {deps.title}
@@ -235,9 +233,7 @@ Use these EXACT details - names, ages, addresses, amounts, dates - in your draft
 {deps.instructions}
 
 === END STRUCTURED INPUT ===
-{language_section}{examples_section}
-If reference documents are available, use the query_reference_documents tool to gather
-relevant context before drafting.
+{language_section}{rag_section}{examples_section}
 
 If legal_case_search is available, use it for EACH ground requiring case law support.
 Query specifically: e.g., "anticipatory bail Section 438 factors", "bail default Section 167 right",
@@ -259,9 +255,7 @@ Query specifically: e.g., "anticipatory bail Section 438 factors", "bail default
 
 Generate a COMPLETE, court-ready document following the EXACT markdown template from your specialized prompt."""
 
-        # Create tool with runtime deps
-        rag_tool = create_rag_tool(deps.rag_client, deps.file_ids, deps.user_id)
-        tools = [rag_tool]
+        tools = []
         if deps.retriever:
             tools.append(create_legal_search_tool(deps.retriever))
 

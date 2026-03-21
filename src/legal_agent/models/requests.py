@@ -117,7 +117,7 @@ class CreateSummaryJobRequest(BaseModel):
     chat_highlights: list[str] = Field(
         default_factory=list, description="Key conversation points"
     )
-    model: Literal["openai", "gemini"] = "openai"
+    model: str = "gemini-3.1-flash-lite-preview"
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Optional extra context or parameters"
     )
