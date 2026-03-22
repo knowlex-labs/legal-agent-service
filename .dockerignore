@@ -1,0 +1,17 @@
+.venv/
+.git/
+.gitignore
+.env
+.env.*
+!.env.example
+.pytest_cache/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+tests/
+docs/
+*.md
+postman_collection.json
+render.yaml
+rippling-painting-liskov.md
