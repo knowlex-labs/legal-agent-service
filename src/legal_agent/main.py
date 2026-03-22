@@ -32,6 +32,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from legal_agent.middleware import RequestContextMiddleware
 
 from legal_agent.api.routes import router, set_services
+from legal_agent.causelist.routes import causelist_router
 from legal_agent.clients.rag_client import HTTPRAGClient, MockRAGClient
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.config import get_settings
@@ -137,6 +138,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     app.include_router(router, prefix="/api/v1", tags=["jobs"])
     app.include_router(workspace_chat_router, prefix="/api/v1", tags=["workspace-chat"])
+    app.include_router(causelist_router, prefix="/api/v1", tags=["causelist"])
 
     @app.get("/")
     async def root():
