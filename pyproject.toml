@@ -25,6 +25,7 @@ dependencies = [
     "sse-starlette>=2.0.0",
     "pyyaml>=6.0",
     "boto3>=1.34.0",
+    "playwright>=1.40.0",
 ]
 
 [project.optional-dependencies]
