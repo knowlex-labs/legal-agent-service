@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     cors_allowed_origins: list[str] = Field(default=["https://app.knowlex.ai"])
     trust_forwarded_headers: bool = False
 
+    # Playwright
+    playwright_headless: bool = True
+
     # S3
     s3_access_key: str = ""
     s3_secret_key: str = ""

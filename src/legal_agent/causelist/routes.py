@@ -2,15 +2,12 @@
 
 import asyncio
 import logging
-import re
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter
 from pydantic import BaseModel
 
-from legal_agent.causelist.connection import get_connection
-from legal_agent.causelist.db import insert_cause_list_entries
 from legal_agent.causelist.scraper import scrape_cause_list
 
 logger = logging.getLogger(__name__)
@@ -26,92 +23,74 @@ class TriggerRequest(BaseModel):
     date: str | None = None  # YYYY-MM-DD, defaults to today IST
 
 
-class CaseDetail(BaseModel):
-    case_number: str
-    case_type: str | None
-    case_status: str  # ACTIVE / PENDING / CLOSED
-    case_title: str | None
+class CauseListEntry(BaseModel):
+    cause_list_date: str
+    bench: str
+    court: str
+    case_number: str | None
     judge_name: str | None
-    court_name: str
-    court_location: str | None
-    next_hearing_date: str | None  # YYYY-MM-DD
+    hearing_type: str | None
+    court_hall_no: str | None
+    serial_number: int | None
+    case_status: str
+    case_title: str | None
+    next_hearing_date: str | None
     cnr: str | None
+    metadata: dict
 
 
 class TriggerResponse(BaseModel):
-    inserted: int
-    duplicates: int
     total: int
-    cases: list[CaseDetail]
+    entries: list[CauseListEntry]
 
 
-def _build_cases(entries: list[dict], bench: str) -> list[CaseDetail]:
-    seen: set[str] = set()
-    cases: list[CaseDetail] = []
+def _build_entries(entries: list[dict], date_str: str, bench: str) -> list[CauseListEntry]:
+    result = []
     for entry in entries:
-        case_number = entry.get("case_number")
         detail = entry.get("case_detail") or {}
-        if not case_number or not detail or case_number in seen:
-            continue
-        seen.add(case_number)
-
-        # Extract case type prefix from e.g. "MCRC - 9947/2026"
-        m = re.match(r"^([A-Z_]+)", case_number.strip())
-        case_type = m.group(1) if m else None
-
-        # Build case title from petitioner/respondent
-        petitioner = detail.get("petitioner") or ""
-        respondent = detail.get("respondent") or ""
+        petitioner = (detail.get("petitioner") or "").strip()
+        respondent = (detail.get("respondent") or "").strip()
         if petitioner and respondent:
             case_title = f"{petitioner} vs {respondent}"
         elif petitioner:
             case_title = petitioner
         else:
             case_title = None
-
-        cases.append(CaseDetail(
-            case_number=case_number,
-            case_type=case_type,
+        result.append(CauseListEntry(
+            cause_list_date=date_str,
+            bench=bench,
+            court="MPHC",
+            case_number=entry.get("case_number"),
+            judge_name=entry.get("judge_name"),
+            hearing_type=entry.get("hearing_type"),
+            court_hall_no=entry.get("metadata", {}).get("court_hall_no"),
+            serial_number=entry.get("serial_number"),
             case_status=detail.get("case_status", "PENDING"),
             case_title=case_title,
-            judge_name=detail.get("judge_name"),
-            court_name="MPHC",
-            court_location=bench,
             next_hearing_date=detail.get("next_hearing_date"),
             cnr=detail.get("cnr"),
+            metadata=entry.get("metadata", {}),
         ))
-    return cases
+    return result
 
 
 def _run_scrape(req: TriggerRequest) -> TriggerResponse:
     date_str = req.date or datetime.now(ZoneInfo("Asia/Kolkata")).strftime("%Y-%m-%d")
 
-    entries = scrape_cause_list(
+    raw_entries = scrape_cause_list(
         bench=req.bench,
         lawyer_name=req.lawyerName,
         date_str=date_str,
         hearing_type=req.hearingType,
     )
 
-    if not entries:
+    if not raw_entries:
         logger.info("No entries found for user=%s bench=%s date=%s", req.userId, req.bench, date_str)
-        return TriggerResponse(inserted=0, duplicates=0, total=0, cases=[])
+        return TriggerResponse(total=0, entries=[])
 
-    for entry in entries:
-        entry["user_id"] = req.userId
-        entry["cause_list_date"] = date_str
-        entry["bench"] = req.bench
-        entry["court"] = "MPHC"
-        entry["lawyer_name"] = req.lawyerName
-        entry["court_hall_no"] = entry.get("metadata", {}).get("court_hall_no")
-
-    with get_connection() as conn:
-        inserted = insert_cause_list_entries(conn, entries)
-
-    cases = _build_cases(entries, req.bench)
-    duplicates = len(entries) - inserted
-    logger.info("Done user=%s: inserted=%d duplicates=%d total=%d cases=%d", req.userId, inserted, duplicates, len(entries), len(cases))
-    return TriggerResponse(inserted=inserted, duplicates=duplicates, total=len(entries), cases=cases)
+    entries = _build_entries(raw_entries, date_str, req.bench)
+    logger.info("Done user=%s bench=%s date=%s total=%d", req.userId, req.bench, date_str, len(entries))
+    return TriggerResponse(total=len(entries), entries=entries)
 
 
 @causelist_router.post("/causelist/trigger", response_model=TriggerResponse)

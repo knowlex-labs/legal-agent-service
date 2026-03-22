@@ -32,6 +32,6 @@ RUN /app/.venv/bin/playwright install chromium --with-deps
 
 USER appuser
 
-EXPOSE 8001
+EXPOSE 8080
 
-CMD ["python", "-m", "uvicorn", "legal_agent.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD ["sh", "-c", "python -m uvicorn legal_agent.main:app --host 0.0.0.0 --port ${PORT:-8080}"]

@@ -43,6 +43,8 @@ from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
 from legal_agent.summary.generator import SummaryGenerator
 from legal_agent.summary.service import SummaryService
+from legal_agent.research_chat.agent import ResearchChatAgent
+from legal_agent.research_chat.routes import research_chat_router, set_research_chat_agent
 from legal_agent.workspace_chat.agent import WorkspaceChatAgent
 from legal_agent.workspace_chat.routes import set_workspace_chat_agent, workspace_chat_router
 
@@ -64,6 +66,7 @@ _setup_llm_environment()
 job_manager: JobManager | None = None
 rag_client: HTTPRAGClient | MockRAGClient | None = None
 workspace_chat_agent: WorkspaceChatAgent | None = None
+research_chat_agent: ResearchChatAgent | None = None
 
 
 async def _init_workspace_chat_agent():
@@ -76,6 +79,18 @@ async def _init_workspace_chat_agent():
         logger.info("Workspace chat agent fully initialized")
     except Exception:
         logger.exception("Failed to initialize workspace chat agent")
+
+
+async def _init_research_chat_agent(retriever):
+    """Initialize research chat agent in background."""
+    global research_chat_agent
+    try:
+        research_chat_agent = ResearchChatAgent()
+        await research_chat_agent.initialize(get_legal_db_url(), retriever)
+        set_research_chat_agent(research_chat_agent)
+        logger.info("Research chat agent fully initialized")
+    except Exception:
+        logger.exception("Failed to initialize research chat agent")
 
 
 @asynccontextmanager
@@ -109,6 +124,7 @@ async def lifespan(app: FastAPI):
     set_services(draft_service, summary_service, job_manager, s3_client)
 
     workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent())
+    research_chat_init_task = asyncio.create_task(_init_research_chat_agent(legal_retriever))
 
     logger.info("Service ready")
     yield
@@ -116,8 +132,12 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
     if not workspace_chat_init_task.done():
         workspace_chat_init_task.cancel()
+    if not research_chat_init_task.done():
+        research_chat_init_task.cancel()
     if workspace_chat_agent:
         await workspace_chat_agent.close()
+    if research_chat_agent:
+        await research_chat_agent.close()
     close_pool()
     if job_manager:
         await job_manager.cleanup()
@@ -138,6 +158,7 @@ def create_app() -> FastAPI:
     app.add_middleware(RequestContextMiddleware)
     app.include_router(router, prefix="/api/v1", tags=["jobs"])
     app.include_router(workspace_chat_router, prefix="/api/v1", tags=["workspace-chat"])
+    app.include_router(research_chat_router, prefix="/api/v1", tags=["research-chat"])
     app.include_router(causelist_router, prefix="/api/v1", tags=["causelist"])
 
     @app.get("/")

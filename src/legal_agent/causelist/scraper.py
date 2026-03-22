@@ -11,6 +11,9 @@ import time
 from datetime import date, datetime
 
 from playwright.sync_api import sync_playwright
+from playwright_stealth import stealth as stealth_sync
+
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -45,13 +48,26 @@ def scrape_cause_list(
     entries = []
 
     with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
-        context = browser.new_context(ignore_https_errors=True)
+        browser = pw.chromium.launch(
+            headless=get_settings().playwright_headless,
+            args=["--disable-blink-features=AutomationControlled"],
+        )
+        context = browser.new_context(
+            ignore_https_errors=True,
+            user_agent=(
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/122.0.0.0 Safari/537.36"
+            ),
+            viewport={"width": 1280, "height": 800},
+            locale="en-IN",
+        )
         page = context.new_page()
+        stealth_sync(page)
 
         logger.info(f"Navigating to {CAUSELIST_URL}")
-        page.goto(CAUSELIST_URL, wait_until="networkidle", timeout=120000)
-        time.sleep(2)
+        page.goto(CAUSELIST_URL, wait_until="domcontentloaded", timeout=120000)
+        page.wait_for_timeout(3000)
 
         # Click search tab first (Lawyer / Judge / Partyname)
         logger.info(f"Clicking search tab: {search_tab}")
@@ -116,9 +132,10 @@ def scrape_case_detail(context, case_url: str, today_str: str) -> dict:
     """
     detail: dict = {}
     page = context.new_page()
+    stealth_sync(page)
     try:
-        page.goto(case_url, wait_until="networkidle", timeout=60000)
-        time.sleep(2)
+        page.goto(case_url, wait_until="domcontentloaded", timeout=60000)
+        page.wait_for_timeout(2000)
 
         # Build a label → value map from the details table
         label_map: dict[str, str] = {}
@@ -165,8 +182,8 @@ def scrape_case_detail(context, case_url: str, today_str: str) -> dict:
         listing_tab = page.locator("a:has-text('Listing')").first
         if listing_tab.count() > 0:
             listing_tab.click()
-            page.wait_for_load_state("networkidle", timeout=30000)
-            time.sleep(1)
+            page.wait_for_load_state("domcontentloaded", timeout=30000)
+            page.wait_for_timeout(1000)
             today = date.fromisoformat(today_str)
             for lrow in page.query_selector_all("table tr"):
                 lcells = lrow.query_selector_all("td")
