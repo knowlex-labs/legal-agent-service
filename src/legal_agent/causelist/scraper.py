@@ -8,13 +8,14 @@ and extracts cause list entries from the results table.
 import logging
 import re
 import time
-from datetime import datetime
+from datetime import date, datetime
 
 from playwright.sync_api import sync_playwright
 
 logger = logging.getLogger(__name__)
 
 CAUSELIST_URL = "https://mphc.gov.in/causelist"
+MPHC_BASE_URL = "https://mphc.gov.in"
 
 
 def scrape_cause_list(
@@ -94,9 +95,97 @@ def scrape_cause_list(
         entries = extract_entries_from_page(page, search_tab)
         logger.info(f"Extracted {len(entries)} entries")
 
+        # Enrich each entry with case details from the case detail page
+        for entry in entries:
+            case_url = entry.get("case_url")
+            if case_url:
+                logger.info(f"Scraping case detail for {entry.get('case_number')}")
+                entry["case_detail"] = scrape_case_detail(context, case_url, date_str)
+
         browser.close()
 
     return entries
+
+
+def scrape_case_detail(context, case_url: str, today_str: str) -> dict:
+    """
+    Open the MPHC case detail page and extract structured case information.
+
+    Navigates to the Details tab then the Listing tab to find the next hearing date.
+    Returns a dict with cnr, case_status, judge_name, petitioner, respondent, next_hearing_date.
+    """
+    detail: dict = {}
+    page = context.new_page()
+    try:
+        page.goto(case_url, wait_until="networkidle", timeout=60000)
+        time.sleep(2)
+
+        # Build a label → value map from the details table
+        label_map: dict[str, str] = {}
+        rows = page.query_selector_all("table tr")
+        for row in rows:
+            cells = row.query_selector_all("td")
+            if len(cells) >= 2:
+                lbl = (cells[0].inner_text() or "").strip().lower().rstrip(".")
+                val = (cells[1].inner_text() or "").strip()
+                if lbl:
+                    label_map[lbl] = val
+
+        # CNR from "Case No." row
+        case_no_raw = label_map.get("case no", "") or label_map.get("case no.", "")
+        cnr_match = re.search(r"CNR[:\s]*([A-Z0-9]+)", case_no_raw, re.IGNORECASE)
+        detail["cnr"] = cnr_match.group(1) if cnr_match else None
+
+        # Status mapping
+        status_raw = (label_map.get("status", "") or "").lower()
+        if "disposed" in status_raw:
+            detail["case_status"] = "CLOSED"
+        elif "pending" in status_raw:
+            detail["case_status"] = "PENDING"
+        else:
+            detail["case_status"] = "ACTIVE"
+
+        # Judge name from "Last Listed On" — extract bracket content containing JUSTICE
+        last_listed = label_map.get("last listed on", "")
+        judge_match = re.search(r"\[([^\]]*JUSTICE[^\]]*)\]", last_listed, re.IGNORECASE)
+        detail["judge_name"] = judge_match.group(1).strip() if judge_match else None
+
+        # Petitioner — first line, strip leading numbering like "1 "
+        petitioner_raw = label_map.get("petitioner(s)", "") or label_map.get("petitioners", "")
+        first_pet = petitioner_raw.split("\n")[0].strip() if petitioner_raw else ""
+        detail["petitioner"] = re.sub(r"^\d+\s+", "", first_pet).strip() or None
+
+        # Respondent — first line, strip leading numbering
+        respondent_raw = label_map.get("respondent(s)", "") or label_map.get("respondents", "")
+        first_res = respondent_raw.split("\n")[0].strip() if respondent_raw else ""
+        detail["respondent"] = re.sub(r"^\d+\s+", "", first_res).strip() or None
+
+        # Next hearing date from Listing tab
+        detail["next_hearing_date"] = None
+        listing_tab = page.locator("a:has-text('Listing')").first
+        if listing_tab.count() > 0:
+            listing_tab.click()
+            page.wait_for_load_state("networkidle", timeout=30000)
+            time.sleep(1)
+            today = date.fromisoformat(today_str)
+            for lrow in page.query_selector_all("table tr"):
+                lcells = lrow.query_selector_all("td")
+                if lcells:
+                    date_text = (lcells[0].inner_text() or "").strip()
+                    try:
+                        d = datetime.strptime(date_text, "%d-%m-%Y").date()
+                        if d > today:
+                            detail["next_hearing_date"] = d.isoformat()
+                            break
+                    except ValueError:
+                        pass
+
+    except Exception as e:
+        logger.warning("Failed to scrape case detail from %s: %s", case_url, e)
+    finally:
+        page.close()
+
+    return detail
 
 
 def extract_entries_from_page(page, search_tab: str = "Lawyer") -> list[dict]:
@@ -183,9 +272,15 @@ def extract_entries_from_page(page, search_tab: str = "Lawyer") -> list[dict]:
             if first_cell_text and first_cell_text.isdigit():
                 # Petitioner row — start a new entry
                 cell_texts = [(c.inner_text() or "").strip() for c in cells]
+                # Capture case detail URL from the link on the case number cell
+                case_link = cells[2].query_selector("a") if len(cells) > 2 else None
+                case_href = case_link.get_attribute("href") if case_link else None
+                if case_href and not case_href.startswith("http"):
+                    case_href = MPHC_BASE_URL + case_href
                 entry = {
                     "serial_number": int(first_cell_text),
                     "case_number": cell_texts[2] if len(cell_texts) > 2 else None,
+                    "case_url": case_href,
                     "judge_name": current_judge,
                     "hearing_type": current_hearing_type,
                     "metadata": {
