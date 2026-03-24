@@ -11,7 +11,7 @@ import time
 from datetime import date, datetime
 
 from playwright.sync_api import sync_playwright
-from playwright_stealth import stealth as stealth_sync
+from playwright_stealth import Stealth
 
 from legal_agent.config import get_settings
 
@@ -62,8 +62,9 @@ def scrape_cause_list(
             viewport={"width": 1280, "height": 800},
             locale="en-IN",
         )
+        stealth = Stealth()
         page = context.new_page()
-        stealth_sync(page)
+        stealth.apply_stealth_sync(page)
 
         logger.info(f"Navigating to {CAUSELIST_URL}")
         page.goto(CAUSELIST_URL, wait_until="domcontentloaded", timeout=120000)
@@ -131,8 +132,9 @@ def scrape_case_detail(context, case_url: str, today_str: str) -> dict:
     Returns a dict with cnr, case_status, judge_name, petitioner, respondent, next_hearing_date.
     """
     detail: dict = {}
+    stealth = Stealth()
     page = context.new_page()
-    stealth_sync(page)
+    stealth.apply_stealth_sync(page)
     try:
         page.goto(case_url, wait_until="domcontentloaded", timeout=60000)
         page.wait_for_timeout(2000)
