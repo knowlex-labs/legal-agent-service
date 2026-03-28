@@ -35,13 +35,106 @@ class RAGClient(ABC):
         pass
 
 
+class LocalRAGClient(RAGClient):
+    """In-process RAG client — calls QueryService directly without HTTP overhead.
+
+    Used when the rag-engine code is co-located in the same process (merged service).
+    """
+
+    def __init__(self):
+        # Lazy-import to avoid circular imports at module load time
+        self._query_service = None
+        logger.info("Initialized LocalRAGClient (in-process RAG)")
+
+    def _get_query_service(self):
+        if self._query_service is None:
+            from legal_agent.rag_engine.services.query_service import QueryService
+            self._query_service = QueryService()
+        return self._query_service
+
+    async def query(
+        self,
+        file_ids: list[str],
+        query: str,
+        user_id: str,
+    ) -> str:
+        """Query RAG engine and return formatted context string.
+
+        Calls QueryService.retrieve_context directly in-process.
+        Collection is derived as 'user_{user_id}' to match Qdrant naming convention.
+        """
+        if not query:
+            logger.debug("Empty query, skipping RAG retrieval")
+            return ""
+
+        collection = _collection_for_user(user_id)
+
+        filters_file_ids = file_ids if file_ids else None
+
+        logger.debug(
+            f"LocalRAG request: query='{query[:50]}...' user={user_id} "
+            f"collection={collection} file_ids={file_ids}"
+        )
+
+        try:
+            query_service = self._get_query_service()
+            results = await query_service.retrieve_context(
+                query=query,
+                user_id=collection,
+                top_k=10,
+                file_ids=filters_file_ids,
+                content_type="legal",
+            )
+
+            if not results:
+                logger.info(f"No results from RAG for query: {query[:50]}...")
+                return ""
+
+            logger.info(f"RAG returned {len(results)} chunks")
+            return self._format_chunks(results)
+
+        except Exception as e:
+            logger.error(f"LocalRAG request failed: {e}")
+            return ""
+
+    def _format_chunks(self, chunks: list[dict]) -> str:
+        """Format RAG chunks into a context string for the LLM."""
+        context_parts = []
+
+        for chunk in chunks:
+            text = chunk.get("text", "")
+            if not text:
+                continue
+
+            score = chunk.get("score", 0)
+            page = chunk.get("page_start")
+            concepts = chunk.get("key_terms", [])
+
+            header = f"[Relevance: {score:.2f}]"
+            if page:
+                header += f" [Page: {page}]"
+            if concepts:
+                header += f" [Concepts: {', '.join(concepts[:3])}]"
+
+            context_parts.append(f"{header}\n{text}")
+
+        return "\n\n---\n\n".join(context_parts)
+
+    async def close(self) -> None:
+        pass
+
+
 class HTTPRAGClient(RAGClient):
-    """HTTP client for RAG engine /api/v1/collections/{collection}/retrieve endpoint."""
+    """HTTP client for RAG engine /api/v1/collections/{collection}/retrieve endpoint.
+
+    Kept for backwards-compatibility / standalone deployments where rag-engine
+    is still running as a separate service.
+    """
 
     def __init__(self, settings: Settings):
         self.base_url = settings.rag_engine_base_url.rstrip("/")
         self._client: httpx.AsyncClient | None = None
-        logger.info(f"Initialized RAG client with base_url={self.base_url}")
+        logger.info(f"Initialized HTTPRAGClient with base_url={self.base_url}")
 
     async def _get_client(self) -> httpx.AsyncClient:
         if self._client is None:
