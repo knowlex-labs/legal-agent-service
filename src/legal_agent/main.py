@@ -33,7 +33,8 @@ from legal_agent.middleware import RequestContextMiddleware
 
 from legal_agent.api.routes import router, set_services
 from legal_agent.causelist.routes import causelist_router
-from legal_agent.clients.rag_client import HTTPRAGClient, MockRAGClient
+from legal_agent.clients.rag_client import HTTPRAGClient, LocalRAGClient, MockRAGClient
+from legal_agent.rag_engine.api.routes.collections import router as rag_collections_router
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.config import get_settings
 from legal_agent.legal_retrieval import LegalCaseRetriever
@@ -62,7 +63,7 @@ def _setup_llm_environment() -> None:
 _setup_llm_environment()
 
 job_manager: JobManager | None = None
-rag_client: HTTPRAGClient | MockRAGClient | None = None
+rag_client: LocalRAGClient | HTTPRAGClient | MockRAGClient | None = None
 workspace_chat_agent: WorkspaceChatAgent | None = None
 
 
@@ -86,7 +87,8 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting legal-agent-service (draft={settings.llm_model}, chat_default={settings.chat_llm_default_model})")
 
     job_manager = JobManager()
-    rag_client = MockRAGClient() if settings.debug else HTTPRAGClient(settings)
+    # RAG engine is now co-located — use direct in-process client (no HTTP overhead)
+    rag_client = MockRAGClient() if settings.debug else LocalRAGClient()
 
     legal_retriever: LegalCaseRetriever | None = None
     try:
@@ -121,7 +123,7 @@ async def lifespan(app: FastAPI):
     close_pool()
     if job_manager:
         await job_manager.cleanup()
-    if isinstance(rag_client, HTTPRAGClient):
+    if rag_client and hasattr(rag_client, "close"):
         await rag_client.close()
 
 
@@ -139,6 +141,7 @@ def create_app() -> FastAPI:
     app.include_router(router, prefix="/api/v1", tags=["jobs"])
     app.include_router(workspace_chat_router, prefix="/api/v1", tags=["workspace-chat"])
     app.include_router(causelist_router, prefix="/api/v1", tags=["causelist"])
+    app.include_router(rag_collections_router, prefix="/api/v1/collections", tags=["rag"])
 
     @app.get("/")
     async def root():
