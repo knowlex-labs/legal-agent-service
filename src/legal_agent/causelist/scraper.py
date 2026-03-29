@@ -10,8 +10,6 @@ import re
 import time
 from datetime import date, datetime
 
-from playwright.sync_api import sync_playwright
-
 logger = logging.getLogger(__name__)
 
 CAUSELIST_URL = "https://mphc.gov.in/causelist"
@@ -38,6 +36,9 @@ def scrape_cause_list(
     Returns:
         List of entry dicts with case details and metadata.
     """
+    # Import here so the API process can start without Playwright (e.g. Render) until this endpoint runs.
+    from playwright.sync_api import sync_playwright
+
     # Convert ISO date to DD-MM-YYYY for the website form
     date_obj = datetime.strptime(date_str, "%Y-%m-%d")
     dd_mm_yyyy = date_obj.strftime("%d-%m-%Y")
