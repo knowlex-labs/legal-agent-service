@@ -42,7 +42,9 @@ dependencies = [
     "beautifulsoup4>=4.12.3",
     "lxml>=5.1.0",
     "readability-lxml>=0.8.1",
-    "numpy>=1.24.0",
+    # NumPy 2.x avoids broken/partial 1.26 installs that raise
+    # ImportError: cannot import name 'matrix_power' from 'numpy.linalg' (unknown location)
+    "numpy>=2.1.0,<3",
 ]
 
 [project.optional-dependencies]
@@ -56,11 +58,13 @@ dev = [
 legal-agent = "legal_agent.main:run"
 
 [build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
 
-[tool.hatch.build.targets.wheel]
-packages = ["src/legal_agent"]
+# Hatchling + uv editable used `_legal_agent_service.pth`; Python 3.11+ skips underscore .pth
+# files, so `import legal_agent` broke. Setuptools editable uses .pth names Python applies.
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.ruff]
 line-length = 100

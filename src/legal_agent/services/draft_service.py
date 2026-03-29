@@ -3,12 +3,22 @@
 import logging
 import re
 
+from legal_agent.agents.anticipatory_bail_agent import AnticipatoryBailAgent
+from legal_agent.agents.application_agent import ApplicationAgent
 from legal_agent.agents.bail_agent import BailApplicationAgent
 from legal_agent.agents.base import BaseDraftingAgent, DraftingDependencies
+from legal_agent.agents.consumer_complaint_agent import ConsumerComplaintAgent
 from legal_agent.agents.contract_agent import ContractAgent
 from legal_agent.agents.court_filing_agent import CourtFilingAgent
 from legal_agent.agents.criminal_appeal_agent import CriminalAppealAgent
+from legal_agent.agents.execution_petition_agent import ExecutionPetitionAgent
 from legal_agent.agents.notice_agent import NoticeAgent
+from legal_agent.agents.patent_agent import PatentAgent
+from legal_agent.agents.quashing_petition_agent import QuashingPetitionAgent
+from legal_agent.agents.revision_petition_agent import RevisionPetitionAgent
+from legal_agent.agents.slp_agent import SLPAgent
+from legal_agent.agents.written_arguments_agent import WrittenArgumentsAgent
+from legal_agent.agents.written_statement_agent import WrittenStatementAgent
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import Settings
@@ -56,6 +66,7 @@ class DraftService:
         # Initialize agents based on settings
         model, provider = self._get_model_config()
         self._agents: dict[DocumentType, BaseDraftingAgent] = {
+            # Existing document types
             DocumentType.CONTRACT: ContractAgent(model, provider),
             DocumentType.AGREEMENT: ContractAgent(model, provider),
             DocumentType.LEGAL_NOTICE: NoticeAgent(model, provider),
@@ -65,6 +76,17 @@ class DraftService:
             DocumentType.APPLICATION: CourtFilingAgent(model, provider),
             DocumentType.BAIL_APPLICATION: BailApplicationAgent(model, provider),
             DocumentType.CRIMINAL_APPEAL: CriminalAppealAgent(model, provider),
+            # New document types
+            DocumentType.SLP: SLPAgent(model, provider),
+            DocumentType.QUASHING_PETITION: QuashingPetitionAgent(model, provider),
+            DocumentType.ANTICIPATORY_BAIL: AnticipatoryBailAgent(model, provider),
+            DocumentType.REVISION_PETITION: RevisionPetitionAgent(model, provider),
+            DocumentType.EXECUTION_PETITION: ExecutionPetitionAgent(model, provider),
+            DocumentType.CONSUMER_COMPLAINT: ConsumerComplaintAgent(model, provider),
+            DocumentType.PATENT: PatentAgent(model, provider),
+            DocumentType.WRITTEN_STATEMENT: WrittenStatementAgent(model, provider),
+            DocumentType.WRITTEN_ARGUMENTS: WrittenArgumentsAgent(model, provider),
+            DocumentType.APPLICATION_DRAFT: ApplicationAgent(model, provider),
         }
 
     def _get_model_config(self) -> tuple[str, str]:

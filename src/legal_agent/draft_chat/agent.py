@@ -1,6 +1,7 @@
 """LangGraph ReAct agent for draft chat with persistent sessions."""
 
 import asyncio
+import concurrent.futures
 import json
 import logging
 
@@ -12,34 +13,23 @@ from langgraph.prebuilt import create_react_agent
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from legal_agent.chat.citation_utils import parse_legal_web_search_citations
+from legal_agent.chat.web_search import create_web_search_tool
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import get_settings
 from legal_agent.draft_chat.session_store import DraftChatSessionStore
+from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
+from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
+from legal_agent.prompts.legal_assistant_chat import LEGAL_ASSISTANT_CHAT_SYSTEM_PROMPT
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an expert legal assistant specializing in Indian law, embedded in a
-document drafting workspace. You help lawyers edit drafts, understand case files, and answer
-legal questions in the context of the case they are working on.
-
-CAPABILITIES:
-1. Read and analyse case files using the search tool when file IDs are provided.
-2. Suggest edits, improvements, and additions to legal drafts.
-3. Answer questions about legal provisions, case law, and procedures relevant to the case.
-4. Explain legal concepts in context of the documents at hand.
-
-GROUNDING RULES:
-1. Use the query_case_documents tool to search case files when the user asks about document
-   content, facts, or needs information from uploaded files.
-2. Only answer based on information from search results when referencing case files.
-3. For general legal questions (not about specific documents), answer from your legal knowledge.
-4. Do NOT fabricate case citations or document content not present in search results.
-5. If the tool returns no results, say so clearly.
-
-OUTPUT FORMAT:
-- Use markdown for formatting.
-- When suggesting draft edits, clearly mark additions and deletions.
-- Cite specific sections or paragraphs when referencing documents."""
+SYSTEM_PROMPT = (
+    LEGAL_ASSISTANT_CHAT_SYSTEM_PROMPT
+    + "\n\nCONTEXT: You are embedded in a matter workspace (drafting and research). "
+    "When file IDs are in scope, use query_case_documents for those uploads; always cite "
+    "external law and cases via legal_case_search and legal_web_search when those tools exist."
+)
 
 TONE_INSTRUCTIONS = {
     "formal": (
@@ -60,9 +50,9 @@ TONE_INSTRUCTIONS = {
 STYLE_INSTRUCTIONS = {
     "precise": (
         "\n\nSTYLE — PRECISE:"
-        "\n- Keep responses concise: 3–5 sentences maximum."
+        "\n- Keep the main answer concise: 3–5 sentences where possible."
         "\n- State the answer directly without preamble."
-        "\n- Maximum 2 citations or references."
+        "\n- You must still include ### References with every [D*], [L*], and [n] used; do not omit citations for brevity."
     ),
     "balanced": (
         "\n\nSTYLE — BALANCED:"
@@ -101,17 +91,37 @@ def _create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
     return query_case_documents
 
 
+def _static_tools(agent: "DraftChatAgent"):
+    tools = []
+    if agent._legal_search_tool:
+        tools.append(agent._legal_search_tool)
+    if agent._web_search_tool:
+        tools.append(agent._web_search_tool)
+    return tools
+
+
 class DraftChatAgent:
     def __init__(self):
         self._pool: AsyncConnectionPool | None = None
         self.checkpointer: AsyncPostgresSaver | None = None
         self.session_store: DraftChatSessionStore | None = None
         self._rag_client: RAGClient | None = None
+        self._legal_search_tool = None
+        self._web_search_tool = None
         self._graphs: dict[str, object] = {}
         self._ready = asyncio.Event()
 
-    async def initialize(self, db_url: str, rag_client: RAGClient):
+    async def initialize(
+        self,
+        db_url: str,
+        rag_client: RAGClient,
+        retriever: LegalCaseRetriever | None = None,
+    ):
         self._rag_client = rag_client
+        settings = get_settings()
+        self._legal_search_tool = create_legal_search_tool(retriever) if retriever else None
+        self._web_search_tool = create_web_search_tool() if settings.serper_api_key else None
+
         self._pool = AsyncConnectionPool(
             conninfo=db_url,
             min_size=1,
@@ -132,22 +142,18 @@ class DraftChatAgent:
 
     def _compile_graphs_background(self):
         """Compile LangGraph graphs in a background thread."""
-        import concurrent.futures
 
         loop = asyncio.get_event_loop()
 
         def _compile():
             settings = get_settings()
             chat_models = settings.get_chat_models()
-            # We compile graphs without tools — tools are added per-request
-            # because file_ids differ per message. We use a no-tool graph as base
-            # and create tool-equipped graphs on demand.
             for provider_key, (model_name, langchain_provider) in chat_models.items():
                 llm = init_chat_model(model_name, model_provider=langchain_provider)
-                # Base graph (no tools) for general questions
+                tools = _static_tools(self)
                 self._graphs[provider_key] = create_react_agent(
                     model=llm,
-                    tools=[],
+                    tools=tools,
                     checkpointer=self.checkpointer,
                     prompt=SYSTEM_PROMPT,
                 )
@@ -158,32 +164,39 @@ class DraftChatAgent:
         executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
         executor.submit(_compile)
 
+    def _tools_for_request(self, file_ids: list[str], user_id: str) -> list:
+        tools = []
+        if file_ids and self._rag_client:
+            tools.append(_create_rag_tool(self._rag_client, file_ids, user_id))
+        tools.extend(_static_tools(self))
+        return tools
+
     async def _get_graph(self, model: str, file_ids: list[str], user_id: str = ""):
         """Get or create a graph for the given model and file_ids."""
         await self._ready.wait()
 
-        if file_ids and self._rag_client:
-            # Create a tool-equipped graph on demand for this request
-            settings = get_settings()
-            chat_models = settings.get_chat_models()
-            provider_key = model if model in chat_models else settings.chat_llm_default_provider
-            model_name, langchain_provider = chat_models[provider_key]
-            llm = init_chat_model(model_name, model_provider=langchain_provider)
-            rag_tool = _create_rag_tool(self._rag_client, file_ids, user_id)
-            return create_react_agent(
-                model=llm,
-                tools=[rag_tool],
-                checkpointer=self.checkpointer,
-                prompt=SYSTEM_PROMPT,
-            )
+        settings = get_settings()
+        chat_models = settings.get_chat_models()
+        provider_key = model if model in chat_models else settings.chat_llm_default_provider
+        model_name, langchain_provider = chat_models[provider_key]
+        llm = init_chat_model(model_name, model_provider=langchain_provider)
+        req_tools = self._tools_for_request(file_ids, user_id)
 
-        # No files — use pre-compiled graph
-        key = model
-        if key not in self._graphs:
-            settings = get_settings()
-            logger.warning(f"[draft_chat] Graph '{key}' not found, falling back to {settings.chat_llm_default_provider}")
-            key = settings.chat_llm_default_provider
-        return self._graphs[key]
+        if not file_ids:
+            if provider_key not in self._graphs:
+                logger.warning(
+                    f"[draft_chat] Graph '{model}' not found, falling back to {settings.chat_llm_default_provider}"
+                )
+                provider_key = settings.chat_llm_default_provider
+            if req_tools == _static_tools(self):
+                return self._graphs[provider_key]
+
+        return create_react_agent(
+            model=llm,
+            tools=req_tools,
+            checkpointer=self.checkpointer,
+            prompt=SYSTEM_PROMPT,
+        )
 
     async def stream_response(
         self,
@@ -207,24 +220,67 @@ class DraftChatAgent:
         style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
         full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS:{tone_suffix}{style_suffix}"
 
+        web_search_output: str | None = None
+        used_legal_tools = False
+        legal_search_queries: list[str] = []
+
         async for event in graph.astream_events(
             {"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"
         ):
             kind = event["event"]
             if kind == "on_chat_model_stream":
                 token = event["data"]["chunk"].content
+                if isinstance(token, list):
+                    token = "".join(
+                        p.get("text", "") if isinstance(p, dict) else str(p) for p in token
+                    )
                 if token:
-                    escaped = token.replace("\n", "\\n")
-                    yield {"event": "answer", "data": escaped}
+                    yield {"event": "answer", "data": token.replace("\n", "\\n")}
             elif kind == "on_tool_start":
+                tool_name = event["name"]
+                if tool_name in ("query_case_documents", "legal_case_search"):
+                    used_legal_tools = True
+                if tool_name == "legal_case_search":
+                    q = event["data"].get("input", {}).get("query", "")
+                    if q:
+                        legal_search_queries.append(q)
                 yield {
                     "event": "tool_call",
-                    "data": json.dumps({"name": event["name"], "args": event["data"].get("input", {})}),
+                    "data": json.dumps({"name": tool_name, "args": event["data"].get("input", {})}),
                 }
             elif kind == "on_tool_end":
-                yield {"event": "tool_result", "data": event["data"].get("output", "")}
+                output = event["data"].get("output", "")
+                if event.get("name") == "legal_web_search":
+                    web_search_output = str(output)
+                yield {"event": "tool_result", "data": output}
+
+        if not web_search_output and used_legal_tools and self._web_search_tool:
+            try:
+                search_query = legal_search_queries[-1] if legal_search_queries else message[:200]
+                yield {
+                    "event": "tool_call",
+                    "data": json.dumps({"name": "legal_web_search", "args": {"query": search_query}}),
+                }
+                web_search_output = await self._web_search_tool.ainvoke({"query": search_query})
+                yield {"event": "tool_result", "data": web_search_output}
+            except Exception as e:
+                logger.warning(f"[draft_chat] Forced citation search failed: {e}")
+
+        if web_search_output:
+            citations = parse_legal_web_search_citations(web_search_output)
+            if citations:
+                yield {"event": "citations", "data": json.dumps(citations)}
 
         yield {"event": "end", "data": ""}
+
+    def _normalize_content(self, content) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                p.get("text", "") if isinstance(p, dict) else str(p) for p in content
+            )
+        return str(content)
 
     async def get_history(self, session_id: str, model: str = "openai") -> list[dict]:
         """Return conversation history as structured turns."""
@@ -238,9 +294,9 @@ class DraftChatAgent:
             if isinstance(m, SystemMessage):
                 continue
             if isinstance(m, HumanMessage):
-                turns.append({"role": "human", "content": m.content})
+                turns.append({"role": "human", "content": self._normalize_content(m.content)})
             elif isinstance(m, AIMessage):
-                turn = {"role": "ai", "content": m.content}
+                turn = {"role": "ai", "content": self._normalize_content(m.content)}
                 if m.tool_calls:
                     turn["tool_calls"] = [
                         {"name": tc["name"], "args": tc["args"]} for tc in m.tool_calls
@@ -250,7 +306,7 @@ class DraftChatAgent:
                 if turns and turns[-1].get("tool_calls"):
                     for tc in turns[-1]["tool_calls"]:
                         if tc.get("result") is None:
-                            tc["result"] = m.content
+                            tc["result"] = self._normalize_content(m.content)
                             break
         return turns
 

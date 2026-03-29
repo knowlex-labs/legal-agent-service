@@ -22,8 +22,9 @@ def create_legal_search_tool(retriever: LegalCaseRetriever):
     ) -> str:
         """Search Indian Supreme Court judgments for relevant case law.
 
-        Every legal statement in your response must be traceable to a specific case
-        returned by this tool. Do not make legal claims that cannot be tied to a result.
+        In your answer, cite results inline as [L1], [L2], … in the same order as
+        "Result 1", "Result 2" below. Every case name or holding must map to one of these.
+        Do not make legal claims that cannot be tied to a returned result.
 
         Args:
             query: Legal search query (e.g., "right to bail under Section 439 CrPC").

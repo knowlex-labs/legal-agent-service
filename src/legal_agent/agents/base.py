@@ -153,7 +153,7 @@ class BaseDraftingAgent:
         if tools:
             workflow.add_node("tools", ToolNode(tools))
         else:
-            workflow.add_node("tools", lambda s: s)
+            workflow.add_node("tools", lambda state: state)
         workflow.add_node("output", output_node)
         workflow.set_entry_point("agent")
         workflow.add_conditional_edges(
@@ -227,6 +227,15 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
 
 Document Type: {deps.title}
 
+=== DRAFTING STRATEGY ===
+Before writing, do the following mentally:
+1. Identify the specific document sub-type (e.g., civil suit for possession, writ petition, anticipatory bail, notice for cheque bounce, NDA, etc.)
+2. Select the MATCHING section structure from your specialized template for that sub-type
+3. Extract all party names, ages, addresses, amounts, dates, FIR details from the input
+4. Plan your legal_case_search queries — one per ground/section requiring case law
+Then draft the document following your template sections EXACTLY.
+=== END DRAFTING STRATEGY ===
+
 === STRUCTURED INPUT DATA ===
 The following contains all party details, facts, and requirements extracted from the user's input.
 Use these EXACT details - names, ages, addresses, amounts, dates - in your draft.
@@ -236,25 +245,25 @@ Use these EXACT details - names, ages, addresses, amounts, dates - in your draft
 === END STRUCTURED INPUT ===
 {language_section}{rag_section}{examples_section}
 
-If legal_case_search is available, use it for EACH ground requiring case law support.
-Query specifically: e.g., "anticipatory bail Section 438 factors", "bail default Section 167 right",
-"chain of circumstantial evidence reasonable doubt". Make targeted per-ground queries.
+If legal_case_search is available, use it for EACH ground/section requiring case law support.
+Make targeted, specific queries: e.g., "anticipatory bail Section 438 factors", "bail default Section 167 right",
+"circumstantial evidence five tests Sharad Birdhichand", "property trespass unlawful interference".
 
 === FORMATTING REMINDER ===
 - Output CLEAN MARKDOWN following your template exactly
+- SECTION HEADERS ARE MANDATORY: Output named section headers as ## headings (e.g., ## 2. FACTS AND BACKGROUND, ## GROUNDS OF APPEAL). Do NOT collapse the entire document into flat numbered paragraphs.
+- Within each section, use hierarchical sub-numbering: 2.1, 2.2, 2.3 for facts; Roman numerals (I), (II), (III) for grounds
 - Tables: Use markdown pipe syntax with header separators |---|
-- Bold: **text** for names, headings, emphasis
-- Numbered paragraphs: (1), (2), (3) or 1., 2., 3.
-- Roman numerals for grounds: (I), (II), (III)
-- Amounts: ALWAYS in figures AND words - Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only)
-- Dates: DD/MM/YYYY format
-- DO NOT use placeholders like [Name], [Date], _____, XXXX
-- Use descriptive alternatives if info missing ("the plaintiff", "the said property")
+- Bold: **text** for names, party roles, section headings, key terms
+- Amounts: ALWAYS in figures AND words - Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only). Use Indian numbering (lakh, crore).
+- Dates: DD/MM/YYYY for specific dates; "on or about [Month] [Year]" for approximate
+- DO NOT use placeholders like [Name], [Date], _____, XXXX. Use actual names/details from the input.
+- Use descriptive alternatives if info is genuinely missing: "the plaintiff", "the said property", "the agreed amount"
 - Do NOT output HTML tags. Do NOT use code fences.
-- Follow your specialized template EXACTLY.
+- Follow your specialized template structure EXACTLY — each required section must be present.
 === END FORMATTING ===
 
-Generate a COMPLETE, court-ready document following the EXACT markdown template from your specialized prompt."""
+Generate a COMPLETE, court-ready document following the EXACT markdown template from your specialized prompt. Every major section must appear with its ## heading."""
 
         tools = []
         if deps.retriever:
