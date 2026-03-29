@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: legal-agent-service
+    runtime: python
+    # UV_COMPILE_BYTECODE=0 here too: runtime envVars may not apply to the build phase.
+    buildCommand: UV_COMPILE_BYTECODE=0 uv sync --frozen && uv cache prune --ci
+    startCommand: uv run legal-agent
+    stopTimeoutSecs: 120
+    envVars:
+      # Avoid compiling ~18k dependency files; cuts peak memory during deploy.
+      - key: UV_COMPILE_BYTECODE
+        value: "0"
+      # Set to false and point RAG_ENGINE_BASE_URL at a RAG-capable service if 512MB OOMs.
+      # - key: RAG_IN_PROCESS
+      #   value: "false"
+      # - key: RAG_ENGINE_BASE_URL
+      #   value: https://your-rag-service.onrender.com
