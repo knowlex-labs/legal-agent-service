@@ -4,7 +4,6 @@ import tempfile
 from typing import List, Optional
 import logging
 
-from legal_agent.rag_engine.repositories.neo4j_repository import neo4j_repository
 from legal_agent.rag_engine.repositories.qdrant_repository import QdrantRepository
 from legal_agent.rag_engine.services.storage.storage_factory import get_storage_service
 from legal_agent.rag_engine.services.hierarchical_chunking_service import chunking_service
@@ -16,7 +15,6 @@ logger = logging.getLogger(__name__)
 
 class CollectionService:
     def __init__(self):
-        self.neo4j_repo = neo4j_repository
         self.qdrant_repo = QdrantRepository()
         self.embedding_client = embedding_client
         self.storage_service = get_storage_service()
@@ -60,10 +58,6 @@ class CollectionService:
         if not self.qdrant_repo.collection_exists(collection_id):
             raise ValueError(f"Collection '{collection_id}' does not exist")
 
-        # Optionally also create Neo4j collection if use_neo4j is True
-        if request.use_neo4j:
-            self.neo4j_repo.create_user_collection(tenant_id, collection_id or "default", content_type)
-
         results = []
         for idx, item in enumerate(request.items):
             logger.info(f"=== INDEXING: Item {idx + 1}/{len(request.items)} ===")
@@ -85,12 +79,7 @@ class CollectionService:
                 embeddings = self._generate_embeddings(chunks, parsed)
                 logger.info(f"Embeddings generated: {len(embeddings)}")
 
-                # Prepare news metadata if content_type is news
-                news_metadata = None
                 item_content_type = item.content_type.value if item.content_type else "legal"
-                if item_content_type == "news":
-                    # Extract news metadata from parsed content or item attributes
-                    news_metadata = self._extract_news_metadata(parsed, item)
 
                 # Index to Qdrant (default)
                 logger.info(f"Indexing chunks to Qdrant for {item.file_id}")
@@ -103,22 +92,6 @@ class CollectionService:
                     content_type=item_content_type
                 )
                 self.qdrant_repo.link_content(qdrant_collection_name, qdrant_documents)
-
-                # Optionally also index to Neo4j
-                if request.use_neo4j:
-                    logger.info(f"Also indexing chunks to Neo4j for {item.file_id}")
-                    file_name = parsed.metadata.title if hasattr(parsed.metadata, 'title') and parsed.metadata.title else "Unknown"
-                    self.neo4j_repo.index_chunks(
-                        chunks=chunks,
-                        embeddings=embeddings,
-                        user_id=tenant_id,
-                        collection_id=item.collection_id or "default",
-                        file_id=item.file_id,
-                        file_name=file_name,
-                        source_type=item.type,
-                        content_type=item_content_type,
-                        news_metadata=news_metadata
-                    )
 
                 logger.info(f"Successfully processed {item.file_id}")
 
@@ -231,62 +204,44 @@ class CollectionService:
         logger.info(f"_generate_embeddings: done, {len(result)} embeddings")
         return result
 
-    def _extract_news_metadata(self, parsed_content, item: LinkItem) -> dict:
-        """Extract news-specific metadata from parsed content and LinkItem"""
-        from datetime import datetime
-
-        metadata = {}
-
-        # Extract from parsed content metadata
-        if hasattr(parsed_content, 'metadata') and parsed_content.metadata:
-            # Try to extract publication date from metadata
-            if hasattr(parsed_content.metadata, 'publish_date'):
-                metadata['published_date'] = parsed_content.metadata.publish_date
-
-            # Extract author if available
-            if hasattr(parsed_content.metadata, 'author'):
-                metadata['author'] = parsed_content.metadata.author
-
-            # Extract headline (title)
-            if hasattr(parsed_content.metadata, 'title'):
-                metadata['headline'] = parsed_content.metadata.title
-
-        # Extract from URL if it's a web source
-        if item.url:
-            metadata['source_url'] = item.url
-            # Try to extract source name from URL domain
-            try:
-                from urllib.parse import urlparse
-                parsed_url = urlparse(item.url)
-                metadata['source_name'] = parsed_url.netloc
-            except:
-                pass
-
-        # Add crawled timestamp
-        metadata['crawled_date'] = datetime.now().isoformat()
-
-        return metadata if metadata else None
-
     def _set_status(self, tenant_id: str, file_id: str, status: IndexingStatus, error: Optional[str] = None, item_name: Optional[str] = None, source_type: Optional[str] = None):
-        logger.info(f"Status tracking not yet implemented for Neo4j: file_id={file_id}, status={status.value}")
+        logger.debug(f"Status update (no-op): file_id={file_id}, status={status.value}")
 
     def get_status(self, tenant_id: str, file_id: str) -> dict:
-        """Check if a document is indexed in Neo4j."""
+        """Check if a document has chunks indexed in Qdrant for this user."""
+        from qdrant_client.models import Filter, FieldCondition, MatchValue
+
+        qdrant_collection_name = self._get_user_collection(tenant_id)
         try:
-            query = "MATCH (d:Document {file_id: $file_id}) RETURN d.indexed_at as indexed_at"
-            result = self.neo4j_repo.graph_service.execute_query(query, {"file_id": file_id})
-            
-            if result:
+            if not self.qdrant_repo.collection_exists(qdrant_collection_name):
                 return {
-                    "status": "READY", 
-                    "file_id": file_id, 
+                    "status": "PROCESSING",
+                    "file_id": file_id,
+                    "message": "User collection not found",
+                }
+
+            scroll_result = self.qdrant_repo.client.scroll(
+                collection_name=qdrant_collection_name,
+                scroll_filter=Filter(
+                    must=[FieldCondition(key="metadata.file_id", match=MatchValue(value=file_id))]
+                ),
+                limit=1,
+                with_payload=True,
+                with_vectors=False,
+            )
+            points = scroll_result[0] if scroll_result else []
+            if points:
+                indexed_at = points[0].payload.get("metadata", {}).get("indexed_at")
+                return {
+                    "status": "READY",
+                    "file_id": file_id,
                     "message": "Document is indexed and ready for AI",
-                    "indexed_at": result[0]["indexed_at"]
+                    "indexed_at": indexed_at,
                 }
             return {
-                "status": "PROCESSING", 
-                "file_id": file_id, 
-                "message": "Document is being processed or not found"
+                "status": "PROCESSING",
+                "file_id": file_id,
+                "message": "Document is being processed or not found",
             }
         except Exception as e:
             logger.error(f"Error checking status: {e}")
@@ -306,27 +261,19 @@ class CollectionService:
                     file_id=file_id
                 )
 
-                # Also delete from Neo4j for backward compatibility
-                neo4j_success = self.neo4j_repo.delete_file(user_id, file_id)
-
-                if qdrant_success or neo4j_success:
+                if qdrant_success:
                     deleted_count += 1
             except Exception:
                 logger.error(f"Error unlinking file {file_id}", exc_info=True)
         return deleted_count
 
     def delete_collection(self, user_id: str, collection_id: str) -> bool:
-        # Delete from Qdrant (logical collection within user's collection)
-        qdrant_success = self.qdrant_repo.delete_logical_collection(user_id, collection_id)
-
-        # Also delete from Neo4j for backward compatibility
-        neo4j_success = self.neo4j_repo.delete_collection(user_id, collection_id)
-
-        return qdrant_success or neo4j_success
+        return self.qdrant_repo.delete_logical_collection(user_id, collection_id)
 
     def purge_user_data(self, user_id: str) -> bool:
-        logger.warning(f"Purge user data not implemented for Neo4j: user_id={user_id}")
-        return False
+        """Delete the user's entire Qdrant collection."""
+        name = self._get_user_collection(user_id)
+        return self.qdrant_repo.delete_collection(name)
 
     def _check_file_in_collection(self, collection_name: str, collection_id: str, file_id: str) -> dict:
         """Check if a specific file exists in a collection and return its status."""

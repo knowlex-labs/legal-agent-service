@@ -187,7 +187,7 @@ async def query_collection(
 ):
     """Query documents in a collection."""
     try:
-        file_ids, content_type, news_subcategory = _extract_filters(request)
+        file_ids, content_type, _news_subcategory = _extract_filters(request)
 
         return query_service.search(
             collection_name=collection_id,
@@ -196,7 +196,6 @@ async def query_collection(
             collection_ids=None,
             file_ids=file_ids,
             content_type=content_type,
-            news_subcategory=news_subcategory,
             answer_style=request.answer_style or "detailed"
         )
     except Exception as e:
@@ -212,7 +211,7 @@ async def retrieve_chunks(
 ):
     """Retrieve relevant chunks for a query without generating an answer."""
     try:
-        file_ids, content_type, news_subcategory = _extract_filters(request)
+        file_ids, content_type, _news_subcategory = _extract_filters(request)
 
         results = await query_service.retrieve_context(
             query=request.query,
@@ -221,8 +220,6 @@ async def retrieve_chunks(
             top_k=request.top_k,
             file_ids=file_ids,
             content_type=content_type,
-            news_subcategory=news_subcategory,
-            use_neo4j=request.use_neo4j
         )
 
         enriched_chunks = []

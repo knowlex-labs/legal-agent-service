@@ -13,7 +13,6 @@ from .models import ParsedContent, ParsedMetadata, ContentSection
 class LegalProvision:
     """
     Represents a legal provision (Article, Section, etc.) with hierarchical structure.
-    Maps to the Provision node in our Neo4j ontology.
     """
     id: str  # "Art-21", "BNS-302"
     number: str  # "21", "302"

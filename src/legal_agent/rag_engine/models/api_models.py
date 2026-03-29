@@ -76,7 +76,6 @@ class LinkItem(BaseModel):
 
 class BatchLinkRequest(BaseModel):
     items: List[LinkItem]
-    use_neo4j: bool = False
 
 class BatchItemResponse(BaseModel):
     file_id: str
@@ -99,7 +98,6 @@ class RetrieveRequest(BaseModel):
     filters: Optional[RetrieveFilters] = None
     top_k: int = 5
     include_graph_context: bool = True
-    use_neo4j: bool = False
 
 class EnrichedChunk(BaseModel):
     chunk_id: str
@@ -120,7 +118,6 @@ class QueryAnswerRequest(BaseModel):
     top_k: int = 5
     include_sources: bool = False
     answer_style: Optional[str] = "detailed"
-    use_neo4j: bool = False
 
 class DeleteFileRequest(BaseModel):
     file_ids: List[str]
