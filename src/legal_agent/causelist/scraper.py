@@ -1,5 +1,5 @@
 """
-Playwright automation to scrape MPHC cause lists.
+Camoufox (anti-detect browser) automation to scrape MPHC cause lists.
 
 Navigates to https://mphc.gov.in/causelist, fills the search form,
 and extracts cause list entries from the results table.
@@ -36,8 +36,8 @@ def scrape_cause_list(
     Returns:
         List of entry dicts with case details and metadata.
     """
-    # Import here so the API process can start without Playwright (e.g. Render) until this endpoint runs.
-    from playwright.sync_api import sync_playwright
+    # Import here so the API process can start without Camoufox until this endpoint runs.
+    from camoufox.sync_api import Camoufox
 
     # Convert ISO date to DD-MM-YYYY for the website form
     date_obj = datetime.strptime(date_str, "%Y-%m-%d")
@@ -45,8 +45,7 @@ def scrape_cause_list(
 
     entries = []
 
-    with sync_playwright() as pw:
-        browser = pw.chromium.launch(headless=True)
+    with Camoufox(headless=True) as browser:
         context = browser.new_context(ignore_https_errors=True)
         page = context.new_page()
 

@@ -27,8 +27,9 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1
 
-# Install Playwright chromium and its system dependencies
-RUN /app/.venv/bin/playwright install chromium --with-deps
+# Install Camoufox browser (Firefox-based anti-detect) and Playwright deps
+RUN /app/.venv/bin/python -m camoufox fetch && \
+    /app/.venv/bin/playwright install-deps
 
 USER appuser
 
