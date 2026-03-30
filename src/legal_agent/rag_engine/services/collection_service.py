@@ -50,13 +50,14 @@ class CollectionService:
         logger.info(f"=== INDEXING: process_batch STARTED ===")
         logger.info(f"tenant_id={tenant_id}, item_count={len(request.items)}")
 
-        collection_id = request.items[0].collection_id if request.items else "default"
+        collection_id = (request.items[0].collection_id if request.items else None) or "default"
         content_type = request.items[0].content_type.value if request.items and request.items[0].content_type else "legal"
         logger.info(f"Starting batch process for tenant {tenant_id}, collection {collection_id}, content_type {content_type}")
 
         qdrant_collection_name = collection_id
         if not self.qdrant_repo.collection_exists(collection_id):
-            raise ValueError(f"Collection '{collection_id}' does not exist")
+           raise ValueError(f"Collection '{collection_id}' does not exist")
+               
 
         results = []
         for idx, item in enumerate(request.items):

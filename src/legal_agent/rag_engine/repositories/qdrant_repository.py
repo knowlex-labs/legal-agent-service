@@ -44,7 +44,7 @@ class QdrantRepository:
             return exists
         except Exception as e:
             logger.error(f"Error checking if collection '{collection_name}' exists: {str(e)}")
-            return False
+            raise
 
     def ensure_indexes(self, collection_name: str, use_new_schema: bool = False) -> bool:
         """
