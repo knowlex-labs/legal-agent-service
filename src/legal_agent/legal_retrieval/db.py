@@ -78,7 +78,7 @@ def build_filter_clause(filters: dict | None) -> tuple[str, dict]:
         "court": "AND c.court ILIKE %(court)s",
         "year_from": "AND c.year >= %(year_from)s",
         "year_to": "AND c.year <= %(year_to)s",
-        "judge": "AND %(judge)s = ANY(c.bench)",
+        "judge": "AND %(judge)s = ANY(c.judges)",
     }
 
     for key, sql in filter_map.items():
@@ -110,7 +110,7 @@ def execute_hybrid_search(
         SELECT p.id AS paragraph_id, p.case_id, p.paragraph_number,
                p.paragraph_text AS text,
                ROW_NUMBER() OVER (ORDER BY p.embedding <=> %(embedding)s::vector) AS rank
-        FROM judgment_paragraphs p JOIN cases c ON c.id = p.case_id
+        FROM judgment_paragraphs p JOIN judgments c ON c.id = p.case_id
         WHERE 1=1 {filter_sql}
         ORDER BY p.embedding <=> %(embedding)s::vector LIMIT 100
     ),
@@ -120,7 +120,7 @@ def execute_hybrid_search(
                ROW_NUMBER() OVER (
                    ORDER BY ts_rank(p.full_text_search, plainto_tsquery('english', %(fts_query)s)) DESC
                ) AS rank
-        FROM judgment_paragraphs p JOIN cases c ON c.id = p.case_id
+        FROM judgment_paragraphs p JOIN judgments c ON c.id = p.case_id
         WHERE p.full_text_search @@ plainto_tsquery('english', %(fts_query)s) {filter_sql}
         LIMIT 100
     ),
@@ -134,8 +134,9 @@ def execute_hybrid_search(
              + {FTS_WEIGHT} / ({K} + COALESCE(f.rank, 1000))) AS rrf_score
         FROM semantic s FULL OUTER JOIN fulltext f ON s.paragraph_id = f.paragraph_id
     )
-    SELECT combined.*, c.case_title, c.citation, c.court, c.year, c.bench, c.decision_date
-    FROM combined JOIN cases c ON c.id = combined.case_id
+    SELECT combined.*, c.title AS case_title, c.citation, c.court, c.year,
+           c.judges AS bench, c.decision_date
+    FROM combined JOIN judgments c ON c.id = combined.case_id
     ORDER BY combined.rrf_score DESC LIMIT %(limit)s
     """
 
@@ -143,7 +144,7 @@ def execute_hybrid_search(
 
 
 def get_case_by_id(case_id: str) -> dict | None:
-    return _query_one("SELECT * FROM cases WHERE id = %(case_id)s", {"case_id": case_id})
+    return _query_one("SELECT * FROM judgments WHERE id = %(case_id)s", {"case_id": case_id})
 
 
 def get_paragraphs_for_case(case_id: str, embedding: list[float] | None = None, limit: int = 10) -> list[dict]:
@@ -167,13 +168,13 @@ def get_filter_options() -> dict:
     pool = get_pool()
     with pool.connection() as conn:
         with conn.cursor() as cur:
-            cur.execute("SELECT DISTINCT court FROM cases ORDER BY court")
+            cur.execute("SELECT DISTINCT court FROM judgments ORDER BY court")
             courts = [r["court"] for r in cur.fetchall()]
 
-            cur.execute("SELECT MIN(year) AS min_year, MAX(year) AS max_year FROM cases")
+            cur.execute("SELECT MIN(year) AS min_year, MAX(year) AS max_year FROM judgments")
             yr = cur.fetchone()
 
-            cur.execute("SELECT DISTINCT unnest(bench) AS judge FROM cases ORDER BY judge LIMIT 500")
+            cur.execute("SELECT DISTINCT unnest(judges) AS judge FROM judgments ORDER BY judge LIMIT 500")
             judges = [r["judge"] for r in cur.fetchall()]
 
             return {
