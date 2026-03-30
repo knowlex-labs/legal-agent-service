@@ -25,6 +25,16 @@ class DocumentType(str, Enum):
     APPLICATION = "application"
     BAIL_APPLICATION = "bail_application"
     CRIMINAL_APPEAL = "criminal_appeal"
+    PATENT = "patent"
+    APPLICATION_DRAFT = "application_draft"
+    WRITTEN_STATEMENT = "written_statement"
+    WRITTEN_ARGUMENTS = "written_arguments"
+    SLP = "slp"
+    QUASHING_PETITION = "quashing_petition"
+    ANTICIPATORY_BAIL = "anticipatory_bail"
+    REVISION_PETITION = "revision_petition"
+    EXECUTION_PETITION = "execution_petition"
+    CONSUMER_COMPLAINT = "consumer_complaint"
 
 
 class DocumentSection(BaseModel):

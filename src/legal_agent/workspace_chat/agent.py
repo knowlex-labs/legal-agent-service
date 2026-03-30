@@ -2,7 +2,6 @@
 
 import json
 import logging
-import re
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -12,37 +11,23 @@ from langgraph.prebuilt import create_react_agent
 from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
+from legal_agent.chat.citation_utils import parse_legal_web_search_citations
 from legal_agent.chat.web_search import create_web_search_tool
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import get_settings
 from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
 from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
+from legal_agent.prompts.legal_assistant_chat import LEGAL_ASSISTANT_CHAT_SYSTEM_PROMPT
 from legal_agent.workspace_chat.session_store import WorkspaceChatSessionStore
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are an expert legal assistant specializing in Indian law, embedded in a
-document drafting workspace. You help lawyers edit drafts, understand case files, and answer
-legal questions in the context of the case they are working on.
-
-CAPABILITIES:
-1. Read and analyse case files using query_case_documents.
-2. Suggest edits, improvements, and additions to legal drafts.
-3. Answer questions about legal provisions, case law, and procedures relevant to the case.
-4. Explain legal concepts in context of the documents at hand.
-
-GROUNDING RULES:
-1. Always call query_case_documents to search case files first.
-2. For legal citations, use legal_case_search for verified case law.
-3. After drafting your answer, call legal_web_search EXACTLY ONCE to find supporting citations from SCC Online, Manupatra, Indian Kanoon, and other legal databases. Do NOT call it more than once.
-4. When citing web search results, use [1], [2], etc. matching the source numbers returned by legal_web_search. Include the source URLs at the end.
-5. Never tell the user "no documents found" — draft or answer using available context.
-6. Do NOT fabricate citations not found via tools.
-
-OUTPUT FORMAT:
-- Use markdown for formatting.
-- When suggesting draft edits, clearly mark additions and deletions.
-- Cite specific sections or paragraphs when referencing documents."""
+SYSTEM_PROMPT = (
+    LEGAL_ASSISTANT_CHAT_SYSTEM_PROMPT
+    + "\n\nCONTEXT: You are embedded in a document drafting workspace for a specific matter. "
+    "Prioritise indexed case files when the user’s question relates to their uploads; still run "
+    "legal_case_search and legal_web_search when the issue needs external authority."
+)
 
 TONE_INSTRUCTIONS = {
     "formal": (
@@ -63,9 +48,9 @@ TONE_INSTRUCTIONS = {
 STYLE_INSTRUCTIONS = {
     "precise": (
         "\n\nSTYLE — PRECISE:"
-        "\n- Keep responses concise: 3–5 sentences maximum."
+        "\n- Keep the main answer concise: 3–5 sentences where possible."
         "\n- State the answer directly without preamble."
-        "\n- Maximum 2 citations or references."
+        "\n- You must still include ### References with every [D*], [L*], and [n] used; do not omit citations for brevity."
     ),
     "balanced": (
         "\n\nSTYLE — BALANCED:"
@@ -95,44 +80,6 @@ def _create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
         return context
 
     return query_case_documents
-
-
-_BLOCK_SPLIT_RE = re.compile(r'(?=\[\d+\]\s)')
-
-
-def _parse_web_citations(tool_output: str) -> list[dict]:
-    """Extract structured citations from legal_web_search tool output using block-based parsing."""
-    blocks = _BLOCK_SPLIT_RE.split(tool_output)
-    results = []
-    for block in blocks:
-        block = block.strip()
-        id_m = re.match(r'\[(\d+)\]\s*(.+)', block)
-        if not id_m:
-            continue
-        cid = int(id_m.group(1))
-        case_name = id_m.group(2).strip()
-
-        def _field(name: str) -> str | None:
-            m = re.search(rf'^{name}:\s*(.+)', block, re.MULTILINE)
-            return m.group(1).strip() if m else None
-
-        source = _field("Source") or "Web"
-        url = _field("URL") or ""
-        snippet = _field("Snippet")
-        citation = _field("Citation")
-        year_str = _field("Year")
-        year = int(year_str) if year_str and year_str.isdigit() else None
-
-        results.append({
-            "id": cid,
-            "case_name": case_name,
-            "source": source,
-            "url": url,
-            "snippet": snippet,
-            "citation": citation,
-            "year": year,
-        })
-    return results
 
 
 class WorkspaceChatAgent:
@@ -270,7 +217,7 @@ class WorkspaceChatAgent:
 
         # Emit structured citations from web search results
         if web_search_output:
-            citations = _parse_web_citations(web_search_output)
+            citations = parse_legal_web_search_citations(web_search_output)
             if citations:
                 yield {"event": "citations", "data": json.dumps(citations)}
 

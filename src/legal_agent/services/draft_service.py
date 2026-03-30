@@ -3,12 +3,22 @@
 import logging
 import re
 
+from legal_agent.agents.anticipatory_bail_agent import AnticipatoryBailAgent
+from legal_agent.agents.application_agent import ApplicationAgent
 from legal_agent.agents.bail_agent import BailApplicationAgent
 from legal_agent.agents.base import BaseDraftingAgent, DraftingDependencies
+from legal_agent.agents.consumer_complaint_agent import ConsumerComplaintAgent
 from legal_agent.agents.contract_agent import ContractAgent
 from legal_agent.agents.court_filing_agent import CourtFilingAgent
 from legal_agent.agents.criminal_appeal_agent import CriminalAppealAgent
+from legal_agent.agents.execution_petition_agent import ExecutionPetitionAgent
 from legal_agent.agents.notice_agent import NoticeAgent
+from legal_agent.agents.patent_agent import PatentAgent
+from legal_agent.agents.quashing_petition_agent import QuashingPetitionAgent
+from legal_agent.agents.revision_petition_agent import RevisionPetitionAgent
+from legal_agent.agents.slp_agent import SLPAgent
+from legal_agent.agents.written_arguments_agent import WrittenArgumentsAgent
+from legal_agent.agents.written_statement_agent import WrittenStatementAgent
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import Settings
@@ -17,7 +27,7 @@ from legal_agent.data.examples_loader import (
     format_as_prompt_section,
     get_examples_for_document_type,
 )
-from legal_agent.models.documents import DocumentType
+from legal_agent.models.documents import DocumentType, GeneratedDocument
 from legal_agent.models.requests import CreateDraftJobRequest
 from legal_agent.models.responses import JobStatus, JobType
 from legal_agent.services.content_preprocessor import (
@@ -34,6 +44,29 @@ def _slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
     return re.sub(r"[\s_]+", "-", text)
+
+
+def _markdown_for_upload(document: GeneratedDocument) -> str:
+    """Use full draft text; if the LLM left `draft` empty but filled sections, assemble markdown."""
+    body = (document.draft or "").strip()
+    if body:
+        return document.draft
+    if document.sections:
+        ordered = sorted(document.sections, key=lambda s: s.order)
+        parts = [f"## {s.title}\n\n{s.content.strip()}" for s in ordered if s.content and s.content.strip()]
+        assembled = "\n\n".join(parts)
+        if assembled.strip():
+            logger.warning(
+                "Structured output had empty draft field; assembled %s sections into markdown (%s chars)",
+                len(document.sections),
+                len(assembled),
+            )
+            header = f"# {document.title}\n\n" if (document.title or "").strip() else ""
+            return header + assembled
+    raise ValueError(
+        "Draft generation produced no content: empty `draft` and no usable sections. "
+        "Retry or adjust the model / prompt."
+    )
 
 
 class DraftService:
@@ -65,6 +98,16 @@ class DraftService:
             DocumentType.APPLICATION: CourtFilingAgent(model, provider),
             DocumentType.BAIL_APPLICATION: BailApplicationAgent(model, provider),
             DocumentType.CRIMINAL_APPEAL: CriminalAppealAgent(model, provider),
+            DocumentType.SLP: SLPAgent(model, provider),
+            DocumentType.QUASHING_PETITION: QuashingPetitionAgent(model, provider),
+            DocumentType.ANTICIPATORY_BAIL: AnticipatoryBailAgent(model, provider),
+            DocumentType.REVISION_PETITION: RevisionPetitionAgent(model, provider),
+            DocumentType.EXECUTION_PETITION: ExecutionPetitionAgent(model, provider),
+            DocumentType.CONSUMER_COMPLAINT: ConsumerComplaintAgent(model, provider),
+            DocumentType.PATENT: PatentAgent(model, provider),
+            DocumentType.WRITTEN_STATEMENT: WrittenStatementAgent(model, provider),
+            DocumentType.WRITTEN_ARGUMENTS: WrittenArgumentsAgent(model, provider),
+            DocumentType.APPLICATION_DRAFT: ApplicationAgent(model, provider),
         }
 
     def _get_model_config(self) -> tuple[str, str]:
@@ -161,6 +204,7 @@ class DraftService:
             user_id=user_id,
             title=cleaned_title,
             instructions=cleaned_instructions,
+            document_type=request.document_type,
             examples=formatted_examples,
             language=language,
             retriever=self.retriever,
@@ -168,13 +212,16 @@ class DraftService:
 
         logger.debug(f"[{job_id}] Calling agent.draft()")
         document = await agent.draft(deps)
-        logger.info(f"[{job_id}] Draft completed: {len(document.sections)} sections")
+        markdown_body = _markdown_for_upload(document)
+        logger.info(
+            f"[{job_id}] Draft completed: {len(document.sections)} sections, markdown_len={len(markdown_body)}"
+        )
 
         # Step 4: Upload to S3
         # Use request title for proper naming (user-provided title)
         slug = _slugify(request.title)
         s3_path = f"{request.case_folder_id}/drafts/{slug}.md"
-        await self.s3_client.upload_text(s3_path, document.draft)
+        await self.s3_client.upload_text(s3_path, markdown_body)
 
         # Get signed URL and update job with file details
         signed_url = await self.s3_client.signed_url(s3_path)

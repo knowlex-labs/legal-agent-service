@@ -101,7 +101,7 @@ class LocalRAGClient(RAGClient):
         """Format RAG chunks into a context string for the LLM."""
         context_parts = []
 
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks, 1):
             text = chunk.get("text", "")
             if not text:
                 continue
@@ -109,9 +109,12 @@ class LocalRAGClient(RAGClient):
             score = chunk.get("score", 0)
             page = chunk.get("page_start")
             concepts = chunk.get("key_terms", [])
+            file_id = chunk.get("file_id", "")
 
-            header = f"[Relevance: {score:.2f}]"
-            if page:
+            header = f"[Indexed chunk {i}] [Relevance: {score:.2f}]"
+            if file_id:
+                header += f" [File id: {file_id}]"
+            if page is not None:
                 header += f" [Page: {page}]"
             if concepts:
                 header += f" [Concepts: {', '.join(concepts[:3])}]"
@@ -213,7 +216,7 @@ class HTTPRAGClient(RAGClient):
         """Format RAG chunks into a context string for the LLM."""
         context_parts = []
 
-        for chunk in chunks:
+        for i, chunk in enumerate(chunks, 1):
             text = chunk.get("chunk_text", "")
             if not text:
                 continue
@@ -221,9 +224,12 @@ class HTTPRAGClient(RAGClient):
             score = chunk.get("relevance_score", 0)
             page = chunk.get("page_number")
             concepts = chunk.get("concepts", [])
+            file_id = chunk.get("file_id") or chunk.get("source") or ""
 
-            header = f"[Relevance: {score:.2f}]"
-            if page:
+            header = f"[Indexed chunk {i}] [Relevance: {score:.2f}]"
+            if file_id:
+                header += f" [File id: {file_id}]"
+            if page is not None:
                 header += f" [Page: {page}]"
             if concepts:
                 header += f" [Concepts: {', '.join(concepts[:3])}]"

@@ -20,10 +20,16 @@ def create_legal_search_tool(retriever: LegalCaseRetriever):
         judge: str | None = None,
         top_k: int = 5,
     ) -> str:
-        """Search Indian Supreme Court judgments for relevant case law.
+        """Search Indian Supreme Court and High Court judgments for relevant case law.
 
-        Every legal statement in your response must be traceable to a specific case
-        returned by this tool. Do not make legal claims that cannot be tied to a result.
+        When citing a result in your draft, use EXACTLY this format:
+          **[case_title]** — [citation]
+        Examples:
+          **Sushila Aggarwal v. State (NCT Delhi)** — (2020) 5 SCC 1
+          **Arnesh Kumar v. State of Bihar** — (2014) 8 SCC 273
+
+        Do NOT cite inline as [L1], [L2]. Always write the full case name and citation.
+        Only cite cases returned by this tool — never write citations from memory.
 
         Args:
             query: Legal search query (e.g., "right to bail under Section 439 CrPC").
