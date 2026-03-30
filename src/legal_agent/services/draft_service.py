@@ -27,7 +27,7 @@ from legal_agent.data.examples_loader import (
     format_as_prompt_section,
     get_examples_for_document_type,
 )
-from legal_agent.models.documents import DocumentType
+from legal_agent.models.documents import DocumentType, GeneratedDocument
 from legal_agent.models.requests import CreateDraftJobRequest
 from legal_agent.models.responses import JobStatus, JobType
 from legal_agent.services.content_preprocessor import (
@@ -44,6 +44,29 @@ def _slugify(text: str) -> str:
     text = text.lower().strip()
     text = re.sub(r"[^\w\s-]", "", text)
     return re.sub(r"[\s_]+", "-", text)
+
+
+def _markdown_for_upload(document: GeneratedDocument) -> str:
+    """Use full draft text; if the LLM left `draft` empty but filled sections, assemble markdown."""
+    body = (document.draft or "").strip()
+    if body:
+        return document.draft
+    if document.sections:
+        ordered = sorted(document.sections, key=lambda s: s.order)
+        parts = [f"## {s.title}\n\n{s.content.strip()}" for s in ordered if s.content and s.content.strip()]
+        assembled = "\n\n".join(parts)
+        if assembled.strip():
+            logger.warning(
+                "Structured output had empty draft field; assembled %s sections into markdown (%s chars)",
+                len(document.sections),
+                len(assembled),
+            )
+            header = f"# {document.title}\n\n" if (document.title or "").strip() else ""
+            return header + assembled
+    raise ValueError(
+        "Draft generation produced no content: empty `draft` and no usable sections. "
+        "Retry or adjust the model / prompt."
+    )
 
 
 class DraftService:
@@ -190,13 +213,16 @@ class DraftService:
 
         logger.debug(f"[{job_id}] Calling agent.draft()")
         document = await agent.draft(deps)
-        logger.info(f"[{job_id}] Draft completed: {len(document.sections)} sections")
+        markdown_body = _markdown_for_upload(document)
+        logger.info(
+            f"[{job_id}] Draft completed: {len(document.sections)} sections, markdown_len={len(markdown_body)}"
+        )
 
         # Step 4: Upload to S3
         # Use request title for proper naming (user-provided title)
         slug = _slugify(request.title)
         s3_path = f"{request.case_folder_id}/drafts/{slug}.md"
-        await self.s3_client.upload_text(s3_path, document.draft)
+        await self.s3_client.upload_text(s3_path, markdown_body)
 
         # Get signed URL and update job with file details
         signed_url = await self.s3_client.signed_url(s3_path)
