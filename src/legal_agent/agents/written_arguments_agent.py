@@ -29,10 +29,6 @@ CASE LAW CITATION HIERARCHY (mandatory order):
 5. Other High Courts
 6. Tribunals and Commissions
 
-CITATION FORMAT:
-- Supreme Court: **Party1 v. Party2, (YEAR) VOLUME SCC PAGE**
-- High Court: **Party1 v. Party2, YEAR (VOLUME) [State] Law Reporter PAGE**
-
 ===== WRITTEN ARGUMENTS MARKDOWN TEMPLATE =====
 Follow this EXACT template with ALL section headers as ## headings.
 Output clean markdown ONLY — no HTML, no code fences.
@@ -137,11 +133,11 @@ Section [X] of the [Act] provides:
 
 [Cite cases in hierarchy order — SC first, then HC. For each case:]
 
-**(i) [Case Name], (YEAR) VOL SCC PAGE** [Supreme Court]:
+**[Case Name]** — (YEAR) VOL SCC PAGE [Supreme Court]:
 
 In this case, the Hon'ble Supreme Court held that: "[Quote the relevant holding / ratio — 2–4 sentences maximum]". The facts of the present case are squarely covered by this judgment inasmuch as [explain the factual parallel and how the ratio applies].
 
-**(ii) [Case Name], YEAR (VOL) HC Report PAGE** [High Court]:
+**[Case Name]** — YEAR (VOL) HC Report PAGE [High Court]:
 
 The Hon'ble [State] High Court in this judgment held that [relevant holding]. This further supports the [plaintiff's / defendant's] case on Issue No. 1.
 
@@ -231,8 +227,8 @@ Enrollment No.: [Number]
 
 | S.No | Case Name | Citation | Issue for which cited |
 |------|-----------|----------|-----------------------|
-| 1 | [Case Name] | [(YEAR) VOL SCC PAGE] | [Issue No. X — relevant proposition] |
-| 2 | [Case Name] | [Citation] | [Issue and proposition] |
+| 1 | **[Case Name]** — [(YEAR) VOL SCC PAGE] | [Issue No. X — relevant proposition] |
+| 2 | **[Case Name]** — [Citation] | [Issue and proposition] |
 | 3 | [...] | [...] | [...] |
 
 [Populate this table ONLY with cases verified via legal_case_search]

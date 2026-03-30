@@ -89,7 +89,6 @@ class DraftService:
         # Initialize agents based on settings
         model, provider = self._get_model_config()
         self._agents: dict[DocumentType, BaseDraftingAgent] = {
-            # Existing document types
             DocumentType.CONTRACT: ContractAgent(model, provider),
             DocumentType.AGREEMENT: ContractAgent(model, provider),
             DocumentType.LEGAL_NOTICE: NoticeAgent(model, provider),
@@ -99,7 +98,6 @@ class DraftService:
             DocumentType.APPLICATION: CourtFilingAgent(model, provider),
             DocumentType.BAIL_APPLICATION: BailApplicationAgent(model, provider),
             DocumentType.CRIMINAL_APPEAL: CriminalAppealAgent(model, provider),
-            # New document types
             DocumentType.SLP: SLPAgent(model, provider),
             DocumentType.QUASHING_PETITION: QuashingPetitionAgent(model, provider),
             DocumentType.ANTICIPATORY_BAIL: AnticipatoryBailAgent(model, provider),
@@ -206,6 +204,7 @@ class DraftService:
             user_id=user_id,
             title=cleaned_title,
             instructions=cleaned_instructions,
+            document_type=request.document_type,
             examples=formatted_examples,
             language=language,
             retriever=self.retriever,

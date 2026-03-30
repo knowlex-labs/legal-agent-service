@@ -146,11 +146,21 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
     Returns:
         Assembled text with labeled sections for non-null fields
     """
-    court_types = {"affidavit", "petition", "application"}
+    court_types = {
+        "affidavit", "petition", "application",
+        "written_statement", "written_arguments", "application_draft",
+        "execution_petition", "revision_petition", "quashing_petition",
+    }
     notice_types = {"legal_notice", "demand_notice"}
-    bail_criminal_types = {"bail_application", "criminal_appeal"}
+    bail_criminal_types = {
+        "bail_application", "criminal_appeal",
+        "anticipatory_bail", "slp",
+    }
 
-    if document_type in bail_criminal_types:
+    if document_type == "consumer_complaint":
+        party_one_label = "COMPLAINANT DETAILS"
+        party_two_label = "OPPOSITE PARTY DETAILS"
+    elif document_type in bail_criminal_types:
         party_one_label = "APPLICANT / APPELLANT DETAILS"
         party_two_label = "NON-APPLICANT / RESPONDENT (STATE) DETAILS"
     elif document_type in court_types:
@@ -383,6 +393,16 @@ async def enhance_content(
         "agreement": "Agreement",
         "bail_application": "Bail Application (Criminal)",
         "criminal_appeal": "Criminal Appeal",
+        "slp": "Special Leave Petition (SLP)",
+        "quashing_petition": "Petition for Quashing of FIR / Proceedings",
+        "anticipatory_bail": "Anticipatory Bail Application",
+        "revision_petition": "Revision Petition",
+        "execution_petition": "Execution Petition",
+        "consumer_complaint": "Consumer Complaint",
+        "patent": "Patent Application (Complete Specification)",
+        "written_statement": "Written Statement",
+        "written_arguments": "Written Arguments / Written Submissions",
+        "application_draft": "Court Application (Miscellaneous / Interlocutory)",
     }
     doc_label = type_labels.get(document_type, document_type.replace("_", " ").title())
 

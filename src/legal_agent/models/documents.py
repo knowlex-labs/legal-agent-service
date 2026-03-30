@@ -25,7 +25,6 @@ class DocumentType(str, Enum):
     APPLICATION = "application"
     BAIL_APPLICATION = "bail_application"
     CRIMINAL_APPEAL = "criminal_appeal"
-    # New document types
     PATENT = "patent"
     APPLICATION_DRAFT = "application_draft"
     WRITTEN_STATEMENT = "written_statement"

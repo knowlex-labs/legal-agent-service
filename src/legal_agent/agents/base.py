@@ -2,7 +2,7 @@
 
 import logging
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, cast
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
@@ -14,7 +14,7 @@ from typing_extensions import TypedDict
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
 from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
-from legal_agent.models.documents import GeneratedDocument
+from legal_agent.models.documents import DocumentType, GeneratedDocument
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,7 @@ class DraftingDependencies:
     user_id: str
     title: str
     instructions: str
+    document_type: DocumentType
     examples: str = ""
     language: str = "english"
     retriever: LegalCaseRetriever | None = None
@@ -78,12 +79,39 @@ CRITICAL - SINGLE PAGE OUTPUT:
 9. Follow the EXACT template structure provided by your specialized prompt
 === END OUTPUT FORMAT ===
 
-GROUNDING RULE FOR LEGAL CITATIONS:
+=== LEGAL CITATION FORMAT ===
+ALL case citations MUST follow this EXACT format — no variation:
+
+  **[Case Name]** — [Citation]
+
+Examples:
+  **Sushila Aggarwal v. State (NCT Delhi)** — (2020) 5 SCC 1
+  **Gurbaksh Singh Sibbia v. State of Punjab** — (1980) 2 SCC 565
+  **Arnesh Kumar v. State of Bihar** — (2014) 8 SCC 273
+  **Sharad Birdhichand Sarda v. State of Maharashtra** — AIR 1984 SC 1622
+
+Format rules:
+1. Case name in **bold**, followed by em-dash (—), followed by citation in plain text
+2. Supreme Court: (YYYY) Vol SCC Page — e.g., (2020) 5 SCC 1
+3. AIR: AIR YYYY Court Page — e.g., AIR 1984 SC 1622
+4. High Court: YYYY (Vol) Abbreviation Page — e.g., 2019 (3) GLH 45
+5. Do NOT put the citation inside parentheses after the em-dash
+6. Do NOT use markdown links — plain text only
+=== END CITATION FORMAT ===
+
+GROUNDING RULE FOR LEGAL CITATIONS (only when legal_case_search tool is provided):
 When drafting grounds, prayer, or any section citing case law:
 1. Call legal_case_search BEFORE writing each legal ground that needs a citation
 2. Only cite cases returned by legal_case_search — never write citations from memory
 3. If no relevant case is found, write the ground without a citation rather than inventing one
 4. Make SEPARATE calls for different grounds (bail factors, precedent for anticipatory bail, etc.)"""
+
+
+_PROVIDER_MAX_TOKENS: dict[str, int] = {
+    "openai": 16384,
+    "anthropic": 8192,
+    "google-genai": 8192,
+}
 
 
 class DraftAgentState(TypedDict):
@@ -110,12 +138,13 @@ class BaseDraftingAgent:
         self.model_name = model
         self.provider = provider
 
-    def _build_graph(self, tools: list):
+    def _build_graph(self, tools: list, document_type: DocumentType):
         """Build a LangGraph workflow for drafting."""
-        llm = init_chat_model(self.model_name, model_provider=self.provider, max_tokens=8192)
+        max_tokens = _PROVIDER_MAX_TOKENS.get(self.provider, 8192)
+        llm = init_chat_model(self.model_name, model_provider=self.provider, max_tokens=max_tokens)
         llm_with_tools = llm.bind_tools(tools) if tools else llm
         llm_structured = init_chat_model(
-            self.model_name, model_provider=self.provider, max_tokens=8192
+            self.model_name, model_provider=self.provider, max_tokens=max_tokens
         ).with_structured_output(GeneratedDocument)
         system_msg = SystemMessage(content=self.system_prompt)
 
@@ -145,7 +174,8 @@ class BaseDraftingAgent:
                 "The section titles should match what appears in the document itself."
             )
             msgs = [system_msg] + state["messages"] + [HumanMessage(content=extraction_prompt)]
-            document = await llm_structured.ainvoke(msgs)
+            raw_doc = cast(GeneratedDocument, await llm_structured.ainvoke(msgs))
+            document = raw_doc.model_copy(update={"document_type": document_type})
             return {"document": document}
 
         workflow = StateGraph(DraftAgentState)
@@ -223,9 +253,23 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
             else:
                 logger.warning(f"[draft] RAG returned empty context for file_ids={deps.file_ids}")
 
+        if deps.retriever:
+            search_instruction = (
+                "legal_case_search is available — use it for EACH ground/section requiring case citations. "
+                "Make targeted queries per ground. Only cite cases returned by the tool. "
+                "Format every citation as: **Case Name** — Citation (see CITATION FORMAT above)."
+            )
+        else:
+            search_instruction = (
+                "legal_case_search is NOT available in this session. Do NOT attempt to call it. "
+                "Write all legal grounds without case citations. You may reference landmark case names "
+                "only where essential (e.g., Sharad Birdhichand Sarda, Gurbaksh Singh Sibbia) "
+                "but do not write any citation numbers."
+            )
+
         prompt = f"""Draft the following document using ONLY the information provided.
 
-Document Type: {deps.title}
+Document Title: {deps.title}
 
 === DRAFTING STRATEGY ===
 Before writing, do the following mentally:
@@ -245,9 +289,7 @@ Use these EXACT details - names, ages, addresses, amounts, dates - in your draft
 === END STRUCTURED INPUT ===
 {language_section}{rag_section}{examples_section}
 
-If legal_case_search is available, use it for EACH ground/section requiring case law support.
-Make targeted, specific queries: e.g., "anticipatory bail Section 438 factors", "bail default Section 167 right",
-"circumstantial evidence five tests Sharad Birdhichand", "property trespass unlawful interference".
+{search_instruction}
 
 === FORMATTING REMINDER ===
 - Output CLEAN MARKDOWN following your template exactly
@@ -269,6 +311,6 @@ Generate a COMPLETE, court-ready document following the EXACT markdown template 
         if deps.retriever:
             tools.append(create_legal_search_tool(deps.retriever))
 
-        graph = self._build_graph(tools)
+        graph = self._build_graph(tools, deps.document_type)
         result = await graph.ainvoke({"messages": [HumanMessage(content=prompt)], "document": None})
         return result["document"]

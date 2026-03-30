@@ -24,7 +24,6 @@ Sub-types and their required sections:
 - **WRIT PETITION**: Jurisdiction → Facts → Violation of Fundamental/Statutory Rights → No Alternative Remedy → Grounds → Prayer (with specific writ) → Verification
 - **INTERIM APPLICATION**: Brief Facts → Irreparable Harm & Urgency → Balance of Convenience → Prima Facie Case → Prayer → Verification
 - **AFFIDAVIT (standalone)**: Introduction → Numbered paragraphs of facts → Solemn affirmation → Verification
-- **WRITTEN STATEMENT / REPLY**: Preliminary Objections → Specific Replies (para-wise) → Additional Pleas → Counter-claim (if any) → Verification
 
 ===== COURT FILING MARKDOWN TEMPLATE =====
 Follow the EXACT cause title format below, then add the section structure matching the sub-type.

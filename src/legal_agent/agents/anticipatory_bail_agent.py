@@ -22,10 +22,10 @@ KEY DISTINCTION FROM REGULAR BAIL (Section 439 CrPC / Section 483 BNSS):
 | Effect | Direction to release IF arrested | Release from existing custody |
 
 KEY PRECEDENTS:
-- **Gurbaksh Singh Sibbia v. State of Punjab, (1980) 2 SCC 565** — wide and unfettered discretion; conditions must not be excessive
-- **Sushila Aggarwal v. State (NCT Delhi), (2020) 5 SCC 1** — AB valid till end of trial; no need for time limit
-- **Arnesh Kumar v. State of Bihar, (2014) 8 SCC 273** — arrest not automatic for offences with ≤7 years imprisonment or Section 498A; IO must apply mind
-- **Siddharam Satlingappa Mhetre v. State of Maharashtra, (2011) 1 SCC 694** — AB is a fundamental right protection; must be granted unless exceptional circumstances
+- **Gurbaksh Singh Sibbia v. State of Punjab** — (1980) 2 SCC 565 — wide and unfettered discretion; conditions must not be excessive
+- **Sushila Aggarwal v. State (NCT Delhi)** — (2020) 5 SCC 1 — AB valid till end of trial; no need for time limit
+- **Arnesh Kumar v. State of Bihar** — (2014) 8 SCC 273 — arrest not automatic for offences with ≤7 years imprisonment or Section 498A; IO must apply mind
+- **Siddharam Satlingappa Mhetre v. State of Maharashtra** — (2011) 1 SCC 694 — AB is a fundamental right protection; must be granted unless exceptional circumstances
 
 SECTION 438(1) FACTORS courts consider:
 1. Nature and gravity of accusation
@@ -141,7 +141,7 @@ The applicant is entitled to anticipatory bail on the following grounds, among o
 
 (VII) That the offence alleged is [describe — not heinous / not violent / primarily economic / a civil dispute criminalised]. This Hon'ble Court in exercise of its powers under Section 438 CrPC / Section 482 BNSS must balance the applicant's fundamental right to personal liberty under **Article 21 of the Constitution** against the gravity of the accusation. The accusation, on a fair reading, does not warrant pre-trial incarceration.
 
-(VIII) That in **Arnesh Kumar v. State of Bihar, (2014) 8 SCC 273**, the Hon'ble Supreme Court has directed that arrest should not be made automatically in offences punishable with imprisonment up to 7 years. The police must first satisfy themselves of the necessity of arrest. In the present case, arrest of the applicant is wholly unnecessary. [Use legal_case_search: query "Arnesh Kumar arrest guidelines necessity Section 41 CrPC".]
+(VIII) That in **Arnesh Kumar v. State of Bihar** — (2014) 8 SCC 273, the Hon'ble Supreme Court has directed that arrest should not be made automatically in offences punishable with imprisonment up to 7 years. The police must first satisfy themselves of the necessity of arrest. In the present case, arrest of the applicant is wholly unnecessary. [Use legal_case_search: query "Arnesh Kumar arrest guidelines necessity Section 41 CrPC".]
 
 ### (E) ACCUSATION IS MALAFIDE AND MOTIVATED
 
@@ -151,7 +151,7 @@ The applicant is entitled to anticipatory bail on the following grounds, among o
 
 ### (F) CONSTITUTIONAL RIGHT TO LIBERTY
 
-(XI) That the right to personal liberty guaranteed by **Article 21 of the Constitution of India** is of paramount importance. The Supreme Court in **Sushila Aggarwal v. State (NCT Delhi), (2020) 5 SCC 1** and **Gurbaksh Singh Sibbia v. State of Punjab, (1980) 2 SCC 565** has held that anticipatory bail jurisdiction must be exercised broadly and liberally to protect citizens from harassment. [Use legal_case_search: query "Gurbaksh Singh Sibbia anticipatory bail Section 438 wide discretion personal liberty".]
+(XI) That the right to personal liberty guaranteed by **Article 21 of the Constitution of India** is of paramount importance. The Supreme Court in **Sushila Aggarwal v. State (NCT Delhi)** — (2020) 5 SCC 1 and **Gurbaksh Singh Sibbia v. State of Punjab** — (1980) 2 SCC 565 has held that anticipatory bail jurisdiction must be exercised broadly and liberally to protect citizens from harassment. [Use legal_case_search: query "Gurbaksh Singh Sibbia anticipatory bail Section 438 wide discretion personal liberty".]
 
 (XII) That the applicant's arrest would cause irreparable harm — [loss of livelihood / damage to reputation / separation from family / disruption of medical treatment / impact on minor children] — none of which can be adequately compensated. The balance of hardship strongly favours protection.
 

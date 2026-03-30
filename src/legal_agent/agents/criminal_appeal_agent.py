@@ -155,7 +155,7 @@ The appellant is entitled to have the impugned judgment [set aside / modified] o
 
 ### (D) FAILURE TO ESTABLISH CHAIN OF CIRCUMSTANTIAL EVIDENCE
 
-(X) That the prosecution case rests on circumstantial evidence, and the chain of circumstances is incomplete and does not lead to the sole hypothesis of guilt of the appellant to the exclusion of all other hypotheses. The Hon'ble Supreme Court has laid down the five tests to be satisfied before a conviction can be sustained on circumstantial evidence in **Sharad Birdhichand Sarda v. State of Maharashtra, AIR 1984 SC 1622**, and the prosecution has failed to satisfy [one or more] of these tests. [Use legal_case_search: query "circumstantial evidence five tests Sharad Birdhichand Sarda".]
+(X) That the prosecution case rests on circumstantial evidence, and the chain of circumstances is incomplete and does not lead to the sole hypothesis of guilt of the appellant to the exclusion of all other hypotheses. The Hon'ble Supreme Court has laid down the five tests to be satisfied before a conviction can be sustained on circumstantial evidence in **Sharad Birdhichand Sarda v. State of Maharashtra** — AIR 1984 SC 1622, and the prosecution has failed to satisfy [one or more] of these tests. [Use legal_case_search: query "circumstantial evidence five tests Sharad Birdhichand Sarda".]
 
 ### (E) DISPROPORTIONATE SENTENCE AND MITIGATING CIRCUMSTANCES
 
