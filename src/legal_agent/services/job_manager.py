@@ -10,6 +10,10 @@ from typing import Any, Callable, Coroutine
 from legal_agent.config import get_settings
 from legal_agent.models.responses import JobStatus, JobType
 
+# Maximum number of terminal (completed/failed) jobs kept in memory per restart.
+# Active (pending/processing) jobs are never evicted.
+_MAX_TERMINAL_JOBS = 200
+
 logger = logging.getLogger(__name__)
 
 
@@ -73,6 +77,7 @@ class JobManager:
         )
         async with self._lock:
             self._jobs[job_id] = job
+            self._evict_terminal_jobs()
         return job
 
     async def get_job(self, job_id: str) -> Job | None:
@@ -174,6 +179,20 @@ class JobManager:
         task = asyncio.create_task(_execute())
         async with self._lock:
             self._tasks[job_id] = task
+
+    def _evict_terminal_jobs(self) -> None:
+        """Drop oldest completed/failed jobs once the cap is exceeded. Must be called under self._lock."""
+        terminal = [
+            j for j in self._jobs.values()
+            if j.status in (JobStatus.COMPLETED, JobStatus.FAILED)
+        ]
+        if len(terminal) <= _MAX_TERMINAL_JOBS:
+            return
+        terminal.sort(key=lambda j: j.completed_at or j.created_at)
+        to_drop = len(terminal) - _MAX_TERMINAL_JOBS
+        for job in terminal[:to_drop]:
+            del self._jobs[job.job_id]
+        logger.debug(f"Evicted {to_drop} old terminal jobs (cap={_MAX_TERMINAL_JOBS})")
 
     async def cleanup(self) -> None:
         """Cancel all running tasks and clean up."""

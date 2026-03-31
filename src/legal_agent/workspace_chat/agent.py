@@ -83,6 +83,9 @@ def _create_rag_tool(rag_client: RAGClient, file_ids: list[str], user_id: str):
 
 
 class WorkspaceChatAgent:
+    # Max number of distinct (model_id, file_ids) graph instances kept in memory.
+    _GRAPH_CACHE_SIZE = 32
+
     def __init__(self):
         self._pool: AsyncConnectionPool | None = None
         self.checkpointer: AsyncPostgresSaver | None = None
@@ -91,6 +94,7 @@ class WorkspaceChatAgent:
         self._legal_search_tool = None
         self._llms: dict = {}
         self._base_graphs: dict = {}  # cached per model_id, no per-request tools
+        self._rag_graphs: dict = {}   # LRU cache: (model_id, file_ids_key) -> graph
 
     async def initialize(self, db_url: str, rag_client: RAGClient | None, retriever: LegalCaseRetriever | None = None):
         self._rag_client = rag_client
@@ -138,6 +142,15 @@ class WorkspaceChatAgent:
         model_id = model or get_settings().chat_llm_default_model
         if not file_ids:
             return self._get_base_graph(model_id)
+
+        # Cache graphs by (model_id, sorted file_ids) — user_id is passed inside the tool
+        # closure but doesn't affect the graph structure itself.
+        cache_key = (model_id, tuple(sorted(file_ids)))
+        if cache_key in self._rag_graphs:
+            # Refresh RAG tool closure so it uses the current user_id and file_ids order
+            self._rag_graphs[cache_key] = self._rag_graphs.pop(cache_key)
+            return self._rag_graphs[cache_key]
+
         llm = self._get_llm(model_id)
         rag_tool = _create_rag_tool(self._rag_client, file_ids, user_id)
         tools = [rag_tool]
@@ -145,7 +158,16 @@ class WorkspaceChatAgent:
             tools.append(self._legal_search_tool)
         if self._web_search_tool:
             tools.append(self._web_search_tool)
-        return create_react_agent(llm, tools=tools, checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT)
+        graph = create_react_agent(llm, tools=tools, checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT)
+
+        # Evict oldest entry when cache is full
+        if len(self._rag_graphs) >= self._GRAPH_CACHE_SIZE:
+            oldest = next(iter(self._rag_graphs))
+            del self._rag_graphs[oldest]
+            logger.debug(f"Evicted cached RAG graph for key {oldest}")
+
+        self._rag_graphs[cache_key] = graph
+        return graph
 
     async def stream_response(
         self,
