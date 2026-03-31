@@ -62,6 +62,61 @@ class Settings(BaseSettings):
     s3_bucket_name: str = "knowlex-user-documents"
     s3_signed_url_expiry: int = 3600
 
+    # Embeddings (RAG engine)
+    embedding_model: str = "gemini-embedding-2-preview"
+    embedding_provider: str = "gemini"
+    vector_size: int = 1536
+    distance_metric: str = "COSINE"
+    chunk_size: int = 800
+    chunk_overlap: int = 100
+    max_chunk_size: int = 1200
+
+    # LLM extras (RAG engine)
+    openai_model: str = "gpt-4o"
+    openai_max_tokens: int = 1000
+    openai_temperature: float = 0.1
+    gemini_model: str = "gemini-2.0-flash"
+    gemini_max_tokens: int = 4000
+    gemini_temperature: float = 0.1
+    enable_json_response: bool = False
+
+    # Qdrant
+    qdrant_host: str = "localhost"
+    qdrant_port: int = 6333
+    qdrant_timeout: int = 30
+    qdrant_api_key: str = ""
+
+    # Reranking
+    reranker_enabled: bool = True
+    reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+    reranker_top_k: int = 5
+
+    # Critic
+    critic_enabled: bool = False
+    critic_model_name: str = "models/gemini-2.5-flash"
+    critic_model_api_key: str = ""
+    critic_model_temperature: float = 0.1
+
+    # Feedback
+    feedback_enabled: bool = True
+    feedback_similarity_threshold: float = 0.8
+
+    # Query
+    relevance_threshold: float = 0.4
+
+    # LlamaCloud
+    llama_cloud_api_key: str = ""
+
+    # Semantic chunking
+    semantic_similarity_threshold: float = 0.8
+    semantic_min_chunk_size: int = 100
+    semantic_model: str = "sentence-transformers/all-MiniLM-L6-v2"
+
+    # Parser
+    web_scraper_user_agent: str = "RAG-Engine/1.0"
+    web_scraper_timeout: int = 30
+    youtube_transcript_fallback: str = "gemini"
+
     def get_langchain_provider(self) -> str:
         return _LANGCHAIN_PROVIDERS.get(self.llm_provider, self.llm_provider)
 

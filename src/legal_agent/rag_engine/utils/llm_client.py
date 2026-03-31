@@ -1,5 +1,5 @@
 from typing import List, Optional, Any, Dict
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 import logging
 import os
 import json
@@ -8,28 +8,28 @@ logger = logging.getLogger(__name__)
 
 class LlmClient:
     def __init__(self):
-        self.provider = Config.llm.PROVIDER
+        self.provider = get_settings().llm_provider
 
         if self.provider == "gemini":
             from google import genai
             logger.info("Using Gemini via google-genai")
-            self.client = genai.Client(api_key=Config.llm.GEMINI_API_KEY)
-            self.model_id = Config.llm.GEMINI_MODEL # e.g. "gemini-2.0-flash"
-            self.max_tokens = Config.llm.GEMINI_MAX_TOKENS
-            self.temperature = Config.llm.GEMINI_TEMPERATURE
-            
+            self.client = genai.Client(api_key=get_settings().gemini_api_key or "")
+            self.model_id = get_settings().gemini_model # e.g. "gemini-2.0-flash"
+            self.max_tokens = get_settings().gemini_max_tokens
+            self.temperature = get_settings().gemini_temperature
+
         elif self.provider == "openai":
             from openai import OpenAI
-            self.client = OpenAI(api_key=Config.llm.OPENAI_API_KEY)
-            self.model_id = Config.llm.OPENAI_MODEL
-            self.max_tokens = Config.llm.OPENAI_MAX_TOKENS
-            self.temperature = Config.llm.OPENAI_TEMPERATURE
+            self.client = OpenAI(api_key=get_settings().openai_api_key or "")
+            self.model_id = get_settings().openai_model
+            self.max_tokens = get_settings().openai_max_tokens
+            self.temperature = get_settings().openai_temperature
 
     def generate_answer(self, query: str, context_chunks: List[str], force_json: bool = None, answer_style: str = "detailed") -> str:
         if context_chunks is None:
             context_chunks = []
 
-        should_use_json = force_json if force_json is not None else Config.llm.ENABLE_JSON_RESPONSE
+        should_use_json = force_json if force_json is not None else get_settings().enable_json_response
 
         if should_use_json and self._is_educational_query(query):
             return self._generate_educational_json(query, context_chunks)

@@ -4,7 +4,7 @@ from pathlib import Path
 
 from .base_parser import BaseParser
 from .models import ParsedContent, ParsedMetadata, ContentSection
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -31,8 +31,8 @@ class ImageParser(BaseParser):
 
     def __init__(self):
         from google import genai
-        self.client = genai.Client(api_key=Config.llm.GEMINI_API_KEY)
-        self.vision_model = Config.llm.GEMINI_MODEL
+        self.client = genai.Client(api_key=get_settings().gemini_api_key or "")
+        self.vision_model = get_settings().gemini_model
 
     def can_handle(self, source: Union[str, Path]) -> bool:
         ext = Path(str(source)).suffix.lower()
@@ -88,7 +88,7 @@ class ImageParser(BaseParser):
             model=self.vision_model,
             contents=[image_part, IMAGE_DESCRIPTION_PROMPT],
             config=types.GenerateContentConfig(
-                max_output_tokens=Config.llm.GEMINI_MAX_TOKENS,
+                max_output_tokens=get_settings().gemini_max_tokens,
                 temperature=0.1,
             ),
         )

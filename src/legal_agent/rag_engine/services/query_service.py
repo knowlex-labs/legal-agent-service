@@ -7,7 +7,7 @@ from legal_agent.rag_engine.utils.response_enhancer import enhance_response_if_n
 from legal_agent.rag_engine.models.api_models import QueryResponse, ChunkConfig, CriticEvaluation, ChunkType
 from legal_agent.rag_engine.core.reranker import reranker
 from legal_agent.rag_engine.core.critic import critic
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 import re
 import logging
 
@@ -149,7 +149,7 @@ class QueryService:
 
     def _filter_relevant_results(self, results: List[Dict], threshold: float = None) -> List[Dict]:
         if threshold is None:
-            threshold = Config.query.RELEVANCE_THRESHOLD
+            threshold = get_settings().relevance_threshold
         return [result for result in results if result.get("score", 0) >= threshold]
 
     def _is_valid_text(self, text: str) -> bool:
@@ -257,12 +257,12 @@ class QueryService:
 
     def _apply_feedback_scoring(self, results: List[Dict], query_vector: List[float],
                               collection_name: str) -> List[Dict]:
-        if not Config.feedback.FEEDBACK_ENABLED or not results:
+        if not get_settings().feedback_enabled or not results:
             return results
 
         try:
             relevant_feedback = self.feedback_repo.get_relevant_feedback(
-                query_vector, collection_name, Config.feedback.FEEDBACK_SIMILARITY_THRESHOLD
+                query_vector, collection_name, get_settings().feedback_similarity_threshold
             )
 
             if not relevant_feedback:

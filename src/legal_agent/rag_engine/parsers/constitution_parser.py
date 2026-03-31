@@ -12,7 +12,7 @@ from pathlib import Path
 from llama_parse import LlamaParse
 from .base_parser import BaseParser
 from .legal_models import LegalParsedContent, LegalDocument, LegalHierarchy, LegalProvision, ParsedMetadata, ContentSection
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +27,7 @@ class ConstitutionParser(BaseParser):
         """Initialize with LlamaParse configuration."""
         self.llamaparse = LlamaParse(
             result_type="markdown",  # Better for structure extraction
-            api_key=Config.llama_cloud.API_KEY,
+            api_key=get_settings().llama_cloud_api_key,
             verbose=True,
             # Premium parsing settings for legal documents - using new parameter name
             content_guideline_instruction="Extract the complete hierarchical structure of the Constitution including Parts, Articles, Schedules with their titles and full text. Preserve cross-references between articles."

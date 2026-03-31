@@ -10,7 +10,7 @@ import fitz
 
 from .base_parser import BaseParser
 from .models import ParsedContent, ParsedMetadata, ContentSection
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -454,7 +454,7 @@ class PDFParser(BaseParser):
         from google import genai
         from google.genai import types
 
-        client = genai.Client(api_key=Config.llm.GEMINI_API_KEY)
+        client = genai.Client(api_key=get_settings().gemini_api_key or "")
         prompt = (
             "Transcribe all text from this document page exactly as it appears. "
             "Include all visible text: headers, body, stamps, seals, dates, names, "
@@ -467,7 +467,7 @@ class PDFParser(BaseParser):
             image_bytes = pixmap.tobytes("png")
 
             response = client.models.generate_content(
-                model=Config.llm.GEMINI_MODEL,
+                model=get_settings().gemini_model,
                 contents=[
                     types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
                     prompt

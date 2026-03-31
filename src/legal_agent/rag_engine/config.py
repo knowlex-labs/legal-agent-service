@@ -1,96 +1,118 @@
-import os
-from dotenv import load_dotenv
+"""
+Compatibility shim — maps the old rag_engine Config.* namespace to the
+central Settings object so no rag_engine file needs to change.
+"""
 
-load_dotenv()
+from legal_agent.config import get_settings
 
-class ParserConfig:
-    WEB_SCRAPER_USER_AGENT: str = os.getenv("WEB_SCRAPER_USER_AGENT", "RAG-Engine/1.0")
-    WEB_SCRAPER_TIMEOUT: int = int(os.getenv("WEB_SCRAPER_TIMEOUT", "30"))
-    YOUTUBE_TRANSCRIPT_FALLBACK: str = os.getenv("YOUTUBE_TRANSCRIPT_FALLBACK", "gemini")
 
-class EmbeddingConfig:
-    MODEL_NAME: str = os.getenv("EMBEDDING_MODEL", "gemini-embedding-2-preview")
-    PROVIDER: str = os.getenv("EMBEDDING_PROVIDER", "gemini")
-    VECTOR_SIZE: int = int(os.getenv("VECTOR_SIZE", "1536"))
-    DISTANCE_METRIC: str = os.getenv("DISTANCE_METRIC", "COSINE")
-    CHUNK_SIZE: int = int(os.getenv("CHUNK_SIZE", "800"))
-    CHUNK_OVERLAP: int = int(os.getenv("CHUNK_OVERLAP", "100"))
-    MAX_CHUNK_SIZE: int = int(os.getenv("MAX_CHUNK_SIZE", "1200"))
+class _ParserConfig:
+    @property
+    def WEB_SCRAPER_USER_AGENT(self): return get_settings().web_scraper_user_agent
+    @property
+    def WEB_SCRAPER_TIMEOUT(self): return get_settings().web_scraper_timeout
+    @property
+    def YOUTUBE_TRANSCRIPT_FALLBACK(self): return get_settings().youtube_transcript_fallback
 
-class LlmConfig:
-    PROVIDER: str = os.getenv("LLM_PROVIDER", "openai")
-    OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
-    OPENAI_MODEL: str = os.getenv("OPENAI_MODEL", "gpt-4o")
-    OPENAI_MAX_TOKENS: int = int(os.getenv("OPENAI_MAX_TOKENS", "1000"))
-    OPENAI_TEMPERATURE: float = float(os.getenv("OPENAI_TEMPERATURE", "0.1"))
-    GEMINI_API_KEY: str = os.getenv("GEMINI_API_KEY", "")
-    GEMINI_MODEL: str = os.getenv("GEMINI_MODEL", "gemini-2.0-flash")
-    GEMINI_MAX_TOKENS: int = int(os.getenv("GEMINI_MAX_TOKENS", "4000"))
-    GEMINI_TEMPERATURE: float = float(os.getenv("GEMINI_TEMPERATURE", "0.1"))
-    ENABLE_JSON_RESPONSE: bool = os.getenv("ENABLE_JSON_RESPONSE", "false").lower() == "true"
 
-class AppConfig:
-    DEBUG: bool = os.getenv("DEBUG", "false").lower() == "true"
-    LOG_LEVEL: str = os.getenv("LOG_LEVEL", "INFO")
+class _EmbeddingConfig:
+    @property
+    def MODEL_NAME(self): return get_settings().embedding_model
+    @property
+    def PROVIDER(self): return get_settings().embedding_provider
+    @property
+    def VECTOR_SIZE(self): return get_settings().vector_size
+    @property
+    def DISTANCE_METRIC(self): return get_settings().distance_metric
+    @property
+    def CHUNK_SIZE(self): return get_settings().chunk_size
+    @property
+    def CHUNK_OVERLAP(self): return get_settings().chunk_overlap
+    @property
+    def MAX_CHUNK_SIZE(self): return get_settings().max_chunk_size
 
-    API_HOST: str = os.getenv("API_HOST", "0.0.0.0")
-    API_PORT: int = int(os.getenv("API_PORT", "8000"))
-    UPLOADS_DIR: str = os.getenv("UPLOADS_DIR", "uploads")
-    MAX_FILE_SIZE_MB: int = int(os.getenv("MAX_FILE_SIZE_MB", "100"))
-    
-    # CORS Configuration
-    CORS_ALLOWED_ORIGINS: list = os.getenv(
-        "CORS_ALLOWED_ORIGINS",
-        "http://localhost:3000,http://localhost:7860,http://localhost:5173,https://nyayamind-frontend-722723826302.asia-south1.run.app,https://nyayamind-ai-content-tutor-722723826302.asia-south1.run.app,http://13.236.51.35:3000,http://13.236.51.35:8080"
-    ).split(",")
 
-class RerankingConfig:
-    RERANKER_ENABLED: bool = os.getenv("RERANKER_ENABLED", "true").lower() == "true"
-    RERANKER_MODEL: str = os.getenv("RERANKER_MODEL", "cross-encoder/ms-marco-MiniLM-L-6-v2")
-    RERANKER_TOP_K: int = int(os.getenv("RERANKER_TOP_K", "5"))
+class _LlmConfig:
+    @property
+    def PROVIDER(self): return get_settings().llm_provider
+    @property
+    def OPENAI_API_KEY(self): return get_settings().openai_api_key or ""
+    @property
+    def OPENAI_MODEL(self): return get_settings().openai_model
+    @property
+    def OPENAI_MAX_TOKENS(self): return get_settings().openai_max_tokens
+    @property
+    def OPENAI_TEMPERATURE(self): return get_settings().openai_temperature
+    @property
+    def GEMINI_API_KEY(self): return get_settings().gemini_api_key or ""
+    @property
+    def GEMINI_MODEL(self): return get_settings().gemini_model
+    @property
+    def GEMINI_MAX_TOKENS(self): return get_settings().gemini_max_tokens
+    @property
+    def GEMINI_TEMPERATURE(self): return get_settings().gemini_temperature
+    @property
+    def ENABLE_JSON_RESPONSE(self): return get_settings().enable_json_response
 
-class CriticConfig:
-    CRITIC_ENABLED: bool = os.getenv("CRITIC_ENABLED", "false").lower() == "true"
-    CRITIC_MODEL_NAME: str = os.getenv("CRITIC_MODEL_NAME", "models/gemini-2.5-flash")
-    CRITIC_MODEL_API_KEY: str = os.getenv("CRITIC_MODEL_API_KEY", "")
-    CRITIC_MODEL_TEMPERATURE: float = float(os.getenv("CRITIC_MODEL_TEMPERATURE", "0.1"))
 
-class FeedbackConfig:
-    FEEDBACK_ENABLED: bool = os.getenv("FEEDBACK_ENABLED", "true").lower() == "true"
-    FEEDBACK_SIMILARITY_THRESHOLD: float = float(os.getenv("FEEDBACK_SIMILARITY_THRESHOLD", "0.8"))
+class _RerankingConfig:
+    @property
+    def RERANKER_ENABLED(self): return get_settings().reranker_enabled
+    @property
+    def RERANKER_MODEL(self): return get_settings().reranker_model
+    @property
+    def RERANKER_TOP_K(self): return get_settings().reranker_top_k
 
-class QueryConfig:
-    RELEVANCE_THRESHOLD: float = float(os.getenv("RELEVANCE_THRESHOLD", "0.4"))
 
-class StorageConfig:
-    STORAGE_TYPE: str = os.getenv("STORAGE_TYPE", "local").lower()
+class _CriticConfig:
+    @property
+    def CRITIC_ENABLED(self): return get_settings().critic_enabled
+    @property
+    def CRITIC_MODEL_NAME(self): return get_settings().critic_model_name
+    @property
+    def CRITIC_MODEL_API_KEY(self): return get_settings().critic_model_api_key
+    @property
+    def CRITIC_MODEL_TEMPERATURE(self): return get_settings().critic_model_temperature
 
-class S3Config:
-    ACCESS_KEY: str = os.getenv("S3_ACCESS_KEY", "")
-    SECRET_KEY: str = os.getenv("S3_SECRET_KEY", "")
-    REGION_NAME: str = os.getenv("S3_REGION_NAME", "us-east-1")
-    BUCKET_NAME: str = os.getenv("S3_BUCKET_NAME", "rag-engine")
 
-class LlamaCloudConfig:
-    API_KEY: str = os.getenv("LLAMA_CLOUD_API_KEY", "")
+class _FeedbackConfig:
+    @property
+    def FEEDBACK_ENABLED(self): return get_settings().feedback_enabled
+    @property
+    def FEEDBACK_SIMILARITY_THRESHOLD(self): return get_settings().feedback_similarity_threshold
 
-class QdrantConfig:
-    HOST: str = os.getenv("QDRANT_HOST", "localhost")
-    PORT: int = int(os.getenv("QDRANT_PORT", "6333"))
-    TIMEOUT: int = int(os.getenv("QDRANT_TIMEOUT", "30"))
-    API_KEY: str = os.getenv("QDRANT_API_KEY", "")
 
-class Config:
-    parser = ParserConfig()
-    embedding = EmbeddingConfig()
-    llm = LlmConfig()
-    app = AppConfig()
-    reranking = RerankingConfig()
-    critic = CriticConfig()
-    feedback = FeedbackConfig()
-    query = QueryConfig()
-    storage = StorageConfig()
+class _QueryConfig:
+    @property
+    def RELEVANCE_THRESHOLD(self): return get_settings().relevance_threshold
 
-    s3 = S3Config()
-    qdrant = QdrantConfig()
-    llama_cloud = LlamaCloudConfig()
+
+class _QdrantConfig:
+    @property
+    def HOST(self): return get_settings().qdrant_host
+    @property
+    def PORT(self): return get_settings().qdrant_port
+    @property
+    def TIMEOUT(self): return get_settings().qdrant_timeout
+    @property
+    def API_KEY(self): return get_settings().qdrant_api_key
+
+
+class _LlamaCloudConfig:
+    @property
+    def API_KEY(self): return get_settings().llama_cloud_api_key
+
+
+class _Config:
+    parser = _ParserConfig()
+    embedding = _EmbeddingConfig()
+    llm = _LlmConfig()
+    reranking = _RerankingConfig()
+    critic = _CriticConfig()
+    feedback = _FeedbackConfig()
+    query = _QueryConfig()
+    qdrant = _QdrantConfig()
+    llama_cloud = _LlamaCloudConfig()
+
+
+Config = _Config()

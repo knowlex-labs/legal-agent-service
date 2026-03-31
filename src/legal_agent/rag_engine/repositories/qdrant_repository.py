@@ -6,13 +6,13 @@ from qdrant_client.models import (
 from typing import List, Dict, Any, Optional
 import uuid
 import logging
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
 class QdrantRepository:
     def __init__(self):
-        host = Config.qdrant.HOST
+        host = get_settings().qdrant_host
 
         # Determine if using cloud instance (has domain with dots) or local
         is_cloud = '.' in host and 'localhost' not in host
@@ -21,15 +21,15 @@ class QdrantRepository:
             # For cloud instances, use HTTPS and the full host URL without port
             self.client = QdrantClient(
                 url=f"https://{host}",
-                api_key=Config.qdrant.API_KEY,
-                timeout=Config.qdrant.TIMEOUT
+                api_key=get_settings().qdrant_api_key,
+                timeout=get_settings().qdrant_timeout
             )
         else:
             # For local instances, use HTTP with port
             self.client = QdrantClient(
-                url=f"http://{host}:{Config.qdrant.PORT}",
-                api_key=Config.qdrant.API_KEY,
-                timeout=Config.qdrant.TIMEOUT
+                url=f"http://{host}:{get_settings().qdrant_port}",
+                api_key=get_settings().qdrant_api_key,
+                timeout=get_settings().qdrant_timeout
             )
             
 
@@ -124,7 +124,7 @@ class QdrantRepository:
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(
-                    size=Config.embedding.VECTOR_SIZE,
+                    size=get_settings().vector_size,
                     distance=Distance.COSINE
                 )
             )
@@ -157,7 +157,7 @@ class QdrantRepository:
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(
-                    size=Config.embedding.VECTOR_SIZE,
+                    size=get_settings().vector_size,
                     distance=Distance.COSINE,
                     on_disk=False  # Keep in memory for better performance
                 ),

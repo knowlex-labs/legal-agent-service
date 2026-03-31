@@ -1,7 +1,7 @@
 import time
 import logging
 from typing import List, Dict, Any, Optional
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,9 +28,9 @@ class Reranker:
         """Load model lazily on first use."""
         if self._model is None:
             try:
-                logger.info(f"Loading reranker model: {Config.reranking.RERANKER_MODEL}")
+                logger.info(f"Loading reranker model: {get_settings().reranker_model}")
                 from sentence_transformers import CrossEncoder
-                self._model = CrossEncoder(Config.reranking.RERANKER_MODEL)
+                self._model = CrossEncoder(get_settings().reranker_model)
                 logger.info("Reranker model loaded successfully")
             except Exception as e:
                 logger.error(f"Failed to load reranker model: {e}")
@@ -51,15 +51,15 @@ class Reranker:
         start_time = time.time()
 
         # Use config value if top_k not specified
-        final_top_k = top_k or Config.reranking.RERANKER_TOP_K
+        final_top_k = top_k or get_settings().reranker_top_k
         logger.info(f"Fetching top {final_top_k} documents")
 
         # Load model lazily if enabled
-        if Config.reranking.RERANKER_ENABLED:
+        if get_settings().reranker_enabled:
             self._ensure_model_loaded()
 
         # If reranker is disabled or model failed to load, return original order
-        if not Config.reranking.RERANKER_ENABLED or self._model is None:
+        if not get_settings().reranker_enabled or self._model is None:
             logger.info("Reranker disabled or model unavailable, returning original order")
             return documents[:final_top_k]
 
@@ -105,9 +105,9 @@ class Reranker:
 
     def is_available(self) -> bool:
         """Check if reranker is available and enabled."""
-        if Config.reranking.RERANKER_ENABLED:
+        if get_settings().reranker_enabled:
             self._ensure_model_loaded()
-        return Config.reranking.RERANKER_ENABLED and self._model is not None
+        return get_settings().reranker_enabled and self._model is not None
 
 # Global reranker instance
 reranker = Reranker()

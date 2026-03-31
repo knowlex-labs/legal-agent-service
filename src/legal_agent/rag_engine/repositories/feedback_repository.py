@@ -3,7 +3,7 @@ import os
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 
 
 class FeedbackRepository:

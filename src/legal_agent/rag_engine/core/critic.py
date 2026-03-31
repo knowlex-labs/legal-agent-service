@@ -3,7 +3,7 @@ import json
 import time
 import logging
 from typing import List, Dict, Any, Optional
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -17,17 +17,17 @@ class CriticHead:
         return cls._instance
 
     def __init__(self):
-        if self._model is None and Config.critic.CRITIC_MODEL_API_KEY:
+        if self._model is None and get_settings().critic_model_api_key:
             try:
-                genai.configure(api_key=Config.critic.CRITIC_MODEL_API_KEY)
-                self._model = genai.GenerativeModel(Config.critic.CRITIC_MODEL_NAME)
-                logger.info(f"Critic model loaded: {Config.critic.CRITIC_MODEL_NAME}")
+                genai.configure(api_key=get_settings().critic_model_api_key)
+                self._model = genai.GenerativeModel(get_settings().critic_model_name)
+                logger.info(f"Critic model loaded: {get_settings().critic_model_name}")
             except Exception as e:
                 logger.error(f"Failed to load critic model: {e}")
                 self._model = None
 
     def evaluate(self, query: str, context_chunks: List[str], answer: str) -> Optional[Dict[str, Any]]:
-        if not Config.critic.CRITIC_ENABLED or not self._model:
+        if not get_settings().critic_enabled or not self._model:
             return None
 
         start_time = time.time()
@@ -39,7 +39,7 @@ class CriticHead:
             response = self._model.generate_content(
                 prompt,
                 generation_config=genai.types.GenerationConfig(
-                    temperature=Config.critic.CRITIC_MODEL_TEMPERATURE
+                    temperature=get_settings().critic_model_temperature
                 )
             )
 
@@ -93,6 +93,6 @@ Scoring guidelines:
 Focus on factual completeness, not writing quality."""
 
     def is_available(self) -> bool:
-        return Config.critic.CRITIC_ENABLED and self._model is not None
+        return get_settings().critic_enabled and self._model is not None
 
 critic = CriticHead()

@@ -14,7 +14,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from legal_agent.rag_engine.strategies.base_chunking_strategy import BaseChunkingStrategy
 from legal_agent.rag_engine.models.api_models import HierarchicalChunk, ContentType, BookMetadata, ChunkType, TopicMetadata, ChunkMetadata
-from legal_agent.rag_engine.config import SemanticChunkingConfig
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -50,10 +50,10 @@ class SemanticChunkingStrategy(BaseChunkingStrategy):
             model_name: Sentence transformer model name
         """
         # Use configuration values as defaults, allow override
-        self.similarity_threshold = similarity_threshold or SemanticChunkingConfig.SIMILARITY_THRESHOLD
-        self.min_chunk_size = min_chunk_size or SemanticChunkingConfig.MIN_CHUNK_SIZE
-        self.max_chunk_size = max_chunk_size or SemanticChunkingConfig.MAX_CHUNK_SIZE
-        self.model_name = model_name or SemanticChunkingConfig.SEMANTIC_MODEL
+        self.similarity_threshold = similarity_threshold or get_settings().semantic_similarity_threshold
+        self.min_chunk_size = min_chunk_size or get_settings().semantic_min_chunk_size
+        self.max_chunk_size = max_chunk_size or get_settings().max_chunk_size
+        self.model_name = model_name or get_settings().semantic_model
 
         # Initialize model lazily to avoid startup overhead
         self._model = None

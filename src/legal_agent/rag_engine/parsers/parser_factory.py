@@ -10,7 +10,7 @@ from .youtube_parser import YouTubeParser
 from .web_parser import WebParser
 from .constitution_parser import ConstitutionParser
 from .image_parser import ImageParser
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ class ParserFactory:
         elif source_type == "youtube":
             logger.info("ParserFactory: using YouTubeParser")
             return YouTubeParser(
-                gemini_api_key=Config.llm.GEMINI_API_KEY
+                gemini_api_key=get_settings().gemini_api_key or ""
             )
 
         elif source_type == "image":

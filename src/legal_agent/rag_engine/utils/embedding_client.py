@@ -1,5 +1,5 @@
 from typing import List
-from legal_agent.rag_engine.config import Config
+from legal_agent.config import get_settings
 import logging
 
 logger = logging.getLogger(__name__)
@@ -12,34 +12,34 @@ class EmbeddingClient:
 
     def __init__(self):
         if EmbeddingClient._client is None:
-            provider = Config.embedding.PROVIDER
+            provider = get_settings().embedding_provider
 
             if provider == "gemini":
                 logger.info("Using Gemini embeddings via google-genai")
                 from google import genai
 
-                api_key = Config.llm.GEMINI_API_KEY
+                api_key = get_settings().gemini_api_key or ""
                 if not api_key:
                     raise ValueError("GEMINI_API_KEY not found in environment variables")
 
                 EmbeddingClient._client = genai.Client(api_key=api_key)
-                EmbeddingClient._model_name = Config.embedding.MODEL_NAME
+                EmbeddingClient._model_name = get_settings().embedding_model
                 logger.info(f"Gemini embedding client initialized: {EmbeddingClient._model_name}")
 
             elif provider == "openai":
-                logger.info(f"Using OpenAI embeddings: {Config.embedding.MODEL_NAME}")
+                logger.info(f"Using OpenAI embeddings: {get_settings().embedding_model}")
                 from openai import OpenAI
-                EmbeddingClient._client = OpenAI(api_key=Config.llm.OPENAI_API_KEY)
-                EmbeddingClient._model_name = Config.embedding.MODEL_NAME
+                EmbeddingClient._client = OpenAI(api_key=get_settings().openai_api_key or "")
+                EmbeddingClient._model_name = get_settings().embedding_model
 
             else:
-                logger.info(f"Using HuggingFace embeddings: {Config.embedding.MODEL_NAME}")
+                logger.info(f"Using HuggingFace embeddings: {get_settings().embedding_model}")
                 from sentence_transformers import SentenceTransformer
-                EmbeddingClient._client = SentenceTransformer(Config.embedding.MODEL_NAME)
+                EmbeddingClient._client = SentenceTransformer(get_settings().embedding_model)
 
         # Always initialise a dedicated Gemini client for image (multimodal) embeddings
         if EmbeddingClient._gemini_client is None:
-            api_key = Config.llm.GEMINI_API_KEY
+            api_key = get_settings().gemini_api_key or ""
             if api_key:
                 from google import genai
                 EmbeddingClient._gemini_client = genai.Client(api_key=api_key)
@@ -52,7 +52,7 @@ class EmbeddingClient:
             logger.warning("Empty texts list provided for embedding generation")
             return []
 
-        provider = Config.embedding.PROVIDER
+        provider = get_settings().embedding_provider
 
         if provider == "gemini":
             from google.genai import types
@@ -65,7 +65,7 @@ class EmbeddingClient:
                 result = EmbeddingClient._client.models.embed_content(
                     model=EmbeddingClient._model_name,
                     contents=batch,
-                    config=types.EmbedContentConfig(output_dimensionality=Config.embedding.VECTOR_SIZE)
+                    config=types.EmbedContentConfig(output_dimensionality=get_settings().vector_size)
                 )
                 all_embeddings.extend([obj.values for obj in result.embeddings])
 
@@ -94,7 +94,7 @@ class EmbeddingClient:
         result = EmbeddingClient._gemini_client.models.embed_content(
             model=MULTIMODAL_EMBEDDING_MODEL,
             contents=types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
-            config=types.EmbedContentConfig(output_dimensionality=Config.embedding.VECTOR_SIZE)
+            config=types.EmbedContentConfig(output_dimensionality=get_settings().vector_size)
         )
         return result.embeddings[0].values
 
