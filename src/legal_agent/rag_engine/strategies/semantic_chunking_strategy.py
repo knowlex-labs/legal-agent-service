@@ -9,7 +9,6 @@ import logging
 import re
 from typing import List, Dict, Any, Optional, Tuple
 import numpy as np
-from sentence_transformers import SentenceTransformer
 from sklearn.metrics.pairwise import cosine_similarity
 
 from legal_agent.rag_engine.strategies.base_chunking_strategy import BaseChunkingStrategy
@@ -69,10 +68,11 @@ class SemanticChunkingStrategy(BaseChunkingStrategy):
         ]
 
     @property
-    def model(self) -> SentenceTransformer:
+    def model(self):
         """Lazy load the sentence transformer model."""
         if self._model is None:
             logger.info(f"Loading sentence transformer model: {self.model_name}")
+            from sentence_transformers import SentenceTransformer
             self._model = SentenceTransformer(self.model_name)
         return self._model
 
