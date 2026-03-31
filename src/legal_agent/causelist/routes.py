@@ -51,6 +51,7 @@ class CaseDetail(BaseModel):
 
 
 class TriggerResponse(BaseModel):
+    date: str  # YYYY-MM-DD — the cause list date that was scraped
     total: int
     cases: list[CaseDetail]
 
@@ -111,11 +112,11 @@ def _run_scrape(req: TriggerRequest) -> TriggerResponse:
 
     if not entries:
         logger.info("No entries found for user=%s bench=%s date=%s", req.userId, req.bench, date_str)
-        return TriggerResponse(total=0, cases=[])
+        return TriggerResponse(date=date_str, total=0, cases=[])
 
     cases = _build_cases(entries, req.bench)
     logger.info("Done user=%s: total=%d cases=%d", req.userId, len(entries), len(cases))
-    return TriggerResponse(total=len(entries), cases=cases)
+    return TriggerResponse(date=date_str, total=len(entries), cases=cases)
 
 
 @causelist_router.post("/causelist/trigger", response_model=TriggerResponse)
