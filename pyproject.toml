@@ -20,6 +20,8 @@ dependencies = [
     "python-dotenv>=1.0.0",
     "psycopg[binary,pool]>=3.1.0",
     "pgvector>=0.2.0",
+    # Pinned + sourced to pytorch-cpu index so Linux Docker does not install CUDA wheels (~3GB+).
+    "torch>=2.0",
     "sentence-transformers>=3.0.0",
     "langgraph-checkpoint-postgres>=2.0.0",
     "sse-starlette>=2.0.0",
@@ -72,3 +74,13 @@ target-version = "py311"
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+
+# Docker / Railway: default PyPI torch pulls CUDA 12 wheels on Linux (~3GB+ of nvidia-*).
+# Direct `torch` dep + pytorch-cpu index forces CPU-only wheels (matches MODEL_DEVICE=cpu).
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
