@@ -75,6 +75,10 @@ target-version = "py311"
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
+# link-mode here so uv.toml can be deleted — avoids "index ignored in favor of uv.toml" warning.
+[tool.uv]
+link-mode = "copy"
+
 # Docker / Railway: default PyPI torch pulls CUDA 12 wheels on Linux (~3GB+ of nvidia-*).
 # Direct `torch` dep + pytorch-cpu index forces CPU-only wheels (matches MODEL_DEVICE=cpu).
 [[tool.uv.index]]

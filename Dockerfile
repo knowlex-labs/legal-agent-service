@@ -14,6 +14,8 @@ RUN uv sync --frozen --no-dev --no-install-project
 # ---- runtime stage ----
 FROM python:3.12-slim AS runtime
 
+COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+
 RUN useradd --create-home --uid 1000 appuser
 
 WORKDIR /app
