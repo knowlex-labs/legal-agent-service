@@ -27,7 +27,8 @@ COPY src/ src/
 ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app/src" \
     PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    PORT=8080
 
 # Install Camoufox browser (Firefox-based anti-detect) and Playwright deps
 RUN /app/.venv/bin/python -m camoufox fetch && \
@@ -35,6 +36,6 @@ RUN /app/.venv/bin/python -m camoufox fetch && \
 
 USER appuser
 
-EXPOSE 8001
+EXPOSE $PORT
 
-CMD ["python", "-m", "uvicorn", "legal_agent.main:app", "--host", "0.0.0.0", "--port", "8001"]
+CMD sh -c "python -m uvicorn legal_agent.main:app --host 0.0.0.0 --port $PORT"
