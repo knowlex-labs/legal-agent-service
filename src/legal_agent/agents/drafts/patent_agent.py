@@ -1,6 +1,6 @@
 """Patent application drafting agent — Patents Act, 1970 / Patents Rules, 2003."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 PATENT_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 

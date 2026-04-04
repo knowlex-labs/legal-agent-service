@@ -1,6 +1,6 @@
 """Written statement drafting agent — Order VIII CPC."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 WRITTEN_STATEMENT_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 

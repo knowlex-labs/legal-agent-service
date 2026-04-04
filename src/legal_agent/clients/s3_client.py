@@ -23,7 +23,7 @@ class S3Client:
 
     async def upload_text(self, s3_path: str, content: str) -> str:
         """Upload UTF-8 text to S3. Returns s3_path."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _upload():
             self._client.put_object(
@@ -37,9 +37,19 @@ class S3Client:
         await loop.run_in_executor(None, _upload)
         return s3_path
 
+    async def download_bytes(self, s3_path: str) -> bytes:
+        """Download an S3 object and return its raw bytes."""
+        loop = asyncio.get_running_loop()
+
+        def _download():
+            response = self._client.get_object(Bucket=self._bucket_name, Key=s3_path)
+            return response["Body"].read()
+
+        return await loop.run_in_executor(None, _download)
+
     async def signed_url(self, s3_path: str) -> str:
         """Generate a presigned GET URL for the given S3 key."""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         def _sign():
             return self._client.generate_presigned_url(

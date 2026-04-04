@@ -1,6 +1,6 @@
 """Bail application drafting agent for regular and anticipatory bail."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 BAIL_APPLICATION_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
