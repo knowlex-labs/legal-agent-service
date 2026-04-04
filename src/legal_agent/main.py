@@ -151,6 +151,7 @@ async def lifespan(app: FastAPI):
     if workspace_chat_agent:
         await workspace_chat_agent.close()
     close_pool()
+    template_db.close_pool()
     if job_manager:
         await job_manager.cleanup()
     if rag_client and hasattr(rag_client, "close"):
