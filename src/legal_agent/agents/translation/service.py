@@ -91,6 +91,13 @@ class TranslationService:
             return request.content
 
         if request.file_id:
+            # NOTE: The RAG engine is a semantic search API, not a full-text retrieval API.
+            # This query may return only the most relevant chunks rather than the full document.
+            # For complete document translation, prefer passing `content` directly.
+            logger.warning(
+                f"Fetching document via RAG query for file_id={request.file_id} — "
+                "result may be truncated to top-ranked chunks, not the full document text"
+            )
             text = await self._rag_client.query(
                 file_ids=[request.file_id],
                 query="Return the full text content of this document",

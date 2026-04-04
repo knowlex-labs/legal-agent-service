@@ -1,5 +1,6 @@
 """TemplateService — orchestrates template creation, retrieval, and deletion."""
 
+import asyncio
 import logging
 import os
 
@@ -22,7 +23,8 @@ def _fast_model_string(settings: Settings) -> str:
         "anthropic": "claude-3-5-haiku-latest",
         "gemini": "gemini-2.0-flash",
     }
-    model = fast_models.get(settings.llm_provider, "gpt-4o-mini")
+    # Fall back to the configured model so we never produce an invalid cross-provider string
+    model = fast_models.get(settings.llm_provider, settings.llm_model)
     return f"{settings.llm_provider}:{model}"
 
 
@@ -75,8 +77,9 @@ class TemplateService:
         model = _fast_model_string(self._settings)
         generated_prompt = await generate_template_prompt(raw_text, model)
 
-        # Step 4 — persist
-        row = db.insert_template(
+        # Step 4 — persist (run sync DB call off the event loop)
+        row = await asyncio.to_thread(
+            db.insert_template,
             user_id=user_id,
             name=request.name,
             document_type=request.document_type,
@@ -88,16 +91,16 @@ class TemplateService:
         return _row_to_response(row)
 
     async def get_template(self, template_id: str, user_id: str) -> TemplateResponse:
-        row = db.get_template(template_id, user_id)
+        row = await asyncio.to_thread(db.get_template, template_id, user_id)
         if not row:
             raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")
         return _row_to_response(row)
 
     async def list_templates(self, user_id: str) -> list[TemplateResponse]:
-        rows = db.list_templates(user_id)
+        rows = await asyncio.to_thread(db.list_templates, user_id)
         return [_row_to_response(r) for r in rows]
 
     async def delete_template(self, template_id: str, user_id: str) -> None:
-        deleted = db.delete_template(template_id, user_id)
+        deleted = await asyncio.to_thread(db.delete_template, template_id, user_id)
         if not deleted:
             raise HTTPException(status_code=404, detail=f"Template '{template_id}' not found")

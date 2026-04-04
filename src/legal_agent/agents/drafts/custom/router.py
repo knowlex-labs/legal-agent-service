@@ -4,6 +4,7 @@ Registered at /api/v1/drafts/templates in main.py.
 """
 
 import logging
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, Header
 
@@ -52,20 +53,20 @@ async def list_templates(
 
 @router.get("/{template_id}", response_model=TemplateResponse)
 async def get_template(
-    template_id: str,
+    template_id: UUID,
     x_user_id: str = Header(..., alias="X-User-Id"),
     service: TemplateService = Depends(get_template_service),
 ) -> TemplateResponse:
     """Get a single custom template by ID."""
-    return await service.get_template(template_id, user_id=x_user_id)
+    return await service.get_template(str(template_id), user_id=x_user_id)
 
 
 @router.delete("/{template_id}", status_code=204)
 async def delete_template(
-    template_id: str,
+    template_id: UUID,
     x_user_id: str = Header(..., alias="X-User-Id"),
     service: TemplateService = Depends(get_template_service),
 ) -> None:
     """Delete a custom template."""
     logger.info(f"DELETE /drafts/templates/{template_id}: user={x_user_id}")
-    await service.delete_template(template_id, user_id=x_user_id)
+    await service.delete_template(str(template_id), user_id=x_user_id)

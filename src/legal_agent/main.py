@@ -114,7 +114,7 @@ async def lifespan(app: FastAPI):
 
     # Custom templates
     try:
-        template_db.create_table()
+        await asyncio.to_thread(template_db.create_table)
         logger.info("user_templates table ready")
     except Exception:
         logger.warning("Failed to create user_templates table — custom templates unavailable", exc_info=True)

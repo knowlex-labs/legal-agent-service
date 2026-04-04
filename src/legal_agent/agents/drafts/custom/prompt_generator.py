@@ -74,9 +74,15 @@ async def generate_template_prompt(text: str, model: str) -> str:
         provider_map = {"openai": "openai", "anthropic": "anthropic", "gemini": "google-genai"}
         llm = init_chat_model(model_name, model_provider=provider_map.get(provider, provider))
 
+        _TRUNCATION_LIMIT = 12000
+        if len(text) > _TRUNCATION_LIMIT:
+            logger.warning(
+                f"Template text truncated from {len(text)} to {_TRUNCATION_LIMIT} chars "
+                "for prompt generation — sections beyond the limit will not be captured"
+            )
         response = await llm.ainvoke([
             SystemMessage(content=_ANALYZER_SYSTEM_PROMPT),
-            HumanMessage(content=_ANALYZER_HUMAN_TEMPLATE.format(text=text[:12000])),
+            HumanMessage(content=_ANALYZER_HUMAN_TEMPLATE.format(text=text[:_TRUNCATION_LIMIT])),
         ])
         prompt = str(response.content).strip()
         logger.info(f"Generated template prompt: {len(prompt)} chars")

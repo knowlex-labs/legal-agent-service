@@ -65,7 +65,7 @@ def create_table() -> None:
     logger.info("user_templates table ensured")
 
 
-def insert_template(  # type: ignore[return-value]
+def insert_template(
     user_id: str,
     name: str,
     document_type: str,
@@ -90,6 +90,8 @@ def insert_template(  # type: ignore[return-value]
             })
             row = cur.fetchone()
         conn.commit()
+    if row is None:
+        raise RuntimeError("INSERT RETURNING returned no row — this should never happen")
     return row
 
 
