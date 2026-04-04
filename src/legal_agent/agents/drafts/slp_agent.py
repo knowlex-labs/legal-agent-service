@@ -1,6 +1,6 @@
 """Special Leave Petition drafting agent — Article 136 Constitution of India."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 SLP_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 

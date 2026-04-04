@@ -1,6 +1,6 @@
 """Contract and agreement drafting agent."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 CONTRACT_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 

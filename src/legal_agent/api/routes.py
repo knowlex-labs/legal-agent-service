@@ -5,7 +5,12 @@ import logging
 from fastapi import APIRouter, Depends, Header, HTTPException, Query
 
 from legal_agent.clients.s3_client import S3Client
-from legal_agent.models.requests import CreateDraftJobRequest, CreateJobRequest
+from legal_agent.models.requests import (
+    CreateDraftJobRequest,
+    CreateJobRequest,
+    CreateSummaryJobRequest,
+    CreateTranslationJobRequest,
+)
 from legal_agent.models.responses import (
     CreateJobResponse,
     JobListResponse,
@@ -16,6 +21,7 @@ from legal_agent.models.responses import (
 from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
 from legal_agent.summary.service import SummaryService
+from legal_agent.agents.translation.service import TranslationService
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +30,7 @@ router = APIRouter()
 # Dependency injection placeholders - set by main.py
 _draft_service: DraftService | None = None
 _summary_service: SummaryService | None = None
+_translation_service: TranslationService | None = None
 _job_manager: JobManager | None = None
 _s3_client: S3Client | None = None
 
@@ -31,12 +38,14 @@ _s3_client: S3Client | None = None
 def set_services(
     draft_service: DraftService,
     summary_service: SummaryService,
+    translation_service: TranslationService,
     job_manager: JobManager,
     s3_client: S3Client,
 ) -> None:
-    global _draft_service, _summary_service, _job_manager, _s3_client
+    global _draft_service, _summary_service, _translation_service, _job_manager, _s3_client
     _draft_service = draft_service
     _summary_service = summary_service
+    _translation_service = translation_service
     _job_manager = job_manager
     _s3_client = s3_client
 
@@ -51,6 +60,12 @@ def get_summary_service() -> SummaryService:
     if _summary_service is None:
         raise RuntimeError("Summary service not initialized")
     return _summary_service
+
+
+def get_translation_service() -> TranslationService:
+    if _translation_service is None:
+        raise RuntimeError("Translation service not initialized")
+    return _translation_service
 
 
 def get_job_manager() -> JobManager:
@@ -71,20 +86,29 @@ async def create_job(
     x_user_id: str = Header(..., alias="X-User-Id"),
     draft_service: DraftService = Depends(get_draft_service),
     summary_service: SummaryService = Depends(get_summary_service),
+    translation_service: TranslationService = Depends(get_translation_service),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> CreateJobResponse:
-    """Create a new job (draft or summary)."""
+    """Create a new job (draft, summary, or translation)."""
     if isinstance(request, CreateDraftJobRequest):
         logger.info(
             f"POST /jobs [draft]: type={request.document_type.value}, "
             f"title='{request.title}', user={x_user_id}"
         )
         job_id = await draft_service.create_draft_job(request, user_id=x_user_id)
-    else:
+    elif isinstance(request, CreateTranslationJobRequest):
+        logger.info(
+            f"POST /jobs [translation]: target={request.target_language.value}, "
+            f"case_folder_id={request.case_folder_id}, user={x_user_id}"
+        )
+        job_id = await translation_service.create_translation_job(request, user_id=x_user_id)
+    elif isinstance(request, CreateSummaryJobRequest):
         logger.info(
             f"POST /jobs [summary]: case_folder_id={request.case_folder_id}, user={x_user_id}"
         )
         job_id = await summary_service.create_summary_job(request, user_id=x_user_id)
+    else:
+        raise HTTPException(status_code=400, detail=f"Unknown job type: {request.type}")
 
     job = await job_manager.get_job(job_id)
     if not job:

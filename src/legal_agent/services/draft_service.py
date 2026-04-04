@@ -3,22 +3,24 @@
 import logging
 import re
 
-from legal_agent.agents.anticipatory_bail_agent import AnticipatoryBailAgent
-from legal_agent.agents.application_agent import ApplicationAgent
-from legal_agent.agents.bail_agent import BailApplicationAgent
-from legal_agent.agents.base import BaseDraftingAgent, DraftingDependencies
-from legal_agent.agents.consumer_complaint_agent import ConsumerComplaintAgent
-from legal_agent.agents.contract_agent import ContractAgent
-from legal_agent.agents.court_filing_agent import CourtFilingAgent
-from legal_agent.agents.criminal_appeal_agent import CriminalAppealAgent
-from legal_agent.agents.execution_petition_agent import ExecutionPetitionAgent
-from legal_agent.agents.notice_agent import NoticeAgent
-from legal_agent.agents.patent_agent import PatentAgent
-from legal_agent.agents.quashing_petition_agent import QuashingPetitionAgent
-from legal_agent.agents.revision_petition_agent import RevisionPetitionAgent
-from legal_agent.agents.slp_agent import SLPAgent
-from legal_agent.agents.written_arguments_agent import WrittenArgumentsAgent
-from legal_agent.agents.written_statement_agent import WrittenStatementAgent
+from legal_agent.agents.drafts.custom.agent import CustomDraftingAgent
+from legal_agent.agents.drafts.custom.service import TemplateService
+from legal_agent.agents.drafts.anticipatory_bail_agent import AnticipatoryBailAgent
+from legal_agent.agents.drafts.application_agent import ApplicationAgent
+from legal_agent.agents.drafts.bail_agent import BailApplicationAgent
+from legal_agent.agents.drafts.base import BaseDraftingAgent, DraftingDependencies
+from legal_agent.agents.drafts.consumer_complaint_agent import ConsumerComplaintAgent
+from legal_agent.agents.drafts.contract_agent import ContractAgent
+from legal_agent.agents.drafts.court_filing_agent import CourtFilingAgent
+from legal_agent.agents.drafts.criminal_appeal_agent import CriminalAppealAgent
+from legal_agent.agents.drafts.execution_petition_agent import ExecutionPetitionAgent
+from legal_agent.agents.drafts.notice_agent import NoticeAgent
+from legal_agent.agents.drafts.patent_agent import PatentAgent
+from legal_agent.agents.drafts.quashing_petition_agent import QuashingPetitionAgent
+from legal_agent.agents.drafts.revision_petition_agent import RevisionPetitionAgent
+from legal_agent.agents.drafts.slp_agent import SLPAgent
+from legal_agent.agents.drafts.written_arguments_agent import WrittenArgumentsAgent
+from legal_agent.agents.drafts.written_statement_agent import WrittenStatementAgent
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import Settings
@@ -79,12 +81,14 @@ class DraftService:
         rag_client: RAGClient,
         s3_client: S3Client,
         retriever: LegalCaseRetriever | None = None,
+        template_service: TemplateService | None = None,
     ):
         self.settings = settings
         self.job_manager = job_manager
         self.rag_client = rag_client
         self.s3_client = s3_client
         self.retriever = retriever
+        self.template_service = template_service
 
         # Initialize agents based on settings
         model, provider = self._get_model_config()
@@ -194,7 +198,12 @@ class DraftService:
         formatted_examples = format_as_prompt_section(examples_data)
         logger.debug(f"[{job_id}] Examples loaded: {len(formatted_examples)} chars")
 
-        agent = self._get_agent(request.document_type)
+        if request.template_id and self.template_service:
+            template = await self.template_service.get_template(request.template_id, user_id)
+            model, provider = self._get_model_config()
+            agent = CustomDraftingAgent(model, provider, template.generated_prompt)
+        else:
+            agent = self._get_agent(request.document_type)
         logger.debug(f"[{job_id}] Using agent: {agent.__class__.__name__}")
 
         # Step 3: Create dependencies and call agent

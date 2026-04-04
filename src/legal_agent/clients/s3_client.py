@@ -37,6 +37,16 @@ class S3Client:
         await loop.run_in_executor(None, _upload)
         return s3_path
 
+    async def download_bytes(self, s3_path: str) -> bytes:
+        """Download an S3 object and return its raw bytes."""
+        loop = asyncio.get_event_loop()
+
+        def _download():
+            response = self._client.get_object(Bucket=self._bucket_name, Key=s3_path)
+            return response["Body"].read()
+
+        return await loop.run_in_executor(None, _download)
+
     async def signed_url(self, s3_path: str) -> str:
         """Generate a presigned GET URL for the given S3 key."""
         loop = asyncio.get_event_loop()

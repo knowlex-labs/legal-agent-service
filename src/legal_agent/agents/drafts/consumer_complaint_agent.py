@@ -1,6 +1,6 @@
 """Consumer complaint drafting agent — Consumer Protection Act, 2019."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 CONSUMER_COMPLAINT_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 

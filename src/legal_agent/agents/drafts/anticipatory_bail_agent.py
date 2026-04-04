@@ -1,6 +1,6 @@
 """Anticipatory bail application drafting agent — Section 438 CrPC / Section 482 BNSS."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 ANTICIPATORY_BAIL_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 

@@ -1,6 +1,6 @@
 """Quashing petition drafting agent — Section 482 CrPC / Section 528 BNSS."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 QUASHING_PETITION_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 

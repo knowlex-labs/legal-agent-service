@@ -1,6 +1,6 @@
 """Revision petition drafting agent — Section 397 CrPC (criminal) / Section 115 CPC (civil)."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 REVISION_PETITION_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
