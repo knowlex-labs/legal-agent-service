@@ -83,7 +83,8 @@ class QueryService:
             collection_name=collection_name,
             query_vector=query_vector,
             limit=limit,
-            collection_ids=collection_ids
+            collection_ids=collection_ids,
+            file_ids=file_ids,
         )
 
         normalized = []
@@ -91,12 +92,7 @@ class QueryService:
             payload = result.get("payload", {})
             metadata = payload.get("metadata", {})
 
-            # Filter by file_ids if specified
-            if file_ids and metadata.get("file_id") not in file_ids:
-                continue
-
-            # Filter by content_type if specified
-            if content_type and metadata.get("content_type") != content_type:
+            if content_type and not file_ids and metadata.get("content_type") != content_type:
                 continue
 
             normalized.append({
