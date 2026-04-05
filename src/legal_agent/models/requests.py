@@ -5,7 +5,7 @@ from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field, field_validator, model_validator
 
-from legal_agent.models.documents import DocumentType, Language
+from legal_agent.models.documents import DocumentType, Language, TranslationLanguage
 from legal_agent.summary.models import DraftContext
 
 
@@ -91,6 +91,11 @@ class CreateDraftJobRequest(BaseModel):
         default_factory=list,
         description="Optional reference document IDs for RAG context",
     )
+    template_id: str | None = Field(
+        None,
+        description="Custom template ID (from /api/v1/drafts/templates). "
+                    "When set, drafts using the user's stored template prompt instead of the system agent.",
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Optional extra context or parameters"
     )
@@ -130,7 +135,43 @@ class CreateSummaryJobRequest(BaseModel):
         return v
 
 
+class CreateTranslationJobRequest(BaseModel):
+    """Request to create a legal document translation job."""
+
+    type: Literal["translation"]
+    case_folder_id: str = Field(..., description="Case folder identifier")
+
+    @field_validator("case_folder_id")
+    @classmethod
+    def validate_case_folder_id(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError(
+                "case_folder_id must contain only alphanumeric characters, underscores, or dashes"
+            )
+        return v
+
+    target_language: TranslationLanguage = Field(
+        ..., description="Target language for translation"
+    )
+    source_language: TranslationLanguage | None = Field(
+        None, description="Source language (auto-detected if omitted)"
+    )
+    file_id: str | None = Field(
+        None, description="File ID to fetch from RAG engine for translation"
+    )
+    content: str | None = Field(
+        None, description="Raw text content to translate"
+    )
+    metadata: dict[str, Any] = Field(default_factory=dict, description="Optional extra context")
+
+    @model_validator(mode="after")
+    def require_file_id_or_content(self) -> "CreateTranslationJobRequest":
+        if not self.file_id and not self.content:
+            raise ValueError("Either 'file_id' or 'content' must be provided")
+        return self
+
+
 CreateJobRequest = Annotated[
-    CreateDraftJobRequest | CreateSummaryJobRequest,
+    CreateDraftJobRequest | CreateSummaryJobRequest | CreateTranslationJobRequest,
     Field(discriminator="type"),
 ]

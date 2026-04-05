@@ -13,6 +13,61 @@ class Language(str, Enum):
     BILINGUAL = "bilingual"
 
 
+class TranslationLanguage(str, Enum):
+    """All Indian scheduled languages + English for translation."""
+
+    ENGLISH = "english"
+    HINDI = "hindi"
+    BENGALI = "bengali"
+    TELUGU = "telugu"
+    MARATHI = "marathi"
+    TAMIL = "tamil"
+    URDU = "urdu"
+    GUJARATI = "gujarati"
+    KANNADA = "kannada"
+    MALAYALAM = "malayalam"
+    ODIA = "odia"
+    PUNJABI = "punjabi"
+    ASSAMESE = "assamese"
+    MAITHILI = "maithili"
+    SANTALI = "santali"
+    KASHMIRI = "kashmiri"
+    NEPALI = "nepali"
+    SINDHI = "sindhi"
+    DOGRI = "dogri"
+    KONKANI = "konkani"
+    MANIPURI = "manipuri"
+    BODO = "bodo"
+    SANSKRIT = "sanskrit"
+
+
+LANGUAGE_NATIVE_NAMES: dict[str, str] = {
+    "english": "English",
+    "hindi": "हिन्दी",
+    "bengali": "বাংলা",
+    "telugu": "తెలుగు",
+    "marathi": "मराठी",
+    "tamil": "தமிழ்",
+    "urdu": "اردو",
+    "gujarati": "ગુજરાતી",
+    "kannada": "ಕನ್ನಡ",
+    "malayalam": "മലയാളം",
+    "odia": "ଓଡ଼ିଆ",
+    "punjabi": "ਪੰਜਾਬੀ",
+    "assamese": "অসমীয়া",
+    "maithili": "मैथिली",
+    "santali": "ᱥᱟᱱᱛᱟᱲᱤ",
+    "kashmiri": "कॉशुर",
+    "nepali": "नेपाली",
+    "sindhi": "سنڌي",
+    "dogri": "डोगरी",
+    "konkani": "कोंकणी",
+    "manipuri": "মৈতৈলোন্",
+    "bodo": "बड़ो",
+    "sanskrit": "संस्कृत",
+}
+
+
 class DocumentType(str, Enum):
     """Types of legal documents that can be drafted."""
 

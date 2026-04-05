@@ -31,7 +31,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from legal_agent.middleware import RequestContextMiddleware
 
+from legal_agent.agents.drafts.custom import db as template_db
+from legal_agent.agents.drafts.custom.router import router as templates_router, set_template_service
+from legal_agent.agents.drafts.custom.service import TemplateService
 from legal_agent.api.routes import router, set_services
+from legal_agent.agents.translation.generator import TranslationGenerator
+from legal_agent.agents.translation.service import TranslationService
 from legal_agent.causelist.routes import causelist_router
 from legal_agent.clients.rag_client import HTTPRAGClient, LocalRAGClient, MockRAGClient
 from legal_agent.clients.s3_client import S3Client
@@ -106,17 +111,34 @@ async def lifespan(app: FastAPI):
         logger.warning("LegalCaseRetriever unavailable — drafts will not have case law tool")
 
     s3_client = S3Client(settings)
+
+    # Custom templates
+    try:
+        await asyncio.to_thread(template_db.create_table)
+        logger.info("user_templates table ready")
+    except Exception:
+        logger.warning("Failed to create user_templates table — custom templates unavailable", exc_info=True)
+    template_service = TemplateService(s3_client=s3_client, settings=settings)
+    set_template_service(template_service)
+
     draft_service = DraftService(
         settings=settings,
         job_manager=job_manager,
         rag_client=rag_client,
         s3_client=s3_client,
         retriever=legal_retriever,
+        template_service=template_service,
     )
     summary_service = SummaryService(
         generator=SummaryGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
     )
-    set_services(draft_service, summary_service, job_manager, s3_client)
+    translation_service = TranslationService(
+        generator=TranslationGenerator(),
+        job_manager=job_manager,
+        s3_client=s3_client,
+        rag_client=rag_client,
+    )
+    set_services(draft_service, summary_service, translation_service, job_manager, s3_client)
 
     workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent(legal_retriever))
 
@@ -129,6 +151,7 @@ async def lifespan(app: FastAPI):
     if workspace_chat_agent:
         await workspace_chat_agent.close()
     close_pool()
+    template_db.close_pool()
     if job_manager:
         await job_manager.cleanup()
     if rag_client and hasattr(rag_client, "close"):
@@ -147,6 +170,7 @@ def create_app() -> FastAPI:
     app.add_middleware(CORSMiddleware, allow_origins=origins, allow_credentials=True, allow_methods=["*"], allow_headers=["*"])
     app.add_middleware(RequestContextMiddleware)
     app.include_router(router, prefix="/api/v1", tags=["jobs"])
+    app.include_router(templates_router, prefix="/api/v1/drafts/templates", tags=["draft-templates"])
     app.include_router(workspace_chat_router, prefix="/api/v1", tags=["workspace-chat"])
     app.include_router(causelist_router, prefix="/api/v1", tags=["causelist"])
     if settings.rag_in_process:

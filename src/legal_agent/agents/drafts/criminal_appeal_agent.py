@@ -1,6 +1,6 @@
 """Criminal appeal drafting agent for appeals against conviction/sentence."""
 
-from legal_agent.agents.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
+from legal_agent.agents.drafts.base import BASE_SYSTEM_PROMPT, BaseDraftingAgent
 
 CRIMINAL_APPEAL_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
