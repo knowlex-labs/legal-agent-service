@@ -83,7 +83,6 @@ class LocalRAGClient(RAGClient):
                 user_id=collection,
                 top_k=10,
                 file_ids=filters_file_ids,
-                content_type="legal",
             )
 
             if not results:

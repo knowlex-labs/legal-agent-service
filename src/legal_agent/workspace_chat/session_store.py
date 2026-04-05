@@ -11,6 +11,7 @@ _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS workspace_chat_sessions (
     session_id TEXT PRIMARY KEY,
     case_folder_id TEXT NOT NULL,
+    name TEXT,
     tone TEXT DEFAULT 'formal',
     style TEXT DEFAULT 'balanced',
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -23,7 +24,11 @@ CREATE INDEX IF NOT EXISTS idx_workspace_chat_sessions_case_folder
     ON workspace_chat_sessions (case_folder_id);
 """
 
-_SELECT_COLS = "session_id, case_folder_id, tone, style, created_at"
+_MIGRATE_SQL = """
+ALTER TABLE workspace_chat_sessions ADD COLUMN IF NOT EXISTS name VARCHAR(255);
+"""
+
+_SELECT_COLS = "session_id, case_folder_id, name, tone, style, created_at"
 
 
 class WorkspaceChatSessionStore:
@@ -35,6 +40,7 @@ class WorkspaceChatSessionStore:
         async with self._pool.connection() as conn:
             await conn.execute(_CREATE_TABLE_SQL)
             await conn.execute(_CREATE_INDEX_SQL)
+            await conn.execute(_MIGRATE_SQL)
         logger.info("workspace_chat_sessions table ready")
 
     async def create(self, case_folder_id: str) -> dict:

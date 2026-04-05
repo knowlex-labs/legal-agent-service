@@ -369,7 +369,8 @@ class QdrantRepository:
         chunk_type: Optional[str] = None,
         collection_id: Optional[str] = None,
         collection_ids: Optional[List[str]] = None,
-        source_type: Optional[str] = None
+        source_type: Optional[str] = None,
+        file_ids: Optional[List[str]] = None,
     ) -> List[Dict[str, Any]]:
         """
         Query a Qdrant collection with optional filters.
@@ -382,6 +383,7 @@ class QdrantRepository:
             collection_id: Filter by single logical collection (folder)
             collection_ids: Filter by multiple logical collections (folders)
             source_type: Filter by source type ('pdf', 'youtube', 'web')
+            file_ids: Filter by specific file IDs
 
         Returns:
             List of search results with scores and payloads
@@ -391,7 +393,8 @@ class QdrantRepository:
                 chunk_type=chunk_type,
                 collection_id=collection_id,
                 collection_ids=collection_ids,
-                source_type=source_type
+                source_type=source_type,
+                file_ids=file_ids,
             )
 
             results = self._search_with_retry(collection_name, query_vector, limit, query_filter)
@@ -405,7 +408,8 @@ class QdrantRepository:
         chunk_type: Optional[str] = None,
         collection_id: Optional[str] = None,
         collection_ids: Optional[List[str]] = None,
-        source_type: Optional[str] = None
+        source_type: Optional[str] = None,
+        file_ids: Optional[List[str]] = None,
     ) -> Optional[Filter]:
         """
         Build Qdrant filter from query parameters.
@@ -415,6 +419,7 @@ class QdrantRepository:
             collection_id: Filter by single logical collection
             collection_ids: Filter by multiple logical collections
             source_type: Filter by source type
+            file_ids: Filter by specific file IDs
 
         Returns:
             Qdrant Filter object or None if no filters
@@ -439,6 +444,11 @@ class QdrantRepository:
         if source_type:
             conditions.append(
                 FieldCondition(key="metadata.source_type", match=MatchValue(value=source_type))
+            )
+
+        if file_ids:
+            conditions.append(
+                FieldCondition(key="metadata.file_id", match=MatchAny(any=file_ids))
             )
 
         if not conditions:
