@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
@@ -193,6 +194,7 @@ class WorkspaceChatAgent:
         full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS:{tone_suffix}{style_suffix}"
 
         web_search_output: str | None = None
+        rag_output: str | None = None
         used_legal_tools = False
         legal_search_queries: list[str] = []
 
@@ -220,8 +222,11 @@ class WorkspaceChatAgent:
                 }
             elif kind == "on_tool_end":
                 output = event["data"].get("output", "")
-                if event.get("name") == "legal_web_search":
+                tool_name = event.get("name")
+                if tool_name == "legal_web_search":
                     web_search_output = str(output)
+                elif tool_name == "query_case_documents":
+                    rag_output = str(output)
                 yield {"event": "tool_result", "data": output}
 
         # Force citation search if agent used legal tools but skipped web search
@@ -243,7 +248,89 @@ class WorkspaceChatAgent:
             if citations:
                 yield {"event": "citations", "data": json.dumps(citations)}
 
+        # Emit structured document citations from RAG results
+        if rag_output:
+            document_citations = self._parse_rag_citations(rag_output)
+            if document_citations:
+                yield {"event": "document_citations", "data": json.dumps(document_citations)}
+
         yield {"event": "end", "data": ""}
+
+    def _parse_rag_citations(self, rag_output: str) -> list[dict]:
+        """Parse RAG tool output to extract citation metadata from [Indexed chunk N] format.
+        
+        Parses output like:
+        [Indexed chunk 1] [Relevance: 0.85] [File id: abc] [Page: 5] [Concepts: contract, liability]
+        This is the chunk text content...
+        
+        Returns structured data like:
+        [{"id": 1, "file_id": "abc", "page": 5, "score": 0.85, "text_preview": "This is...", "key_terms": ["contract", "liability"]}]
+        """
+        if not rag_output or not rag_output.strip():
+            return []
+        
+        citations = []
+        
+        # Split by chunk separators (---) to get individual chunks
+        chunks = rag_output.split("\n\n---\n\n")
+        
+        for chunk in chunks:
+            if not chunk.strip():
+                continue
+                
+            lines = chunk.strip().split('\n')
+            if not lines:
+                continue
+                
+            header_line = lines[0]
+            
+            # Parse the header using regex to extract metadata
+            # Pattern: [Indexed chunk N] [Relevance: X.XX] [File id: abc] [Page: N] [Concepts: term1, term2]
+            chunk_match = re.search(r'\[Indexed chunk (\d+)\]', header_line)
+            relevance_match = re.search(r'\[Relevance: ([\d.]+)\]', header_line)
+            file_id_match = re.search(r'\[File id: ([^\]]+)\]', header_line)
+            page_match = re.search(r'\[Page: (\d+)\]', header_line)
+            concepts_match = re.search(r'\[Concepts: ([^\]]+)\]', header_line)
+            
+            if not chunk_match:
+                continue  # Skip if we can't find the chunk number
+                
+            chunk_id = int(chunk_match.group(1))
+            score = float(relevance_match.group(1)) if relevance_match else 0.0
+            file_id = file_id_match.group(1) if file_id_match else ""
+            page = int(page_match.group(1)) if page_match else None
+            
+            # Parse key terms from concepts
+            key_terms = []
+            if concepts_match:
+                concepts_str = concepts_match.group(1)
+                key_terms = [term.strip() for term in concepts_str.split(',')]
+            
+            # Extract text content (everything after the header line)
+            text_lines = lines[1:] if len(lines) > 1 else []
+            text_content = '\n'.join(text_lines).strip()
+            
+            # Create preview (first 200 characters)
+            text_preview = text_content[:200]
+            if len(text_content) > 200:
+                text_preview += "..."
+            
+            citation = {
+                "id": chunk_id,
+                "file_id": file_id,
+                "score": score,
+                "text_preview": text_preview,
+            }
+            
+            # Add optional fields only if they exist
+            if page is not None:
+                citation["page"] = page
+            if key_terms:
+                citation["key_terms"] = key_terms
+                
+            citations.append(citation)
+        
+        return citations
 
     def _normalize_content(self, content) -> str:
         """Normalize message content to a plain string (Gemini returns list of dicts)."""
