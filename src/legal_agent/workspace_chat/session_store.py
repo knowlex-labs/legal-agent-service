@@ -11,7 +11,7 @@ _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS workspace_chat_sessions (
     session_id TEXT PRIMARY KEY,
     case_folder_id TEXT NOT NULL,
-    name TEXT,
+    name VARCHAR(255),
     tone TEXT DEFAULT 'formal',
     style TEXT DEFAULT 'balanced',
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -43,13 +43,13 @@ class WorkspaceChatSessionStore:
             await conn.execute(_MIGRATE_SQL)
         logger.info("workspace_chat_sessions table ready")
 
-    async def create(self, case_folder_id: str) -> dict:
+    async def create(self, case_folder_id: str, name: str | None = None) -> dict:
         """Create a new session for a case folder."""
         session_id = str(uuid.uuid4())
         async with self._pool.connection() as conn:
             await conn.execute(
-                f"INSERT INTO workspace_chat_sessions (session_id, case_folder_id) VALUES (%s, %s)",
-                (session_id, case_folder_id),
+                "INSERT INTO workspace_chat_sessions (session_id, case_folder_id, name) VALUES (%s, %s, %s)",
+                (session_id, case_folder_id, name),
             )
             return await self._get_by_session(conn, session_id)
 
@@ -70,10 +70,15 @@ class WorkspaceChatSessionStore:
             ).fetchall()
             return rows or []
 
-    async def update_config(self, session_id: str, tone: str | None, style: str | None) -> dict | None:
-        """Update tone/style for a session. Returns updated row or None if not found."""
+    async def update_config(
+        self, session_id: str, tone: str | None, style: str | None, name: str | None = None
+    ) -> dict | None:
+        """Update tone/style/name for a session. Returns updated row or None if not found."""
         parts = []
         params: list = []
+        if name is not None:
+            parts.append("name = %s")
+            params.append(name)
         if tone is not None:
             parts.append("tone = %s")
             params.append(tone)

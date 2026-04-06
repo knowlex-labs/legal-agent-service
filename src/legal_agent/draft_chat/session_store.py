@@ -11,6 +11,7 @@ CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS draft_chat_sessions (
     session_id TEXT PRIMARY KEY,
     case_folder_id TEXT NOT NULL,
+    name VARCHAR(255),
     tone TEXT DEFAULT 'formal',
     style TEXT DEFAULT 'balanced',
     created_at TIMESTAMPTZ DEFAULT NOW(),
@@ -21,7 +22,11 @@ CREATE INDEX IF NOT EXISTS idx_draft_chat_sessions_case_folder
     ON draft_chat_sessions (case_folder_id);
 """
 
-_SELECT_COLS = "session_id, case_folder_id, tone, style, created_at"
+_MIGRATE_SQL = """
+ALTER TABLE draft_chat_sessions ADD COLUMN IF NOT EXISTS name VARCHAR(255);
+"""
+
+_SELECT_COLS = "session_id, case_folder_id, name, tone, style, created_at"
 
 
 class DraftChatSessionStore:
@@ -32,15 +37,16 @@ class DraftChatSessionStore:
         """Create the sessions table if it doesn't exist."""
         async with self._pool.connection() as conn:
             await conn.execute(CREATE_TABLE_SQL)
+            await conn.execute(_MIGRATE_SQL)
         logger.info("draft_chat_sessions table ready")
 
-    async def create(self, case_folder_id: str) -> dict:
+    async def create(self, case_folder_id: str, name: str | None = None) -> dict:
         """Create a new session for a case folder."""
         session_id = str(uuid.uuid4())
         async with self._pool.connection() as conn:
             await conn.execute(
-                f"INSERT INTO draft_chat_sessions (session_id, case_folder_id) VALUES (%s, %s)",
-                (session_id, case_folder_id),
+                "INSERT INTO draft_chat_sessions (session_id, case_folder_id, name) VALUES (%s, %s, %s)",
+                (session_id, case_folder_id, name),
             )
             return await self._get_by_session(conn, session_id)
 
@@ -61,10 +67,15 @@ class DraftChatSessionStore:
             ).fetchall()
             return rows or []
 
-    async def update_config(self, session_id: str, tone: str | None, style: str | None) -> dict | None:
-        """Update tone/style for a session. Returns updated row or None if not found."""
+    async def update_config(
+        self, session_id: str, tone: str | None, style: str | None, name: str | None = None
+    ) -> dict | None:
+        """Update tone/style/name for a session. Returns updated row or None if not found."""
         parts = []
         params: list = []
+        if name is not None:
+            parts.append("name = %s")
+            params.append(name)
         if tone is not None:
             parts.append("tone = %s")
             params.append(tone)
