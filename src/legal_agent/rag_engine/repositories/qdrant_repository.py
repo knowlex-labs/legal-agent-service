@@ -245,12 +245,20 @@ class QdrantRepository:
             return []
 
 
-    def link_content(self, collection_name: str, documents: List[Dict[str, Any]]) -> bool:
+    def link_content(self, collection_name: str, documents: List[Dict[str, Any]], batch_size: int = 500) -> bool:
         try:
             logger.info(f"Linking {len(documents)} documents to collection '{collection_name}'")
 
-            points = [self._create_point_from_document(doc) for doc in documents]
-            self._upload_points_in_batches(collection_name, points)
+            # Build and upload in batches to avoid holding all PointStructs in memory
+            total_batches = (len(documents) + batch_size - 1) // batch_size
+            for i in range(0, len(documents), batch_size):
+                batch_docs = documents[i:i + batch_size]
+                batch_num = (i // batch_size) + 1
+                points = [self._create_point_from_document(doc) for doc in batch_docs]
+                logger.info(f"Uploading batch {batch_num}/{total_batches} ({len(points)} points)...")
+                result = self.client.upsert(collection_name=collection_name, points=points)
+                logger.debug(f"Batch {batch_num} upload result: {result}")
+                del points  # free memory
 
             logger.info(f"Successfully linked all {len(documents)} documents to collection '{collection_name}'")
             return True

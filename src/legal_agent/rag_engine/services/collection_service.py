@@ -76,23 +76,27 @@ class CollectionService:
                 chunks = self._chunk_content(parsed, parsed.source_type)
                 logger.info(f"Created {len(chunks)} chunks")
 
-                logger.info(f"Generating embeddings for {len(chunks)} chunks")
-                embeddings = self._generate_embeddings(chunks, parsed)
-                logger.info(f"Embeddings generated: {len(embeddings)}")
-
                 item_content_type = item.content_type.value if item.content_type else "legal"
 
-                # Index to Qdrant (default)
-                logger.info(f"Indexing chunks to Qdrant for {item.file_id}")
-                qdrant_documents = self._format_chunks_for_qdrant(
-                    chunks=chunks,
-                    embeddings=embeddings,
-                    file_id=item.file_id,
-                    collection_id=item.collection_id or "default",
-                    source_type=item.type,
-                    content_type=item_content_type
-                )
-                self.qdrant_repo.link_content(qdrant_collection_name, qdrant_documents)
+                # Process in batches to keep memory bounded
+                EMBED_BATCH = 100
+                for batch_start in range(0, len(chunks), EMBED_BATCH):
+                    batch_chunks = chunks[batch_start:batch_start + EMBED_BATCH]
+                    logger.info(
+                        f"Embedding+indexing batch {batch_start // EMBED_BATCH + 1} "
+                        f"({len(batch_chunks)} chunks) for {item.file_id}"
+                    )
+                    batch_embeddings = self._generate_embeddings(batch_chunks, parsed)
+                    qdrant_documents = self._format_chunks_for_qdrant(
+                        chunks=batch_chunks,
+                        embeddings=batch_embeddings,
+                        file_id=item.file_id,
+                        collection_id=item.collection_id or "default",
+                        source_type=item.type,
+                        content_type=item_content_type,
+                    )
+                    self.qdrant_repo.link_content(qdrant_collection_name, qdrant_documents)
+                    del batch_embeddings, qdrant_documents  # free memory immediately
 
                 logger.info(f"Successfully processed {item.file_id}")
 

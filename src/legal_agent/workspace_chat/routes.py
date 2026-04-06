@@ -41,7 +41,7 @@ def _get_agent() -> WorkspaceChatAgent:
 async def create_session(request: CreateSessionRequest) -> WorkspaceChatSessionResponse:
     """Create a new chat session for a case folder."""
     agent = _get_agent()
-    row = await agent.session_store.create(request.case_folder_id)
+    row = await agent.session_store.create(request.case_folder_id, name=request.name)
     return WorkspaceChatSessionResponse(**row)
 
 
@@ -70,7 +70,7 @@ async def list_sessions(case_folder_id: str) -> list[WorkspaceChatSessionRespons
 async def update_config(session_id: str, update: WorkspaceChatConfigUpdate):
     """Update tone/style configuration for a session."""
     agent = _get_agent()
-    row = await agent.session_store.update_config(session_id, update.tone, update.style)
+    row = await agent.session_store.update_config(session_id, update.tone, update.style, name=update.name)
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
     return WorkspaceChatSessionResponse(**row)
