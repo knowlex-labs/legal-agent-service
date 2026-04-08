@@ -63,9 +63,11 @@ class Settings(BaseSettings):
     s3_signed_url_expiry: int = 3600
 
     # Embeddings (RAG engine)
-    embedding_model: str = "gemini-embedding-2-preview"
-    embedding_provider: str = "gemini"
-    vector_size: int = 1536
+    # embedding_model: str = "gemini-embedding-2-preview"  # paid Google embedding
+    # embedding_provider: str = "gemini"
+    embedding_model: str = "BAAI/bge-large-en-v1.5"
+    embedding_provider: str = "huggingface"
+    vector_size: int = 1024
     distance_metric: str = "COSINE"
     chunk_size: int = 800
     chunk_overlap: int = 100
