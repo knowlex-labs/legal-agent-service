@@ -121,36 +121,31 @@ class CollectionService:
     def _resolve_source(self, item: LinkItem) -> str:
         logger.info(f"_resolve_source: item type={item.type}")
         from urllib.parse import unquote
-        if item.type in ('file', 'image'):
-            if not item.storage_url:
-                logger.error("_resolve_source: Missing storage_url!")
-                raise ValueError("Missing storage_url")
 
-            # Unquote in case of %20 etc
-            storage_url = unquote(item.storage_url)
-            logger.info(f"_resolve_source: storage_url={storage_url}")
+        if not item.storage_url:
+            logger.error("_resolve_source: Missing storage_url!")
+            raise ValueError("Missing storage_url")
 
-            # Handle local:// URLs (local storage)
-            if storage_url.startswith('local://'):
-                logger.info(f"_resolve_source: Downloading from local storage")
-                local_path = self.storage_service.download_for_processing(storage_url)
-                if not local_path:
-                    logger.error(f"_resolve_source: Failed to get file from local storage: {storage_url}")
-                    raise ValueError(f"Failed to get file from local storage: {storage_url}")
-                logger.info(f"_resolve_source: local_path={local_path}")
-                return local_path
+        storage_url = unquote(item.storage_url)
+        logger.info(f"_resolve_source: storage_url={storage_url}")
 
-            # Handle HTTP/HTTPS URLs
-            if storage_url.startswith(('http://', 'https://')):
-                logger.info(f"_resolve_source: Downloading from HTTP URL")
-                result = self._download_from_url(storage_url)
-                logger.info(f"_resolve_source: downloaded to {result}")
-                return result
+        if storage_url.startswith("local://"):
+            logger.info("_resolve_source: Downloading from local storage")
+            local_path = self.storage_service.download_for_processing(storage_url)
+            if not local_path:
+                logger.error(f"_resolve_source: Failed to get file from local storage: {storage_url}")
+                raise ValueError(f"Failed to get file from local storage: {storage_url}")
+            logger.info(f"_resolve_source: local_path={local_path}")
+            return local_path
 
-            logger.error(f"_resolve_source: Unsupported storage URL format: {storage_url}")
-            raise ValueError(f"Unsupported storage URL format: {storage_url}")
-        logger.info(f"_resolve_source: returning item.url")
-        return item.url
+        if storage_url.startswith(("http://", "https://")):
+            logger.info("_resolve_source: Downloading from HTTP URL")
+            result = self._download_from_url(storage_url)
+            logger.info(f"_resolve_source: downloaded to {result}")
+            return result
+
+        logger.error(f"_resolve_source: Unsupported storage URL format: {storage_url}")
+        raise ValueError(f"Unsupported storage URL format: {storage_url}")
 
     def _download_from_url(self, url: str) -> str:
         try:

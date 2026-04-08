@@ -1,5 +1,5 @@
 from pydantic import BaseModel, model_validator
-from typing import List, Optional
+from typing import List, Literal, Optional
 from enum import Enum
 
 # Enums
@@ -53,24 +53,22 @@ class IndexingStatus(str, Enum):
     CANCELLED = "INDEXING_CANCELLED"
 
 class LinkItem(BaseModel):
-    type: str # 'file', 'youtube', 'web', 'image'
+    type: Literal["file", "image"]
     file_id: str
     collection_id: Optional[str] = None
     url: Optional[str] = None
     storage_url: Optional[str] = None
     content_type: Optional[DataContentType] = DataContentType.LEGAL
 
-    @model_validator(mode='before')
+    @model_validator(mode="before")
     @classmethod
     def check_source(cls, values):
         if isinstance(values, dict):
-            type_val = values.get('type')
-            url = values.get('url')
-            storage_url = values.get('storage_url')
-
-            if type_val in ['youtube', 'web'] and not url:
-                raise ValueError(f"{type_val} requires 'url'")
-            if type_val in ['file', 'image'] and not storage_url:
+            type_val = values.get("type")
+            storage_url = values.get("storage_url")
+            if type_val not in ("file", "image"):
+                raise ValueError("type must be 'file' or 'image'")
+            if not storage_url:
                 raise ValueError(f"{type_val} requires 'storage_url'")
         return values
 
@@ -126,8 +124,7 @@ class QueryResponse(BaseModel):
     answer: str
     confidence: float
     is_relevant: bool
-    chunks: List['ChunkConfig']
-    critic: Optional['CriticEvaluation'] = None
+    chunks: List["ChunkConfig"]
 
 # Internal models for query service
 
@@ -165,11 +162,6 @@ class HierarchicalChunk(BaseModel):
     chunk_metadata: ChunkMetadata
     text: str
     embedding_vector: Optional[List[float]] = None
-
-class CriticEvaluation(BaseModel):
-    confidence: float
-    missing_info: str
-    enrichment_suggestions: List[str]
 
 # Models moved from collections.py
 

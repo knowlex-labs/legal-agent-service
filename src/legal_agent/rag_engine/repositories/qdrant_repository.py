@@ -390,7 +390,7 @@ class QdrantRepository:
             chunk_type: Filter by chunk type ('concept', 'example', 'question', 'other')
             collection_id: Filter by single logical collection (folder)
             collection_ids: Filter by multiple logical collections (folders)
-            source_type: Filter by source type ('pdf', 'youtube', 'web')
+            source_type: Filter by source type ('file', 'image', 'pdf', etc.)
             file_ids: Filter by specific file IDs
 
         Returns:

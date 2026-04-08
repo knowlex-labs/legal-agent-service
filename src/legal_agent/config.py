@@ -91,12 +91,6 @@ class Settings(BaseSettings):
     reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
     reranker_top_k: int = 5
 
-    # Critic
-    critic_enabled: bool = False
-    critic_model_name: str = "models/gemini-2.5-flash"
-    critic_model_api_key: str = ""
-    critic_model_temperature: float = 0.1
-
     # Feedback
     feedback_enabled: bool = True
     feedback_similarity_threshold: float = 0.8
@@ -104,18 +98,10 @@ class Settings(BaseSettings):
     # Query
     relevance_threshold: float = 0.4
 
-    # LlamaCloud
-    llama_cloud_api_key: str = ""
-
     # Semantic chunking
     semantic_similarity_threshold: float = 0.8
     semantic_min_chunk_size: int = 100
     semantic_model: str = "sentence-transformers/all-MiniLM-L6-v2"
-
-    # Parser
-    web_scraper_user_agent: str = "RAG-Engine/1.0"
-    web_scraper_timeout: int = 30
-    youtube_transcript_fallback: str = "gemini"
 
     def get_langchain_provider(self) -> str:
         return _LANGCHAIN_PROVIDERS.get(self.llm_provider, self.llm_provider)

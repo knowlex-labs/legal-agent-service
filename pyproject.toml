@@ -35,17 +35,9 @@ dependencies = [
     "pdfplumber>=0.11.0",
     "pytesseract>=0.3.10",
     "pdf2image>=1.17.0",
-    "llama-index-core>=0.10.0",
-    "llama-parse>=0.3.0",
     "huggingface_hub>=0.20.0",
     "python-multipart>=0.0.18",
     "requests>=2.31.0",
-    "google-generativeai>=0.3.0",
-    "youtube-transcript-api>=0.6.0",
-    "pytube>=15.0.0",
-    "beautifulsoup4>=4.12.3",
-    "lxml>=5.1.0",
-    "readability-lxml>=0.8.1",
     # NumPy 2.x avoids broken/partial 1.26 installs that raise
     # ImportError: cannot import name 'matrix_power' from 'numpy.linalg' (unknown location)
     "numpy>=2.1.0,<3",
