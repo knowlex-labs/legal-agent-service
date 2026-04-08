@@ -300,9 +300,6 @@ class QueryService:
             logger.error(f"Error retrieving context: {str(e)}")
             return []
 
-    def get_all_embeddings(self, collection_name: str, limit: int = 100) -> Dict[str, Any]:
-        return {"message": "Get all embeddings not implemented"}
-
     def search(
         self,
         collection_name: str,

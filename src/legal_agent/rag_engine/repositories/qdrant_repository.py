@@ -497,67 +497,6 @@ class QdrantRepository:
             for hit in results
         ]
 
-    def get_all_embeddings(self, collection_name: str, limit: int = 100, offset: Optional[str] = None, include_vectors: bool = False) -> Dict[str, Any]:
-        try:
-            logger.info(f"Retrieving embeddings from collection '{collection_name}' with limit={limit}, include_vectors={include_vectors}")
-
-            collection_info = self.client.get_collection(collection_name)
-            total_count = collection_info.points_count
-
-            result = self.client.scroll(
-                collection_name=collection_name,
-                limit=limit,
-                offset=offset,
-                with_vectors=include_vectors,
-                with_payload=True
-            )
-
-            points, next_offset = result
-            embeddings = self._format_embeddings(points, include_vectors)
-
-            logger.info(f"Retrieved {len(embeddings)} embeddings from collection '{collection_name}'")
-
-            return {
-                "embeddings": embeddings,
-                "next_offset": next_offset,
-                "total_count": total_count,
-                "has_more": next_offset is not None,
-                "collection_info": {
-                    "name": collection_name,
-                    "points_count": total_count,
-                    "vectors_count": collection_info.vectors_count if hasattr(collection_info, 'vectors_count') else total_count
-                }
-            }
-
-        except Exception as e:
-            logger.error(f"Failed to retrieve embeddings from collection '{collection_name}': {str(e)}")
-            logger.exception("Full exception details:")
-            return {
-                "embeddings": [],
-                "next_offset": None,
-                "total_count": 0,
-                "has_more": False,
-                "collection_info": {},
-                "error": str(e)
-            }
-
-    def _format_embeddings(self, points: List[Any], include_vectors: bool) -> List[Dict[str, Any]]:
-        embeddings = []
-        for point in points:
-            embedding_item = {
-                "id": point.id,
-                "document_id": point.payload.get("document_id", ""),
-                "text": point.payload.get("text", ""),
-                "source": point.payload.get("source", ""),
-                "metadata": point.payload.get("metadata", {})
-            }
-
-            if include_vectors and point.vector:
-                embedding_item["vector"] = point.vector
-
-            embeddings.append(embedding_item)
-        return embeddings
-
     def batch_read_files(self, collection_name: str, document_ids: List[str]) -> Dict[str, Any]:
         try:
             logger.debug(f"Checking status of {len(document_ids)} documents in collection '{collection_name}'")

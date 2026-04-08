@@ -95,7 +95,6 @@ class RetrieveRequest(BaseModel):
     query: str
     filters: Optional[RetrieveFilters] = None
     top_k: int = 5
-    include_graph_context: bool = True
 
 class EnrichedChunk(BaseModel):
     chunk_id: str
