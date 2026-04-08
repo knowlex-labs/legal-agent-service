@@ -42,7 +42,7 @@ class Settings(BaseSettings):
     legal_db_url: str | None = None
 
     # Chat LLM default (frontend sends model ID directly)
-    chat_llm_default_model: str = "gpt-5-mini-2025-08-07"
+    chat_llm_default_model: str = "gemini-2.0-flash"
 
     # Web search (Serper API)
     serper_api_key: str = ""

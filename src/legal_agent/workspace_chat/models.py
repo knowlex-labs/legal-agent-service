@@ -27,7 +27,7 @@ class WorkspaceChatMessageRequest(BaseModel):
         default="balanced", description="Response detail level"
     )
     file_ids: list[str] = Field(default_factory=list, description="File IDs for RAG scope")
-    model: str = Field(default="gpt-5-mini-2025-08-07", description="Model ID to use")
+    model: str = Field(default="gemini-2.0-flash", description="Model ID to use")
 
 
 class WorkspaceChatConfigUpdate(BaseModel):
