@@ -188,17 +188,8 @@ class CollectionService:
 
     def _generate_embeddings(self, chunks, parsed_content=None):
         logger.info(f"_generate_embeddings: {len(chunks)} chunks")
-
-        # For images, embed the raw image bytes directly (multimodal embedding)
-        if parsed_content and parsed_content.source_type == "image" and parsed_content.image_data:
-            from legal_agent.rag_engine.parsers.image_parser import MIME_TYPES
-            from pathlib import Path
-            ext = Path(parsed_content.image_path).suffix.lower() if parsed_content.image_path else ".png"
-            mime_type = MIME_TYPES.get(ext, "image/png")
-            embedding = self.embedding_client.generate_image_embedding(parsed_content.image_data, mime_type)
-            logger.info(f"_generate_embeddings: generated 1 image embedding")
-            return [embedding]
-
+        # Images are described via Gemini Vision OCR into text chunks — embed those text
+        # descriptions with BGE-M3 so queries (also BGE-M3) land in the same vector space.
         texts = [chunk.text for chunk in chunks]
         result = self.embedding_client.generate_embeddings(texts)
         logger.info(f"_generate_embeddings: done, {len(result)} embeddings")

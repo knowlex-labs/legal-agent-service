@@ -65,7 +65,7 @@ class Settings(BaseSettings):
     # Embeddings (RAG engine)
     # embedding_model: str = "gemini-embedding-2-preview"  # paid Google embedding
     # embedding_provider: str = "gemini"
-    embedding_model: str = "BAAI/bge-large-en-v1.5"
+    embedding_model: str = "BAAI/bge-m3"
     embedding_provider: str = "huggingface"
     vector_size: int = 1024
     distance_metric: str = "COSINE"
