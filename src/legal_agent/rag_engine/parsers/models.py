@@ -65,14 +65,14 @@ class ParsedContent:
     """
     Standardized output from all parsers.
 
-    This structure allows all parsers (PDF, YouTube, Web) to return
-    content in a uniform format that can be processed by chunking strategies.
+    This structure allows PDF and image parsers to return content in a uniform
+    format that can be processed by chunking strategies.
     """
 
     text: str  # Full raw text
     metadata: ParsedMetadata
     sections: List[ContentSection]  # Hierarchical structure
-    source_type: str  # 'pdf', 'youtube', 'web'
+    source_type: str  # 'pdf' or 'image'
 
     # Content classification hints
     has_equations: bool = False
@@ -85,7 +85,7 @@ class ParsedContent:
 
     def __post_init__(self):
         """Validate source type."""
-        valid_types = ['pdf', 'youtube', 'web', 'constitution', 'image']
+        valid_types = ["pdf", "image"]
         if self.source_type not in valid_types:
             raise ValueError(f"Invalid source_type: {self.source_type}. Must be one of {valid_types}")
 

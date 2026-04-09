@@ -176,7 +176,8 @@ class DraftService:
                 request.config, request.document_type.value
             )
         else:
-            assert request.body is not None  # guaranteed by model validator
+            if request.body is None:
+                raise ValueError("body is required when config is not provided")
             raw_instructions = request.body
 
         language = request.language.value

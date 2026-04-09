@@ -21,20 +21,17 @@ class DraftChatMessageRequest(BaseModel):
 
 
 class DraftChatConfigUpdate(BaseModel):
-    name: str | None = Field(None, max_length=255, description="Session name")
     tone: Literal["formal", "conversational", "neutral"] | None = None
     style: Literal["precise", "balanced", "detailed"] | None = None
 
 
 class CreateSessionRequest(BaseModel):
     case_folder_id: str = Field(..., min_length=1, description="Case folder this session belongs to")
-    name: str | None = Field(None, max_length=255, description="Optional session name")
 
 
 class DraftChatSessionResponse(BaseModel):
     session_id: str
     case_folder_id: str
-    name: str | None = None
     tone: str
     style: str
     created_at: datetime

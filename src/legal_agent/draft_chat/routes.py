@@ -38,7 +38,7 @@ def _get_agent() -> DraftChatAgent:
 async def create_session(request: CreateSessionRequest) -> DraftChatSessionResponse:
     """Create a new chat session for a case folder."""
     agent = _get_agent()
-    row = await agent.session_store.create(request.case_folder_id, name=request.name)
+    row = await agent.session_store.create(request.case_folder_id)
     return DraftChatSessionResponse(**row)
 
 
@@ -67,7 +67,7 @@ async def list_sessions(case_folder_id: str) -> list[DraftChatSessionResponse]:
 async def update_config(session_id: str, update: DraftChatConfigUpdate):
     """Update tone/style configuration for a session."""
     agent = _get_agent()
-    row = await agent.session_store.update_config(session_id, update.tone, update.style, name=update.name)
+    row = await agent.session_store.update_config(session_id, update.tone, update.style)
     if not row:
         raise HTTPException(status_code=404, detail="Session not found")
     return DraftChatSessionResponse(**row)

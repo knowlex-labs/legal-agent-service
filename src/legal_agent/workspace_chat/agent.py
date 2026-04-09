@@ -30,6 +30,24 @@ SYSTEM_PROMPT = (
     "legal_case_search and legal_web_search when the issue needs external authority."
 )
 
+DOCUMENT_ONLY_SYSTEM_PROMPT = """You are an expert legal assistant specializing in Indian law.
+
+STRICT RULE: You MUST answer ONLY from the documents provided via the query_case_documents tool.
+- Always call query_case_documents first for every question.
+- Do NOT use your general knowledge, legal_case_search, or legal_web_search to answer.
+- If the answer is not found in the documents, respond: "I could not find information about this in the provided documents."
+- Do NOT speculate, infer, or supplement with outside knowledge.
+
+CITATION DISCIPLINE (non-negotiable):
+- Every material proposition must cite the source chunk from query_case_documents.
+- Cite inline as [D1], [D2], … in the order chunks appear in the tool result.
+- In ### References, each [Dn] must include: chunk/page (or file id) and a short quoted phrase (≤25 words) so the reader can locate it.
+- Do not invent citations.
+
+OUTPUT FORMAT:
+- Use markdown. Put ### References last.
+- Never answer from general principles or external sources — only from the provided documents."""
+
 TONE_INSTRUCTIONS = {
     "formal": (
         "\n\nTONE: Write in formal legal language. Use third person. "
@@ -154,12 +172,10 @@ class WorkspaceChatAgent:
 
         llm = self._get_llm(model_id)
         rag_tool = _create_rag_tool(self._rag_client, file_ids, user_id)
+        # When file_ids are provided, restrict answers to those documents only.
+        # legal_case_search and web_search are intentionally excluded.
         tools = [rag_tool]
-        if self._legal_search_tool:
-            tools.append(self._legal_search_tool)
-        if self._web_search_tool:
-            tools.append(self._web_search_tool)
-        graph = create_react_agent(llm, tools=tools, checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT)
+        graph = create_react_agent(llm, tools=tools, checkpointer=self.checkpointer, prompt=DOCUMENT_ONLY_SYSTEM_PROMPT)
 
         # Evict oldest entry when cache is full
         if len(self._rag_graphs) >= self._GRAPH_CACHE_SIZE:
@@ -376,11 +392,15 @@ class WorkspaceChatAgent:
         """Delete all checkpoint data for a session."""
         if not self._pool:
             return
-        async with self._pool.connection() as conn:
-            await conn.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (session_id,))
-            await conn.execute("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (session_id,))
-            await conn.execute("DELETE FROM checkpoints WHERE thread_id = %s", (session_id,))
-        logger.info(f"[workspace_chat] Session {session_id} checkpoints cleared")
+        try:
+            async with self._pool.connection() as conn:
+                async with conn.transaction():
+                    await conn.execute("DELETE FROM checkpoint_writes WHERE thread_id = %s", (session_id,))
+                    await conn.execute("DELETE FROM checkpoint_blobs WHERE thread_id = %s", (session_id,))
+                    await conn.execute("DELETE FROM checkpoints WHERE thread_id = %s", (session_id,))
+            logger.info(f"[workspace_chat] Session {session_id} checkpoints cleared")
+        except Exception:
+            logger.exception(f"[workspace_chat] Failed to clear checkpoints for session {session_id}")
 
     async def close(self):
         if self._pool:

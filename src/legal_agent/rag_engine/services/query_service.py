@@ -4,9 +4,8 @@ from legal_agent.rag_engine.repositories.feedback_repository import FeedbackRepo
 from legal_agent.rag_engine.utils.embedding_client import embedding_client
 from legal_agent.rag_engine.utils.llm_client import LlmClient
 from legal_agent.rag_engine.utils.response_enhancer import enhance_response_if_needed
-from legal_agent.rag_engine.models.api_models import QueryResponse, ChunkConfig, CriticEvaluation, ChunkType
+from legal_agent.rag_engine.models.api_models import QueryResponse, ChunkConfig, ChunkType
 from legal_agent.rag_engine.core.reranker import reranker
-from legal_agent.rag_engine.core.critic import critic
 from legal_agent.config import get_settings
 import re
 import logging
@@ -184,25 +183,14 @@ class QueryService:
 
         return chunks[:5]
 
-    def _extract_full_texts(self, results: List[Dict]) -> List[str]:
-        full_texts = []
-        seen_texts = set()
-
-        for result in results:
-            text = result.get("text", "")
-
-            if text and self._is_valid_text(text) and text not in seen_texts:
-                seen_texts.add(text)
-                full_texts.append(text)
-
-        return full_texts[:5]
-
     def _calculate_confidence(self, results: List[Dict]) -> float:
         if not results:
             return 0.0
         return max(result.get("score", 0) for result in results)
 
-    def _create_query_response(self, results: List[Dict], query: str, enable_critic: bool = True, structured_output: bool = False, answer_style: str = "detailed") -> QueryResponse:
+    def _create_query_response(
+        self, results: List[Dict], query: str, structured_output: bool = False, answer_style: str = "detailed"
+    ) -> QueryResponse:
         relevant_results = self._filter_relevant_results(results)
 
         if not relevant_results:
@@ -232,23 +220,16 @@ class QueryService:
                 chunk_texts.append(f"[Image Content]: {chunk.text}")
             else:
                 chunk_texts.append(chunk.text)
-        full_chunk_texts = self._extract_full_texts(relevant_results)
         answer = self.llm_client.generate_answer(query, chunk_texts, force_json=structured_output, answer_style=answer_style)
         answer = enhance_response_if_needed(answer, query)
 
         confidence = self._calculate_confidence(relevant_results)
-
-        critic_result = None
-        if enable_critic and critic.is_available():
-            if critic_evaluation := critic.evaluate(query, full_chunk_texts, answer):
-                critic_result = CriticEvaluation(**critic_evaluation)
 
         return QueryResponse(
             answer=answer,
             confidence=confidence,
             is_relevant=True,
             chunks=chunks,
-            critic=critic_result
         )
 
     def _apply_feedback_scoring(self, results: List[Dict], query_vector: List[float],
@@ -319,10 +300,17 @@ class QueryService:
             logger.error(f"Error retrieving context: {str(e)}")
             return []
 
-    def get_all_embeddings(self, collection_name: str, limit: int = 100) -> Dict[str, Any]:
-        return {"message": "Get all embeddings not implemented"}
-
-    def search(self, collection_name: str, query_text: str, limit: int = 10, enable_critic: bool = True, structured_output: bool = False, collection_ids: Optional[List[str]] = None, file_ids: Optional[List[str]] = None, content_type: Optional[str] = None, answer_style: str = "detailed") -> QueryResponse:
+    def search(
+        self,
+        collection_name: str,
+        query_text: str,
+        limit: int = 10,
+        structured_output: bool = False,
+        collection_ids: Optional[List[str]] = None,
+        file_ids: Optional[List[str]] = None,
+        content_type: Optional[str] = None,
+        answer_style: str = "detailed",
+    ) -> QueryResponse:
         try:
             query_vector = self.embedding_client.generate_single_embedding(query_text)
 
@@ -341,7 +329,7 @@ class QueryService:
 
             results = self._apply_feedback_scoring(results, query_vector, collection_name)
 
-            return self._create_query_response(results, query_text, enable_critic, structured_output, answer_style=answer_style)
+            return self._create_query_response(results, query_text, structured_output, answer_style=answer_style)
 
         except Exception as e:
             logger.error(f"Error in query search: {str(e)}")
