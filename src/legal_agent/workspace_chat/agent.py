@@ -32,8 +32,10 @@ SYSTEM_PROMPT = (
 
 DOCUMENT_ONLY_SYSTEM_PROMPT = """You are an expert legal assistant specializing in Indian law.
 
-STRICT RULE: You MUST answer ONLY from the documents provided via the query_case_documents tool.
-- Always call query_case_documents first for every question.
+GREETING RULE: If the user sends a greeting, pleasantry, or purely social message (e.g. "Hi", "Hello", "Thanks"), respond naturally and briefly. Do NOT call any tools.
+
+STRICT RULE (for all legal questions): You MUST answer ONLY from the documents provided via the query_case_documents tool.
+- Call query_case_documents first for every legal question about the case.
 - Do NOT use your general knowledge, legal_case_search, or legal_web_search to answer.
 - If the answer is not found in the documents, respond: "I could not find information about this in the provided documents."
 - Do NOT speculate, infer, or supplement with outside knowledge.
@@ -45,8 +47,13 @@ CITATION DISCIPLINE (non-negotiable):
 - Do not invent citations.
 
 OUTPUT FORMAT:
-- Use markdown. Put ### References last.
-- Never answer from general principles or external sources — only from the provided documents."""
+- Lead with a direct 1–2 sentence answer to the question.
+- For multi-part answers, use bullet points or a numbered list — one point per issue.
+- Use ## headings only if the answer covers more than two clearly distinct topics.
+- Where the document text directly supports your answer, quote the relevant passage (≤30 words) in the body, then cite it with [Dn].
+- Re-use the same [Dn] marker whenever you refer to the same chunk again — do not create a new marker for the same source.
+- If query_case_documents returns nothing relevant, respond: "This information does not appear in the indexed documents. You may want to check if the relevant document has been uploaded, or rephrase the question."
+- ### References always last. Never answer from general principles or external sources — only from the provided documents."""
 
 TONE_INSTRUCTIONS = {
     "formal": (
@@ -207,7 +214,7 @@ class WorkspaceChatAgent:
 
         tone_suffix = TONE_INSTRUCTIONS.get(tone, TONE_INSTRUCTIONS["formal"])
         style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
-        full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS:{tone_suffix}{style_suffix}"
+        instruction_message = SystemMessage(content=f"RESPONSE INSTRUCTIONS:{tone_suffix}{style_suffix}")
 
         web_search_output: str | None = None
         rag_output: str | None = None
@@ -215,7 +222,7 @@ class WorkspaceChatAgent:
         legal_search_queries: list[str] = []
 
         async for event in graph.astream_events(
-            {"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"
+            {"messages": [instruction_message, HumanMessage(content=message)]}, config=config, version="v2"
         ):
             kind = event["event"]
             if kind == "on_chat_model_stream":

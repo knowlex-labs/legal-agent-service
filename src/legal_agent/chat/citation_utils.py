@@ -2,7 +2,7 @@
 
 import re
 
-_BLOCK_SPLIT_RE = re.compile(r"(?=\[\d+\]\s)")
+_BLOCK_SPLIT_RE = re.compile(r"(?=\[W\d+\]\s)")
 
 
 def parse_legal_web_search_citations(tool_output: str) -> list[dict]:
@@ -11,7 +11,7 @@ def parse_legal_web_search_citations(tool_output: str) -> list[dict]:
     results: list[dict] = []
     for block in blocks:
         block = block.strip()
-        id_m = re.match(r"\[(\d+)\]\s*(.+)", block)
+        id_m = re.match(r"\[W(\d+)\]\s*(.+)", block)
         if not id_m:
             continue
         cid = int(id_m.group(1))

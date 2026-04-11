@@ -14,7 +14,38 @@ from legal_agent.rag_engine.parsers.pdf_parser import PDFParser
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Legal paragraph detection patterns
+# ---------------------------------------------------------------------------
+
+# Numbered / lettered list item that starts at the beginning of a line:
+#   "1. ", "2) ", "(a) ", "a. ", "a) "
+_INLINE_ITEM_RE = re.compile(
+    r'\n[ \t]*(\d{1,2}[\.\)]\s+|[a-z][\.\)]\s+|\([a-zA-Z0-9]{1,2}\)\s+)'
+)
+
+# Legal keyword markers for chunk-type classification
+_PROVISION_RE = re.compile(
+    r'\b(shall|must|hereby|pursuant|notwithstanding|in accordance|herein|therein|thereof)\b',
+    re.IGNORECASE,
+)
+_DEFINITION_RE = re.compile(
+    r'\b(means|includes|shall mean|defined as|refers to|is defined)\b',
+    re.IGNORECASE,
+)
+_PREAMBLE_RE = re.compile(
+    r'(?im)^(whereas\b|to\s*:|from\s*:|subject\s*:|f\.?no\.?\s*:|ref\.?\s*:|sir\s*,|dear\b)',
+)
+
+# Sentence boundary for splitting oversized paragraphs (avoids "no.", "etc." issues)
+_SENTENCE_END_RE = re.compile(r'(?<=[.!?])\s+(?=[A-Z(])')
+
+
 class HierarchicalChunkingService:
+
+    # Paragraph size bounds (characters)
+    _MIN_PARA_CHARS = 80
+    _MAX_PARA_CHARS = 1200
 
     def __init__(self):
         self.pdf_parser = PDFParser()
@@ -63,39 +94,16 @@ class HierarchicalChunkingService:
                 if not section.text or len(section.text.strip()) < 50:
                     continue
 
-                chunk_type = self._classify_chunk_type_from_header(section.title)
-
-                topic_metadata = TopicMetadata(
-                    chapter_num=None,
-                    chapter_title=section.title,
-                    section_num=None,
-                    section_title=section.title,
-                    page_start=section.start_page,
-                    page_end=section.end_page
+                page_start = getattr(section, "page_number", None) or getattr(section, "start_page", None)
+                section_chunks = self._create_paragraph_chunks(
+                    section.text,
+                    document_id,
+                    page_start=page_start,
+                    section_title=section.title or "Document Content",
                 )
+                chunks.extend(section_chunks)
 
-                key_terms = self._extract_key_terms(section.text)
-                equations = self._extract_equations(section.text)
-
-                chunk_metadata = ChunkMetadata(
-                    chunk_type=chunk_type,
-                    topic_id=str(uuid.uuid4()),
-                    key_terms=key_terms,
-                    equations=equations,
-                    has_equations=len(equations) > 0,
-                    has_diagrams=self._has_diagram_reference(section.text)
-                )
-
-                chunk = HierarchicalChunk(
-                    chunk_id=str(uuid.uuid4()),
-                    document_id=document_id,
-                    topic_metadata=topic_metadata,
-                    chunk_metadata=chunk_metadata,
-                    text=section.text
-                )
-                chunks.append(chunk)
-
-            logger.info(f"Successfully created {len(chunks)} chunks from {len(parsed_content.sections)} sections")
+            logger.info(f"Successfully created {len(chunks)} paragraph chunks from {len(parsed_content.sections)} sections")
 
         except FileNotFoundError as e:
             logger.error(f"PDF file not found: {file_path}")
@@ -119,21 +127,23 @@ class HierarchicalChunkingService:
         chunk_num = 0
 
         for section in parsed_content.sections:
-             if not section.text.strip():
-                 continue
-                 
-             sub_chunks = self._create_basic_chunks(section.text, document_id)
-             
-             for sub_chunk in sub_chunks:
-                 chunk_num += 1
-                 
-                 # Update Topic Metadata with section title
-                 sub_chunk.topic_metadata.section_title = section.title
-                 chunks.append(sub_chunk)
-                 
+            if not section.text.strip():
+                continue
+
+            page_start = getattr(section, "page_number", None)
+            section_chunks = self._create_paragraph_chunks(
+                section.text,
+                document_id,
+                page_start=page_start,
+                section_title=section.title or "Document Content",
+            )
+            for sub_chunk in section_chunks:
+                chunk_num += 1
+                chunks.append(sub_chunk)
+
         if not chunks and parsed_content.text:
             return self.chunk_text(parsed_content.text, file_type)
-            
+
         return chunks
 
     def chunk_text(self, text: str, file_type: str = "text", book_metadata: Any = None) -> List[HierarchicalChunk]:

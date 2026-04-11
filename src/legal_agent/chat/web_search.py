@@ -126,7 +126,7 @@ def create_web_search_tool():
         parts = [f"Found {len(selected)} sources:\n"]
         for i, r in enumerate(selected, 1):
             block = (
-                f"[{i}] {r.get('title', 'Untitled')}\n"
+                f"[W{i}] {r.get('title', 'Untitled')}\n"
                 f"Source: {r.get('_source', 'Web')}\n"
                 f"URL: {r.get('link', '')}\n"
                 f"Snippet: {r.get('snippet', '')}\n"
@@ -138,7 +138,7 @@ def create_web_search_tool():
             parts.append(block)
 
         parts.append(
-            "\n---\nCite sources using [1], [2], etc. "
+            "\n---\nCite sources using [W1], [W2], etc. "
             "If the answer is not supported by the provided sources, "
             'say "No authoritative source found for this proposition."'
         )
