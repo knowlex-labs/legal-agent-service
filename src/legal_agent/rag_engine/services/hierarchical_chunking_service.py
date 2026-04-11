@@ -9,7 +9,7 @@ from legal_agent.rag_engine.models.api_models import (
     TopicMetadata,
     ChunkMetadata
 )
-from legal_agent.rag_engine.parsers.models import ParsedContent, ContentSection
+from legal_agent.rag_engine.parsers.models import ParsedContent
 from legal_agent.rag_engine.parsers.pdf_parser import PDFParser
 
 logger = logging.getLogger(__name__)
@@ -17,12 +17,6 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 # Legal paragraph detection patterns
 # ---------------------------------------------------------------------------
-
-# Numbered / lettered list item that starts at the beginning of a line:
-#   "1. ", "2) ", "(a) ", "a. ", "a) "
-_INLINE_ITEM_RE = re.compile(
-    r'\n[ \t]*(\d{1,2}[\.\)]\s+|[a-z][\.\)]\s+|\([a-zA-Z0-9]{1,2}\)\s+)'
-)
 
 # Legal keyword markers for chunk-type classification
 _PROVISION_RE = re.compile(
@@ -85,7 +79,7 @@ class HierarchicalChunkingService:
             if not parsed_content.sections or len(parsed_content.sections) == 0:
                 logger.warning(f"No sections found in PDF {file_path}. Falling back to basic text chunking.")
                 if parsed_content.text.strip():
-                    return self._create_basic_chunks(parsed_content.text, document_id, chunk_size, chunk_overlap)
+                    return self._create_paragraph_chunks(parsed_content.text, document_id)
                 else:
                     logger.error(f"No text content extracted from PDF {file_path}")
                     return []
@@ -147,91 +141,138 @@ class HierarchicalChunkingService:
         return chunks
 
     def chunk_text(self, text: str, file_type: str = "text", book_metadata: Any = None) -> List[HierarchicalChunk]:
-        """Wrapper for basic text chunking to support generic text"""
+        """Wrapper for paragraph-aware chunking to support generic text."""
         document_id = str(uuid.uuid4())
-        return self._create_basic_chunks(text, document_id)
+        return self._create_paragraph_chunks(text, document_id)
 
-    def _create_basic_chunks(
+    # ------------------------------------------------------------------
+    # Paragraph-aware chunking (replaces sliding-window _create_basic_chunks)
+    # ------------------------------------------------------------------
+
+    def _split_legal_paragraphs(self, text: str) -> List[str]:
+        """Split text into legal paragraphs preserving numbered clauses intact.
+
+        Strategy:
+        1. Split on blank lines (double newlines) — the primary paragraph break.
+        2. Within each block, further split on inline numbered/lettered items
+           that start on their own line (e.g. "\\n1. ", "\\n(a) ").
+        3. Merge fragments shorter than _MIN_PARA_CHARS into the next block.
+        4. Split blocks longer than _MAX_PARA_CHARS at sentence boundaries.
+        """
+        # Step 1 — split on blank lines, then within each block split on
+        # numbered/lettered items that start on their own line.
+        paragraphs: List[str] = []
+        for block in re.split(r'\n\s*\n', text):
+            block = block.strip()
+            if not block:
+                continue
+            # Split on lines starting with numbered/lettered items
+            parts = re.split(r'(?m)(?=^\s*(?:\d{1,2}[\.\)]\s|[a-z][\.\)]\s|\([a-zA-Z0-9]{1,2}\)\s))', block)
+            for part in parts:
+                part = part.strip()
+                if part:
+                    paragraphs.append(part)
+
+        # Step 3 — merge short fragments into the next paragraph
+        merged: List[str] = []
+        carry = ""
+        for para in paragraphs:
+            combined = (carry + " " + para).strip() if carry else para
+            if len(combined) < self._MIN_PARA_CHARS:
+                carry = combined
+            else:
+                merged.append(combined)
+                carry = ""
+        if carry:
+            if merged:
+                merged[-1] = (merged[-1] + " " + carry).strip()
+            else:
+                merged.append(carry)
+
+        # Step 4 — split oversized paragraphs at sentence boundaries
+        final: List[str] = []
+        for para in merged:
+            if len(para) <= self._MAX_PARA_CHARS:
+                final.append(para)
+            else:
+                sentences = _SENTENCE_END_RE.split(para)
+                current = ""
+                for sent in sentences:
+                    if len(current) + len(sent) + 1 > self._MAX_PARA_CHARS and current:
+                        final.append(current.strip())
+                        current = sent
+                    else:
+                        current = (current + " " + sent).strip() if current else sent
+                if current:
+                    final.append(current.strip())
+
+        return final
+
+    def _classify_legal_chunk_type(self, text: str) -> ChunkType:
+        """Classify a paragraph into a legal ChunkType based on its content."""
+        if _PREAMBLE_RE.search(text):
+            return ChunkType.PREAMBLE
+        if _DEFINITION_RE.search(text):
+            return ChunkType.DEFINITION
+        if _PROVISION_RE.search(text):
+            return ChunkType.PROVISION
+        # Numbered paragraph at the start → treat as a provision by default
+        if re.match(r'^\s*\d{1,2}[\.\)]\s', text):
+            return ChunkType.PROVISION
+        return ChunkType.CONCEPT
+
+    def _create_paragraph_chunks(
         self,
         text: str,
         document_id: str,
-        chunk_size: int = 800,
-        chunk_overlap: int = 100
+        page_start: int | None = None,
+        section_title: str = "Document Content",
     ) -> List[HierarchicalChunk]:
+        """Create chunks by splitting text on paragraph/clause boundaries.
 
-        chunks = []
+        Each legal paragraph or numbered clause becomes its own chunk so that
+        specific facts (account numbers, dates, names) are never split across
+        chunk boundaries.
+        """
+        chunks: List[HierarchicalChunk] = []
         text = text.strip()
-
         if not text:
             return chunks
 
-        sentences = re.split(r'(?<=[.!?])\s+', text)
+        paragraphs = self._split_legal_paragraphs(text)
 
-        current_chunk = ""
-        chunk_num = 0
-
-        for sentence in sentences:
-            if len(current_chunk) + len(sentence) > chunk_size and current_chunk:
-                chunk_num += 1
-                chunk_id = f"{document_id}_chunk_{chunk_num}"
-
-                chunk = HierarchicalChunk(
-                    chunk_id=chunk_id,
-                    document_id=document_id,
-                    text=current_chunk.strip(),
-                    topic_metadata=TopicMetadata(
-                        chapter_num=None,
-                        chapter_title="Document Content",
-                        section_num=f"Part {chunk_num}",
-                        section_title=f"Content Part {chunk_num}",
-                        page_start=None,
-                        page_end=None
-                    ),
-                    chunk_metadata=ChunkMetadata(
-                        chunk_type=ChunkType.CONCEPT,  # Default to concept
-                        topic_id=document_id,
-                        key_terms=self._extract_key_terms(current_chunk),
-                        equations=self._extract_equations(current_chunk),
-                        has_equations=bool(self._extract_equations(current_chunk)),
-                        has_diagrams=False
-                    )
-                )
-                chunks.append(chunk)
-
-                words = current_chunk.split()
-                overlap_words = words[-chunk_overlap:] if len(words) > chunk_overlap else words
-                current_chunk = ' '.join(overlap_words) + ' ' + sentence
-            else:
-                current_chunk += ' ' + sentence if current_chunk else sentence
-
-        if current_chunk.strip():
-            chunk_num += 1
-            chunk_id = f"{document_id}_chunk_{chunk_num}"
+        for idx, para in enumerate(paragraphs, start=1):
+            if not para:
+                continue
+            chunk_type = self._classify_legal_chunk_type(para)
+            key_terms = self._extract_key_terms(para)
+            equations = self._extract_equations(para)
+            chunk_id = f"{document_id}_p{idx}"
 
             chunk = HierarchicalChunk(
                 chunk_id=chunk_id,
                 document_id=document_id,
-                text=current_chunk.strip(),
+                text=para,
                 topic_metadata=TopicMetadata(
                     chapter_num=None,
-                    chapter_title="Document Content",
-                    section_num=f"Part {chunk_num}",
-                    section_title=f"Content Part {chunk_num}",
-                    page_start=None,
-                    page_end=None
+                    chapter_title=section_title,
+                    section_num=f"Para {idx}",
+                    section_title=section_title,
+                    page_start=page_start,
+                    page_end=page_start,
                 ),
                 chunk_metadata=ChunkMetadata(
-                    chunk_type=ChunkType.CONCEPT,
+                    chunk_type=chunk_type,
                     topic_id=document_id,
-                    key_terms=self._extract_key_terms(current_chunk),
-                    equations=self._extract_equations(current_chunk),
-                    has_equations=bool(self._extract_equations(current_chunk)),
-                    has_diagrams=False
-                )
+                    key_terms=key_terms,
+                    equations=equations,
+                    has_equations=bool(equations),
+                    has_diagrams=self._has_diagram_reference(para),
+                ),
             )
             chunks.append(chunk)
 
-        logger.info(f"Created {len(chunks)} basic chunks from text")
+        logger.info(f"Created {len(chunks)} paragraph chunks from {len(paragraphs)} paragraphs")
         return chunks
 
     def _create_image_chunk(self, parsed_content: ParsedContent) -> List[HierarchicalChunk]:

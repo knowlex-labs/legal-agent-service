@@ -21,6 +21,7 @@ class JobType(str, Enum):
 
     DRAFT = "draft"
     SUMMARY = "summary"
+    SYNOPSIS = "synopsis"
     TRANSLATION = "translation"
 
 
