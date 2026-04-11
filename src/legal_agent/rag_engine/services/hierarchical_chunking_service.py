@@ -159,36 +159,9 @@ class HierarchicalChunkingService:
         3. Merge fragments shorter than _MIN_PARA_CHARS into the next block.
         4. Split blocks longer than _MAX_PARA_CHARS at sentence boundaries.
         """
-        # Step 1 — split on blank lines
-        raw_blocks = re.split(r'\n\s*\n', text)
-
+        # Step 1 — split on blank lines, then within each block split on
+        # numbered/lettered items that start on their own line.
         paragraphs: List[str] = []
-        for block in raw_blocks:
-            block = block.strip()
-            if not block:
-                continue
-            # Step 2 — split inline numbered items that live on their own lines
-            # e.g. "blah blah\n1. First item\n2. Second item"
-            sub_items = _INLINE_ITEM_RE.split(block)
-            # _INLINE_ITEM_RE splits and keeps the delimiter group, so odd indices
-            # are the matched prefixes ("1. ", "a) " …); rejoin each prefix with its body
-            i = 0
-            while i < len(sub_items):
-                part = sub_items[i].strip()
-                if not part:
-                    i += 1
-                    continue
-                # If next element is the captured numbered prefix, prepend it
-                if i + 1 < len(sub_items) and _INLINE_ITEM_RE.pattern:
-                    # sub_items from re.split with a capturing group:
-                    # [body0, prefix1, body1, prefix2, body2, …]
-                    # We reconstruct by taking body then checking if next is a stray prefix
-                    pass
-                paragraphs.append(part)
-                i += 1
-
-        # A cleaner split approach: use re.split with capturing group to keep prefixes
-        paragraphs = []
         for block in re.split(r'\n\s*\n', text):
             block = block.strip()
             if not block:
