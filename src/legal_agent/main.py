@@ -44,6 +44,8 @@ from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
 from legal_agent.summary.generator import SummaryGenerator
 from legal_agent.summary.service import SummaryService
+from legal_agent.synopsis.generator import SynopsisGenerator
+from legal_agent.synopsis.service import SynopsisService
 from legal_agent.workspace_chat.agent import WorkspaceChatAgent
 from legal_agent.workspace_chat.routes import set_workspace_chat_agent, workspace_chat_router
 
@@ -117,13 +119,16 @@ async def lifespan(app: FastAPI):
     summary_service = SummaryService(
         generator=SummaryGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
     )
+    synopsis_service = SynopsisService(
+        generator=SynopsisGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
+    )
     translation_service = TranslationService(
         generator=TranslationGenerator(),
         job_manager=job_manager,
         s3_client=s3_client,
         rag_client=rag_client,
     )
-    set_services(draft_service, summary_service, translation_service, job_manager, s3_client)
+    set_services(draft_service, summary_service, synopsis_service, translation_service, job_manager, s3_client)
     workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent(legal_retriever))
     logger.info("Service ready")
     yield

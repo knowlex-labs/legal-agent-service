@@ -9,6 +9,7 @@ from legal_agent.models.requests import (
     CreateDraftJobRequest,
     CreateJobRequest,
     CreateSummaryJobRequest,
+    CreateSynopsisJobRequest,
     CreateTranslationJobRequest,
 )
 from legal_agent.models.responses import (
@@ -21,6 +22,7 @@ from legal_agent.models.responses import (
 from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
 from legal_agent.summary.service import SummaryService
+from legal_agent.synopsis.service import SynopsisService
 from legal_agent.agents.translation.service import TranslationService
 
 logger = logging.getLogger(__name__)
@@ -30,6 +32,7 @@ router = APIRouter()
 # Dependency injection placeholders - set by main.py
 _draft_service: DraftService | None = None
 _summary_service: SummaryService | None = None
+_synopsis_service: SynopsisService | None = None
 _translation_service: TranslationService | None = None
 _job_manager: JobManager | None = None
 _s3_client: S3Client | None = None
@@ -38,13 +41,15 @@ _s3_client: S3Client | None = None
 def set_services(
     draft_service: DraftService,
     summary_service: SummaryService,
+    synopsis_service: SynopsisService,
     translation_service: TranslationService,
     job_manager: JobManager,
     s3_client: S3Client,
 ) -> None:
-    global _draft_service, _summary_service, _translation_service, _job_manager, _s3_client
+    global _draft_service, _summary_service, _synopsis_service, _translation_service, _job_manager, _s3_client
     _draft_service = draft_service
     _summary_service = summary_service
+    _synopsis_service = synopsis_service
     _translation_service = translation_service
     _job_manager = job_manager
     _s3_client = s3_client
@@ -60,6 +65,12 @@ def get_summary_service() -> SummaryService:
     if _summary_service is None:
         raise RuntimeError("Summary service not initialized")
     return _summary_service
+
+
+def get_synopsis_service() -> SynopsisService:
+    if _synopsis_service is None:
+        raise RuntimeError("Synopsis service not initialized")
+    return _synopsis_service
 
 
 def get_translation_service() -> TranslationService:
@@ -86,10 +97,11 @@ async def create_job(
     x_user_id: str = Header(..., alias="X-User-Id"),
     draft_service: DraftService = Depends(get_draft_service),
     summary_service: SummaryService = Depends(get_summary_service),
+    synopsis_service: SynopsisService = Depends(get_synopsis_service),
     translation_service: TranslationService = Depends(get_translation_service),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> CreateJobResponse:
-    """Create a new job (draft, summary, or translation)."""
+    """Create a new job (draft, summary, synopsis, or translation)."""
     if isinstance(request, CreateDraftJobRequest):
         logger.info(
             f"POST /jobs [draft]: type={request.document_type.value}, "
@@ -107,6 +119,11 @@ async def create_job(
             f"POST /jobs [summary]: case_folder_id={request.case_folder_id}, user={x_user_id}"
         )
         job_id = await summary_service.create_summary_job(request, user_id=x_user_id)
+    elif isinstance(request, CreateSynopsisJobRequest):
+        logger.info(
+            f"POST /jobs [synopsis]: case_folder_id={request.case_folder_id}, user={x_user_id}"
+        )
+        job_id = await synopsis_service.create_synopsis_job(request, user_id=x_user_id)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown job type: {request.type}")
 
