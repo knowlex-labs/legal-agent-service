@@ -171,7 +171,31 @@ class CreateTranslationJobRequest(BaseModel):
         return self
 
 
+class CreateSynopsisJobRequest(BaseModel):
+    """Request to create a case synopsis job."""
+
+    type: Literal["synopsis"]
+    case_folder_id: str = Field(..., description="Case folder identifier")
+    file_ids: list[str] = Field(
+        default_factory=list,
+        description="File IDs to fetch from RAG engine",
+    )
+    model: str = "gemini-3.1-flash-lite-preview"
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Optional extra context or parameters"
+    )
+
+    @field_validator("case_folder_id")
+    @classmethod
+    def validate_case_folder_id(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError(
+                "case_folder_id must contain only alphanumeric characters, underscores, or dashes"
+            )
+        return v
+
+
 CreateJobRequest = Annotated[
-    CreateDraftJobRequest | CreateSummaryJobRequest | CreateTranslationJobRequest,
+    CreateDraftJobRequest | CreateSummaryJobRequest | CreateSynopsisJobRequest | CreateTranslationJobRequest,
     Field(discriminator="type"),
 ]
