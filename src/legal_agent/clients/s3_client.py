@@ -65,8 +65,7 @@ class S3Client:
             content_type = response.get("ContentType", "")
             logger.info(
                 f"[s3] Downloaded {len(raw)} bytes from {s3_path} "
-                f"| ContentType={content_type} | ContentEncoding={encoding} "
-                f"| first20={raw[:20].hex()}"
+                f"| ContentType={content_type} | ContentEncoding={encoding}"
             )
             if encoding == "gzip":
                 raw = gzip.decompress(raw)

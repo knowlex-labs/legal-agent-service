@@ -35,7 +35,6 @@ class RAGClient(ABC):
         pass
 
 
-
 class LocalRAGClient(RAGClient):
     """In-process RAG client — calls QueryService directly without HTTP overhead.
 

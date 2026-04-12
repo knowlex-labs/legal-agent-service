@@ -35,6 +35,7 @@ from legal_agent.agents.translation.generator import TranslationGenerator
 from legal_agent.agents.translation.service import TranslationService
 from legal_agent.causelist.routes import causelist_router
 from legal_agent.clients.rag_client import HTTPRAGClient, LocalRAGClient, MockRAGClient
+from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.config import get_settings
 from legal_agent.legal_retrieval import LegalCaseRetriever
@@ -122,7 +123,6 @@ async def lifespan(app: FastAPI):
     synopsis_service = SynopsisService(
         generator=SynopsisGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
     )
-    from legal_agent.clients.decryption import DecryptionService
     decryption_service = DecryptionService(settings) if settings.document_encryption_master_key else None
     translation_service = TranslationService(
         generator=TranslationGenerator(),
