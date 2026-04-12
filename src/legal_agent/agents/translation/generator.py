@@ -23,7 +23,7 @@ _CHUNK_MAX_CHARS = 12000
 # Simple aliases the frontend can send instead of full model names.
 _MODEL_ALIASES: dict[str, str] = {
     "gemini": "gemini-3.1-flash-lite-preview",
-    "claude": "claude-sonnet-4-6",
+    "claude": "claude-haiku-4-5-20251001",
     "openai": "gpt-4.1-mini",
 }
 

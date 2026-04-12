@@ -120,7 +120,7 @@ class TranslationService:
             )
             logger.info(f"Decrypted to {len(plaintext)} bytes, extracting text...")
             filename = request.file_id.rsplit("/", 1)[-1]
-            text = extract_text_from_bytes(plaintext, filename)
+            text = await asyncio.to_thread(extract_text_from_bytes, plaintext, filename)
             logger.info(f"Extracted {len(text)} chars from {filename}")
             return text
 
