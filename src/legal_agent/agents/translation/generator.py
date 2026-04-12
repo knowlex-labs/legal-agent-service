@@ -12,9 +12,36 @@ logger = logging.getLogger(__name__)
 
 _PROVIDER_MAX_TOKENS: dict[str, int] = {
     "openai": 16384,
-    "anthropic": 8192,
-    "google-genai": 8192,
+    "anthropic": 16384,
+    "google-genai": 16384,
 }
+
+# Approximate chars per chunk for splitting long documents.
+# Each chunk must fit in the model's context window with room for the system prompt + output.
+_CHUNK_MAX_CHARS = 12000
+
+
+# Simple aliases the frontend can send instead of full model names.
+_MODEL_ALIASES: dict[str, str] = {
+    "gemini": "gemini-3.1-flash-lite-preview",
+    "claude": "claude-sonnet-4-6",
+    "openai": "gpt-4.1-mini",
+}
+
+
+def _resolve_model(model: str) -> tuple[str, str]:
+    """Resolve a model alias or full name to (model_name, provider)."""
+    # Check if it's a short alias first
+    if model in _MODEL_ALIASES:
+        model = _MODEL_ALIASES[model]
+
+    if model.startswith("gemini"):
+        return model, "google-genai"
+    if model.startswith("claude"):
+        return model, "anthropic"
+    if model.startswith("gpt") or model.startswith("o"):
+        return model, "openai"
+    return model, get_settings().llm_provider
 
 
 def _build_system_prompt(
@@ -201,25 +228,75 @@ TASK: Translate the provided legal document into {target_language.value} ({targe
     keep the English term and add a brief parenthetical explanation in the target language.
     NEVER invent new legal terminology.
 
+═══ SOURCE DOCUMENT CLEANUP ═══
+
+13. The source document may come from OCR or PDF text extraction. CLEAN UP these artifacts:
+    - REMOVE garbage strings that are clearly OCR noise (e.g. random alphanumeric IDs at the
+      very start/end like "DIN-202603DEESOOOOO0EECC", stray characters, broken encodings)
+    - REMOVE repeated page headers and footers (office addresses, phone/fax numbers, email
+      addresses, file reference numbers that appear identically on multiple pages)
+    - REMOVE stamps, seal descriptions, and "page X of Y" markers
+    - FIX obvious OCR errors in names, dates, and legal terms
+    - KEEP the substantive legal content, parties, dates, section references, and orders intact
+    - When in doubt, KEEP the content rather than removing it
+
 ═══ OUTPUT FORMAT ═══
 
 Output ONLY the translated document in clean markdown.
 Do NOT add translator notes, comments, preamble, or explanations outside the document.
 Do NOT wrap the output in code fences.
 Do NOT add a "Translated by" footer or any metadata.
+Do NOT include "BEGIN DOCUMENT", "END DOCUMENT", or any wrapper markers in your output.
 The output should be the translated document and nothing else."""
 
 
-def _build_user_message(source_text: str) -> str:
-    return f"""Translate the following legal document accurately. Preserve all formatting, structure, and citations exactly as specified in your instructions.
+def _clean_output(text: str) -> str:
+    """Strip wrapper markers the LLM may echo back."""
+    import re
+    text = re.sub(r"-{2,}\s*BEGIN\s+DOCUMENT\s*-{2,}", "", text)
+    text = re.sub(r"-{2,}\s*END\s+DOCUMENT\s*-{2,}", "", text)
+    return text.strip()
 
----BEGIN DOCUMENT---
-{source_text}
----END DOCUMENT---"""
+
+def _split_into_chunks(text: str, max_chars: int) -> list[str]:
+    """Split text into chunks at paragraph boundaries, respecting max_chars."""
+    if len(text) <= max_chars:
+        return [text]
+
+    paragraphs = text.split("\n\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for para in paragraphs:
+        para_len = len(para) + 2  # +2 for the \n\n separator
+        if current_len + para_len > max_chars and current:
+            chunks.append("\n\n".join(current))
+            current = [para]
+            current_len = para_len
+        else:
+            current.append(para)
+            current_len += para_len
+
+    if current:
+        chunks.append("\n\n".join(current))
+
+    return chunks
+
+
+def _build_user_message(source_text: str, part_info: str = "") -> str:
+    extra = f"\n{part_info}" if part_info else ""
+    return f"""Translate the following legal document accurately. Preserve all formatting, structure, and citations exactly as specified in your instructions.{extra}
+
+{source_text}"""
 
 
 class TranslationGenerator:
-    """Generates legal document translations via a single LLM call."""
+    """Generates legal document translations via LLM calls.
+
+    Long documents are automatically split into chunks and translated
+    sequentially to avoid hitting output token limits.
+    """
 
     def __init__(self) -> None:
         pass
@@ -229,32 +306,46 @@ class TranslationGenerator:
         source_text: str,
         target_language: TranslationLanguage,
         source_language: TranslationLanguage | None = None,
+        model: str | None = None,
     ) -> str:
         """Translate a legal document. Returns translated markdown text."""
-        settings = get_settings()
-        model = settings.llm_model
-        provider = settings.llm_provider
-        max_tokens = _PROVIDER_MAX_TOKENS.get(provider, 8192)
+        model = model or "gemini"
+        model, provider = _resolve_model(model)
+        max_tokens = _PROVIDER_MAX_TOKENS.get(provider, 16384)
 
         llm = init_chat_model(model, model_provider=provider, max_tokens=max_tokens)
-
         system_prompt = _build_system_prompt(target_language, source_language)
-        user_message = _build_user_message(source_text)
+
+        chunks = _split_into_chunks(source_text, _CHUNK_MAX_CHARS)
 
         logger.info(
             f"[translate] {source_language or 'auto'} → {target_language.value} "
-            f"| model={model} | input_chars={len(source_text)}"
+            f"| model={model} | input_chars={len(source_text)} | chunks={len(chunks)}"
         )
 
-        response = await llm.ainvoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ])
+        translated_parts: list[str] = []
+        for i, chunk in enumerate(chunks, 1):
+            if len(chunks) > 1:
+                user_message = _build_user_message(
+                    chunk,
+                    part_info=f"This is part {i} of {len(chunks)}. Translate this part completely.",
+                )
+            else:
+                user_message = _build_user_message(chunk)
 
-        content = response.content
-        if isinstance(content, list):
-            return "".join(
-                block if isinstance(block, str) else block.get("text", "")
-                for block in content
-            )
-        return content
+            logger.info(f"[translate] Translating chunk {i}/{len(chunks)} ({len(chunk)} chars)")
+
+            response = await llm.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_message),
+            ])
+
+            content = response.content
+            if isinstance(content, list):
+                content = "".join(
+                    block if isinstance(block, str) else block.get("text", "")
+                    for block in content
+                )
+            translated_parts.append(_clean_output(content))
+
+        return "\n\n".join(translated_parts)

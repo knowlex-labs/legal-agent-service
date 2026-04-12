@@ -62,6 +62,9 @@ class Settings(BaseSettings):
     s3_bucket_name: str = "knowlex-user-documents"
     s3_signed_url_expiry: int = 3600
 
+    # Document encryption (AES-256-GCM envelope encryption, matches platform API)
+    document_encryption_master_key: str = ""
+
     # Embeddings (RAG engine)
     # embedding_model: str = "gemini-embedding-2-preview"  # paid Google embedding
     # embedding_provider: str = "gemini"

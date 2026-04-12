@@ -122,11 +122,13 @@ async def lifespan(app: FastAPI):
     synopsis_service = SynopsisService(
         generator=SynopsisGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
     )
+    from legal_agent.clients.decryption import DecryptionService
+    decryption_service = DecryptionService(settings)
     translation_service = TranslationService(
         generator=TranslationGenerator(),
         job_manager=job_manager,
         s3_client=s3_client,
-        rag_client=rag_client,
+        decryption=decryption_service,
     )
     set_services(draft_service, summary_service, synopsis_service, translation_service, job_manager, s3_client)
     workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent(legal_retriever))

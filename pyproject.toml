@@ -38,6 +38,9 @@ dependencies = [
     "huggingface_hub>=0.20.0",
     "python-multipart>=0.0.18",
     "requests>=2.31.0",
+    "cryptography>=42.0",
+    "python-docx>=1.1.0",
+    "fpdf2>=2.8.0",
     # NumPy 2.x avoids broken/partial 1.26 installs that raise
     # ImportError: cannot import name 'matrix_power' from 'numpy.linalg' (unknown location)
     "numpy>=2.1.0,<3",

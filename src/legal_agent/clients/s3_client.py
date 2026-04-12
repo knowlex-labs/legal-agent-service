@@ -37,13 +37,42 @@ class S3Client:
         await loop.run_in_executor(None, _upload)
         return s3_path
 
+    async def upload_bytes(self, s3_path: str, data: bytes, content_type: str) -> str:
+        """Upload raw bytes to S3. Returns s3_path."""
+        loop = asyncio.get_running_loop()
+
+        def _upload():
+            self._client.put_object(
+                Bucket=self._bucket_name,
+                Key=s3_path,
+                Body=data,
+                ContentType=content_type,
+            )
+            logger.info(f"[s3] Uploaded {len(data)} bytes to s3://{self._bucket_name}/{s3_path}")
+
+        await loop.run_in_executor(None, _upload)
+        return s3_path
+
     async def download_bytes(self, s3_path: str) -> bytes:
         """Download an S3 object and return its raw bytes."""
+        import gzip
+
         loop = asyncio.get_running_loop()
 
         def _download():
             response = self._client.get_object(Bucket=self._bucket_name, Key=s3_path)
-            return response["Body"].read()
+            raw = response["Body"].read()
+            encoding = response.get("ContentEncoding", "")
+            content_type = response.get("ContentType", "")
+            logger.info(
+                f"[s3] Downloaded {len(raw)} bytes from {s3_path} "
+                f"| ContentType={content_type} | ContentEncoding={encoding} "
+                f"| first20={raw[:20].hex()}"
+            )
+            if encoding == "gzip":
+                raw = gzip.decompress(raw)
+                logger.info(f"[s3] Decompressed gzip: {len(raw)} bytes")
+            return raw
 
         return await loop.run_in_executor(None, _download)
 

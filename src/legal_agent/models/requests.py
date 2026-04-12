@@ -139,12 +139,12 @@ class CreateTranslationJobRequest(BaseModel):
     """Request to create a legal document translation job."""
 
     type: Literal["translation"]
-    case_folder_id: str = Field(..., description="Case folder identifier")
+    case_folder_id: str | None = Field(None, description="Case folder identifier")
 
     @field_validator("case_folder_id")
     @classmethod
-    def validate_case_folder_id(cls, v: str) -> str:
-        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
+    def validate_case_folder_id(cls, v: str | None) -> str | None:
+        if v is not None and not re.match(r"^[a-zA-Z0-9_-]+$", v):
             raise ValueError(
                 "case_folder_id must contain only alphanumeric characters, underscores, or dashes"
             )
@@ -157,16 +157,24 @@ class CreateTranslationJobRequest(BaseModel):
         None, description="Source language (auto-detected if omitted)"
     )
     file_id: str | None = Field(
-        None, description="File ID to fetch from RAG engine for translation"
+        None, description="S3 key of the encrypted source document to decrypt and translate"
+    )
+    file_name: str | None = Field(
+        None, description="Original document name (e.g. 'WhatsApp Image 2026-03-13.pdf'). Used for naming the translated output."
     )
     content: str | None = Field(
         None, description="Raw text content to translate"
+    )
+    model: str = Field(
+        "gemini",
+        description="Model alias: 'gemini', 'claude', or 'openai'. Or a full model name.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional extra context")
 
     @model_validator(mode="after")
     def require_file_id_or_content(self) -> "CreateTranslationJobRequest":
-        if not self.file_id and not self.content:
+        has_content = bool(self.content and self.content.strip())
+        if not self.file_id and not has_content:
             raise ValueError("Either 'file_id' or 'content' must be provided")
         return self
 
