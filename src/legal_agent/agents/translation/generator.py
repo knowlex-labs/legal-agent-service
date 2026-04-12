@@ -1,6 +1,7 @@
-"""Translation generator — single LLM call with a legal-domain system prompt."""
+"""Translation generator — LLM-based legal document translation with strict terminology."""
 
 import logging
+import re
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -12,9 +13,257 @@ logger = logging.getLogger(__name__)
 
 _PROVIDER_MAX_TOKENS: dict[str, int] = {
     "openai": 16384,
-    "anthropic": 8192,
-    "google-genai": 8192,
+    "anthropic": 16384,
+    "google-genai": 16384,
 }
+
+# Approximate chars per chunk for splitting long documents.
+_CHUNK_MAX_CHARS = 12000
+
+# Simple aliases the frontend can send instead of full model names.
+_MODEL_ALIASES: dict[str, str] = {
+    "gemini": "gemini-3.1-flash-lite-preview",
+    "claude": "claude-haiku-4-5-20251001",
+    "openai": "gpt-4.1-mini",
+}
+
+# ── Mandatory legal terminology per language ──────────────────────────────────
+# When a term appears in the source, the model MUST use the mapped translation.
+# Only the target language's terms are injected into the prompt.
+
+_LEGAL_TERMS: dict[str, dict[str, str]] = {
+    "hindi": {
+        "Petition": "याचिका",
+        "Application": "आवेदन",
+        "Affidavit": "शपथ पत्र",
+        "Applicant": "आवेदक",
+        "Respondent": "प्रत्यर्थी",
+        "Appellant": "अपीलार्थी",
+        "Plaintiff": "वादी",
+        "Defendant": "प्रतिवादी",
+        "Accused": "अभियुक्त",
+        "Bail": "जमानत",
+        "Anticipatory Bail": "अग्रिम जमानत",
+        "FIR": "प्रथम सूचना रिपोर्ट",
+        "Charge Sheet": "आरोप पत्र",
+        "Section": "धारा",
+        "Act": "अधिनियम",
+        "Code": "संहिता",
+        "Rule": "नियम",
+        "Order": "आदेश",
+        "Judgment": "निर्णय",
+        "Decree": "डिक्री",
+        "Prayer": "प्रार्थना",
+        "Grounds": "आधार",
+        "Facts": "तथ्य",
+        "Witness": "साक्षी",
+        "Evidence": "साक्ष्य",
+        "Testimony": "गवाही",
+        "Hon'ble Court": "माननीय न्यायालय",
+        "Advocate": "अधिवक्ता",
+        "Judge": "न्यायाधीश",
+        "Versus": "विरुद्ध",
+        "Jurisdiction": "अधिकार क्षेत्र",
+        "Injunction": "व्यादेश",
+        "Stay": "स्थगन",
+        "Contempt": "अवमानना",
+        "Compromise": "समझौता",
+        "Settlement": "निपटान",
+        "Arbitration": "मध्यस्थता",
+        "Power of Attorney": "मुख्तारनामा",
+        "Notarized": "नोटरीकृत",
+        "Criminal": "आपराधिक",
+        "Civil": "दीवानी",
+        "Non-compete": "प्रतिस्पर्धा-निषेध",
+        "Non-solicitation": "ग्राहक/कर्मचारी अनाकर्षण",
+        "Termination": "समाप्ति",
+        "Indemnity": "क्षतिपूर्ति",
+        "Confidentiality": "गोपनीयता",
+        "Force Majeure": "अप्रत्याशित घटना",
+        "Liability": "दायित्व",
+        "Negligence": "लापरवाही",
+        "Probation": "परीक्षाकाल",
+        "CrPC": "दण्ड प्रक्रिया संहिता",
+        "BNSS": "भारतीय नागरिक सुरक्षा संहिता",
+        "BNS": "भारतीय न्याय संहिता",
+        "IPC": "भारतीय दण्ड संहिता",
+    },
+    "bengali": {
+        "Petition": "আবেদনপত্র",
+        "Application": "দরখাস্ত",
+        "Affidavit": "হলফনামা",
+        "Applicant": "আবেদনকারী",
+        "Respondent": "প্রতিবাদী",
+        "Plaintiff": "বাদী",
+        "Defendant": "বিবাদী",
+        "Accused": "অভিযুক্ত",
+        "Bail": "জামিন",
+        "Section": "ধারা",
+        "Act": "আইন",
+        "Order": "আদেশ",
+        "Judgment": "রায়",
+        "Witness": "সাক্ষী",
+        "Hon'ble Court": "মাননীয় আদালত",
+        "Advocate": "আইনজীবী",
+        "Prayer": "প্রার্থনা",
+        "Grounds": "ভিত্তি",
+        "Facts": "তথ্য",
+    },
+    "tamil": {
+        "Petition": "மனு",
+        "Application": "விண்ணப்பம்",
+        "Affidavit": "சத்தியப்பிரமாணம்",
+        "Applicant": "மனுதாரர்",
+        "Respondent": "எதிர்மனுதாரர்",
+        "Plaintiff": "வாதி",
+        "Defendant": "பிரதிவாதி",
+        "Accused": "குற்றவாளி",
+        "Bail": "ஜாமீன்",
+        "Section": "பிரிவு",
+        "Act": "சட்டம்",
+        "Order": "ஆணை",
+        "Judgment": "தீர்ப்பு",
+        "Witness": "சாட்சி",
+        "Hon'ble Court": "மாண்புமிகு நீதிமன்றம்",
+        "Advocate": "வழக்கறிஞர்",
+        "Prayer": "வேண்டுகோள்",
+        "Grounds": "அடிப்படை",
+        "Facts": "உண்மைகள்",
+    },
+    "marathi": {
+        "Petition": "याचिका",
+        "Application": "अर्ज",
+        "Affidavit": "प्रतिज्ञापत्र",
+        "Applicant": "अर्जदार",
+        "Respondent": "सामनेवाला",
+        "Plaintiff": "वादी",
+        "Defendant": "प्रतिवादी",
+        "Accused": "आरोपी",
+        "Bail": "जामीन",
+        "Section": "कलम",
+        "Act": "अधिनियम",
+        "Order": "आदेश",
+        "Judgment": "निकालपत्र",
+        "Witness": "साक्षीदार",
+        "Hon'ble Court": "मा. न्यायालय",
+        "Advocate": "अधिवक्ता",
+        "Prayer": "प्रार्थना",
+        "Grounds": "कारणे",
+        "Facts": "वस्तुस्थिती",
+    },
+    "telugu": {
+        "Petition": "పిటిషన్",
+        "Application": "దరఖాస్తు",
+        "Affidavit": "అఫిడవిట్",
+        "Applicant": "దరఖాస్తుదారు",
+        "Respondent": "ప్రతివాది",
+        "Plaintiff": "వాది",
+        "Defendant": "ప్రతివాది",
+        "Accused": "నిందితుడు",
+        "Bail": "బెయిల్",
+        "Section": "సెక్షన్",
+        "Act": "చట్టం",
+        "Order": "ఉత్తర్వు",
+        "Judgment": "తీర్పు",
+        "Witness": "సాక్షి",
+        "Hon'ble Court": "గౌరవనీయ న్యాయస్థానం",
+        "Advocate": "న్యాయవాది",
+    },
+    "gujarati": {
+        "Petition": "અરજી",
+        "Application": "અરજી",
+        "Affidavit": "સોગંદનામું",
+        "Applicant": "અરજદાર",
+        "Respondent": "સામાવાળા",
+        "Plaintiff": "વાદી",
+        "Defendant": "પ્રતિવાદી",
+        "Accused": "આરોપી",
+        "Bail": "જામીન",
+        "Section": "કલમ",
+        "Act": "અધિનિયમ",
+        "Order": "હુકમ",
+        "Judgment": "ચુકાદો",
+        "Witness": "સાક્ષી",
+        "Hon'ble Court": "માનનીય અદાલત",
+        "Advocate": "વકીલ",
+    },
+    "kannada": {
+        "Petition": "ಅರ್ಜಿ",
+        "Application": "ಅರ್ಜಿ",
+        "Affidavit": "ಪ್ರಮಾಣ ಪತ್ರ",
+        "Applicant": "ಅರ್ಜಿದಾರ",
+        "Respondent": "ಪ್ರತಿವಾದಿ",
+        "Plaintiff": "ವಾದಿ",
+        "Defendant": "ಪ್ರತಿವಾದಿ",
+        "Accused": "ಆರೋಪಿ",
+        "Bail": "ಜಾಮೀನು",
+        "Section": "ಕಲಂ",
+        "Act": "ಅಧಿನಿಯಮ",
+        "Order": "ಆದೇಶ",
+        "Judgment": "ತೀರ್ಪು",
+        "Witness": "ಸಾಕ್ಷಿ",
+        "Hon'ble Court": "ಮಾನ್ಯ ನ್ಯಾಯಾಲಯ",
+        "Advocate": "ನ್ಯಾಯವಾದಿ",
+    },
+    "malayalam": {
+        "Petition": "ഹർജി",
+        "Application": "അപേക്ഷ",
+        "Affidavit": "സത്യവാങ്മൂലം",
+        "Applicant": "അപേക്ഷകൻ",
+        "Respondent": "എതിർകക്ഷി",
+        "Plaintiff": "വാദി",
+        "Defendant": "പ്രതിവാദി",
+        "Accused": "പ്രതി",
+        "Bail": "ജാമ്യം",
+        "Section": "വകുപ്പ്",
+        "Act": "നിയമം",
+        "Order": "ഉത്തരവ്",
+        "Judgment": "വിധി",
+        "Witness": "സാക്ഷി",
+        "Hon'ble Court": "ബഹുമാനപ്പെട്ട കോടതി",
+        "Advocate": "അഭിഭാഷകൻ",
+    },
+    "punjabi": {
+        "Petition": "ਅਰਜ਼ੀ",
+        "Applicant": "ਅਰਜ਼ੀਕਰਤਾ",
+        "Bail": "ਜ਼ਮਾਨਤ",
+        "Section": "ਧਾਰਾ",
+        "Act": "ਕਾਨੂੰਨ",
+        "Order": "ਹੁਕਮ",
+        "Judgment": "ਫੈਸਲਾ",
+        "Witness": "ਗਵਾਹ",
+        "Hon'ble Court": "ਮਾਨਯੋਗ ਅਦਾਲਤ",
+        "Advocate": "ਵਕੀਲ",
+    },
+}
+
+_LATIN_MAXIMS = (
+    "habeas corpus, certiorari, mandamus, quo warranto, inter alia, "
+    "prima facie, suo motu, ab initio, res judicata, obiter dictum, "
+    "mutatis mutandis, ultra vires, locus standi, amicus curiae, "
+    "ratio decidendi, stare decisis, de novo, ex parte, ad interim, "
+    "mens rea, actus reus, bona fide, mala fide, sub judice, in limine"
+)
+
+
+def _resolve_model(model: str) -> tuple[str, str]:
+    """Resolve a model alias or full name to (model_name, provider)."""
+    if model in _MODEL_ALIASES:
+        model = _MODEL_ALIASES[model]
+
+    if model.startswith("gemini"):
+        return model, "google-genai"
+    if model.startswith("claude"):
+        return model, "anthropic"
+    if model.startswith("gpt") or model.startswith("o"):
+        return model, "openai"
+    return model, get_settings().llm_provider
+
+
+def _format_term_table(terms: dict[str, str]) -> str:
+    """Format terminology dict as a strict mapping block for the prompt."""
+    lines = [f"  {eng} → {translated}" for eng, translated in terms.items()]
+    return "\n".join(lines)
 
 
 def _build_system_prompt(
@@ -23,203 +272,153 @@ def _build_system_prompt(
 ) -> str:
     target_name = LANGUAGE_NATIVE_NAMES[target_language.value]
     source_desc = (
-        f"The source document is in {LANGUAGE_NATIVE_NAMES[source_language.value]} ({source_language.value})."
+        f"Source language: {LANGUAGE_NATIVE_NAMES[source_language.value]} ({source_language.value})."
         if source_language
-        else "Auto-detect the source language of the document."
+        else "Auto-detect the source language."
     )
 
-    return f"""You are a certified legal translator specializing in Indian legal documents.
-You translate legal texts with the precision and domain expertise of a qualified law translator
-registered with an Indian High Court. You have deep knowledge of legal terminology across all
-Indian languages as used in High Courts, District Courts, and Tribunals.
+    # Get terminology for target language, or empty dict for unsupported ones
+    terms = _LEGAL_TERMS.get(target_language.value, {})
+    if terms:
+        term_section = f"""═══ MANDATORY TERMINOLOGY ═══
 
+When you encounter ANY of these English legal terms, you MUST use EXACTLY the mapped translation below.
+No alternatives. No invention. No transliteration. This is non-negotiable.
+
+{_format_term_table(terms)}
+
+For any legal term NOT in this list: use the established term from {target_language.value} High Court proceedings.
+If NO established term exists, keep the English term and add a parenthetical explanation in {target_language.value}."""
+    else:
+        term_section = f"""═══ TERMINOLOGY ═══
+
+Use established legal terminology as used in {target_language.value} High Court and subordinate court proceedings.
+If no established term exists for a concept, keep the English term and add a parenthetical explanation in {target_language.value}."""
+
+    return f"""You are an Indian lawyer who drafts legal documents in {target_language.value} ({target_name}).
+You write like a native — simple, precise, formal. NOT like a translator.
 TASK: Translate the provided legal document into {target_language.value} ({target_name}).
 {source_desc}
 
-═══ LEGAL TERMINOLOGY RULES ═══
+{term_section}
 
-1. PRESERVE LATIN LEGAL MAXIMS — do NOT translate these terms:
-   habeas corpus, certiorari, mandamus, quo warranto, inter alia,
-   prima facie, suo motu, ab initio, res judicata, obiter dictum,
-   mutatis mutandis, ultra vires, locus standi, amicus curiae,
-   ratio decidendi, stare decisis, de novo, ex parte, ad interim,
-   mens rea, actus reus, bona fide, mala fide, sub judice, in limine
+═══ TRANSLATION STYLE ═══
 
-2. PRESERVE ENGLISH PROPER NOUNS as-is (do NOT transliterate):
-   - Court names: "Supreme Court of India", "High Court of Delhi", "District Court"
-   - Statute titles: "Indian Penal Code", "Code of Criminal Procedure",
-     "Bharatiya Nyaya Sanhita", "Bharatiya Nagarik Suraksha Sanhita"
-   - Case names: "State of Punjab v. Ram Singh" — NEVER translate party names in citations
-   - Official designations: "Additional Sessions Judge", "District Magistrate",
-     "Public Prosecutor", "Judicial Magistrate First Class"
-   - After the first mention, you MAY add the translated equivalent in parentheses
-     for the reader's convenience
+1. Use SIMPLE, STANDARD legal {target_language.value}
+   - Avoid overly complex or Sanskrit-heavy words
+   - Use commonly understood legal terms, not literary ones
+   - Example (Hindi): Use "गोपनीय जानकारी" NOT "गोपनीयता संबंधी सूचना"
 
-3. USE ESTABLISHED LEGAL TERMINOLOGY in the target language — not literal word-for-word
-   translation. Below are authoritative legal term mappings for major languages:
+2. Be CONSISTENT — pick ONE term for each concept and reuse it throughout
+   - Do NOT alternate between synonyms (e.g., "अनुबंध" and "समझौता" for the same thing)
 
-   HINDI (हिन्दी):
-   - Petition = याचिका | Application = आवेदन | Affidavit = शपथ पत्र
-   - Applicant = आवेदक | Respondent = प्रत्यर्थी | Appellant = अपीलार्थी
-   - Plaintiff = वादी | Defendant = प्रतिवादी | Accused = अभियुक्त
-   - Bail = जमानत | Anticipatory Bail = अग्रिम जमानत
-   - FIR = प्रथम सूचना रिपोर्ट | Charge Sheet = आरोप पत्र
-   - Section = धारा | Act = अधिनियम | Code = संहिता | Rule = नियम
-   - Order = आदेश | Judgment = निर्णय | Decree = डिक्री
-   - Prayer = प्रार्थना | Grounds = आधार | Facts = तथ्य
-   - Witness = साक्षी | Evidence = साक्ष्य/प्रमाण | Testimony = गवाही
-   - Hon'ble Court = माननीय न्यायालय | Advocate = अधिवक्ता | Judge = न्यायाधीश
-   - Versus = विरुद्ध | Jurisdiction = अधिकार क्षेत्र
-   - Injunction = व्यादेश | Stay = स्थगन | Contempt = अवमानना
-   - Compromise = समझौता | Settlement = निपटान | Arbitration = मध्यस्थता
-   - Power of Attorney = मुख्तारनामा | Notarized = नोटरीकृत
-   - Criminal = दांडिक/आपराधिक | Civil = सिविल/दीवानी
-   - CrPC = दण्ड प्रक्रिया संहिता | BNSS = भारतीय नागरिक सुरक्षा संहिता
-   - BNS = भारतीय न्याय संहिता | IPC = भारतीय दण्ड संहिता
+3. Use BILINGUAL format on FIRST occurrence of important legal terms:
+   - Non-Compete (प्रतिस्पर्धा-निषेध)
+   - Confidential Information (गोपनीय जानकारी)
+   - Intellectual Property (बौद्धिक संपदा)
+   After first occurrence, use only the {target_language.value} term.
 
-   BENGALI (বাংলা):
-   - Petition = আবেদনপত্র | Application = দরখাস্ত | Affidavit = হলফনামা
-   - Applicant = আবেদনকারী | Respondent = বিবাদী/প্রতিবাদী
-   - Plaintiff = বাদী | Defendant = বিবাদী | Accused = অভিযুক্ত
-   - Bail = জামিন | Section = ধারা | Act = আইন
-   - Order = আদেশ | Judgment = রায় | Witness = সাক্ষী
-   - Hon'ble Court = মাননীয় আদালত | Advocate = আইনজীবী
-   - Prayer = প্রার্থনা | Grounds = ভিত্তি | Facts = তথ্য
+4. Do NOT over-translate terms commonly used in English in Indian contracts:
+   - KEEP in English: Work Product, Non-Disparagement, IP, HR, CEO, CTO, etc.
+   - KEEP in English: technical terms, company names, product names
 
-   TAMIL (தமிழ்):
-   - Petition = மனு | Application = விண்ணப்பம் | Affidavit = சத்தியப்பிரமாணம்
-   - Applicant = மனுதாரர் | Respondent = எதிர்மனுதாரர்
-   - Plaintiff = வாதி | Defendant = பிரதிவாதி | Accused = குற்றவாளி
-   - Bail = ஜாமீன் | Section = பிரிவு | Act = சட்டம்
-   - Order = ஆணை | Judgment = தீர்ப்பு | Witness = சாட்சி
-   - Hon'ble Court = மாண்புமிகு நீதிமன்றம் | Advocate = வழக்கறிஞர்
-   - Prayer = வேண்டுகோள் | Grounds = அடிப்படை | Facts = உண்மைகள்
+5. Remove repetition and unnecessary wording — be concise but formal
 
-   MARATHI (मराठी):
-   - Petition = याचिका | Application = अर्ज | Affidavit = प्रतिज्ञापत्र
-   - Applicant = अर्जदार | Respondent = सामनेवाला/प्रतिवादी
-   - Plaintiff = वादी/फिर्यादी | Defendant = प्रतिवादी | Accused = आरोपी
-   - Bail = जामीन | Section = कलम | Act = अधिनियम/कायदा
-   - Order = आदेश | Judgment = निकालपत्र | Witness = साक्षीदार
-   - Hon'ble Court = मा. न्यायालय | Advocate = वकील/अधिवक्ता
-   - Prayer = प्रार्थना | Grounds = कारणे | Facts = वस्तुस्थिती
+═══ STRICTLY FORBIDDEN ═══
 
-   TELUGU (తెలుగు):
-   - Petition = పిటిషన్ | Application = దరఖాస్తు | Affidavit = అఫిడవిట్
-   - Applicant = దరఖాస్తుదారు | Respondent = ప్రతివాది
-   - Plaintiff = వాది | Defendant = ప్రతివాది | Accused = నిందితుడు
-   - Bail = బెయిల్ | Section = సెక్షన్ | Act = చట్టం
-   - Order = ఉత్తర్వు | Judgment = తీర్పు | Witness = సాక్షి
-   - Hon'ble Court = గౌరవనీయ న్యాయస్థానం | Advocate = న్యాయవాది
+- Do NOT transliterate English words into {target_name} script (e.g., "ऑब्जर्वेशन", "टर्मिनेशन", "नॉन-कम्पीट")
+- Do NOT invent new legal terms — if unsure, keep the English term with bilingual format
+- Do NOT produce informal or conversational language
+- Do NOT mix English and {target_language.value} randomly mid-sentence
+- Do NOT translate word-by-word — use natural legal phrasing
 
-   GUJARATI (ગુજરાતી):
-   - Petition = અરજી | Application = અરજી | Affidavit = સોગંદનામું
-   - Applicant = અરજદાર | Respondent = સામાવાળા/પ્રતિવાદી
-   - Plaintiff = વાદી | Defendant = પ્રતિવાદી | Accused = આરોપી
-   - Bail = જામીન | Section = કલમ | Act = અધિનિયમ/કાયદો
-   - Order = હુકમ | Judgment = ચુકાદો | Witness = સાક્ષી
-   - Hon'ble Court = માનનીય અદાલત | Advocate = વકીલ/અધિવક્તા
+═══ PRESERVE AS-IS (do NOT translate) ═══
 
-   KANNADA (ಕನ್ನಡ):
-   - Petition = ಅರ್ಜಿ | Application = ಅರ್ಜಿ | Affidavit = ಅಫಿಡವಿಟ್/ಪ್ರಮಾಣ ಪತ್ರ
-   - Applicant = ಅರ್ಜಿದಾರ | Respondent = ಪ್ರತಿವಾದಿ
-   - Plaintiff = ವಾದಿ | Defendant = ಪ್ರತಿವಾದಿ | Accused = ಆರೋಪಿ
-   - Bail = ಜಾಮೀನು | Section = ಕಲಂ | Act = ಅಧಿನಿಯಮ
-   - Order = ಆದೇಶ | Judgment = ತೀರ್ಪು | Witness = ಸಾಕ್ಷಿ
-   - Hon'ble Court = ಮಾನ್ಯ ನ್ಯಾಯಾಲಯ | Advocate = ವಕೀಲ/ನ್ಯಾಯವಾದಿ
+- Latin legal maxims: {_LATIN_MAXIMS}
+- Court names, statute titles, case citations — keep EXACTLY as-is in English
+- Official designations: "Additional Sessions Judge", "District Magistrate", etc.
+- Numbers, dates (DD/MM/YYYY), monetary amounts (Rs. X,XX,XXX/-)
+- Statute references on first occurrence: "Section 438 of CrPC, 1973 (धारा 438, दं.प्र.सं., 1973)"
 
-   MALAYALAM (മലയാളം):
-   - Petition = ഹർജി | Application = അപേക്ഷ | Affidavit = സത്യവാങ്മൂലം
-   - Applicant = അപേക്ഷകൻ | Respondent = എതിർകക്ഷി
-   - Plaintiff = വാദി | Defendant = പ്രതിവാദി | Accused = പ്രതി
-   - Bail = ജാമ്യം | Section = വകുപ്പ് | Act = നിയമം
-   - Order = ഉത്തരവ് | Judgment = വിധി | Witness = സാക്ഷി
-   - Hon'ble Court = ബഹുമാനപ്പെട്ട കോടതി | Advocate = അഭിഭാഷകൻ
+═══ FORMATTING ═══
 
-   PUNJABI (ਪੰਜਾਬੀ):
-   - Petition = ਪਟੀਸ਼ਨ/ਅਰਜ਼ੀ | Applicant = ਅਰਜ਼ੀਕਰਤਾ
-   - Bail = ਜ਼ਮਾਨਤ | Section = ਧਾਰਾ | Act = ਐਕਟ/ਕਾਨੂੰਨ
-   - Order = ਹੁਕਮ | Judgment = ਫੈਸਲਾ | Witness = ਗਵਾਹ
-   - Hon'ble Court = ਮਾਨਯੋਗ ਅਦਾਲਤ | Advocate = ਵਕੀਲ
+- Preserve all markdown headings (##, ###), numbering, bullet points, paragraph breaks exactly
+- **Bold text** → translate content inside, keep ** markers
+- Tables → translate cell content only, keep structure
+- Remove repeated headers, footers, and address blocks from OCR artifacts
+- Keep clause structure and numbering exactly the same
 
-   For ODIA, ASSAMESE, URDU, NEPALI, KASHMIRI, SINDHI, MAITHILI, DOGRI, KONKANI,
-   MANIPURI, BODO, SANTALI, and SANSKRIT: use the accepted legal terminology as
-   used in that language's High Court and subordinate court proceedings. If you are
-   unsure of the established term, keep the English term and add a parenthetical
-   explanation in the target language.
+═══ EXAMPLES ═══
 
-4. STATUTE AND SECTION REFERENCES — use dual format on first occurrence:
-   "Section 438 of the Code of Criminal Procedure, 1973 (धारा 438, दण्ड प्रक्रिया संहिता, 1973)"
-   The English reference comes first, followed by the target language equivalent in parentheses.
-   Subsequent references may use the short form in target language only (e.g., धारा 438 दं.प्र.सं.).
+English: "The Employee agrees to maintain confidentiality of all Confidential Information during and after employment."
+→ Hindi: "कर्मचारी सहमत है कि वह रोजगार के दौरान और उसके बाद सभी Confidential Information (गोपनीय जानकारी) की गोपनीयता बनाए रखेगा।"
 
-═══ FORMATTING AND STRUCTURE RULES ═══
+English: "The Employee shall be on probation for a period of three (3) months from the date of joining."
+→ Hindi: "कर्मचारी कार्यभार ग्रहण की तिथि से तीन (3) माह की परिवीक्षा अवधि (Probation Period) पर रहेगा।"
 
-5. PRESERVE THE EXACT DOCUMENT STRUCTURE:
-   - All markdown headings (##, ###) must appear in the translation at the same positions
-   - Section numbering (1, 2, 3... or I, II, III... or (a), (b), (c)...) must remain identical
-   - Paragraph breaks, bullet points, and list formatting must be preserved exactly
-   - Markdown tables must keep the same row/column structure — translate cell content only
-   - Horizontal rules (---) must remain in the same positions
+═══ OCR CLEANUP ═══
 
-6. PRESERVE ALL CASE CITATIONS in their ORIGINAL English format:
-   - **Sushila Aggarwal v. State (NCT Delhi)** — (2020) 5 SCC 1
-   - Keep case name, citation, and formatting EXACTLY as-is
-   - Do NOT translate case names, court abbreviations, or citation numbers
-   - The surrounding sentence that introduces the citation should be translated
+Source may come from OCR/PDF extraction. Remove garbage strings, repeated headers/footers, page markers. Fix obvious OCR errors. Keep all substantive legal content.
 
-7. PRESERVE FORMATTING MARKERS:
-   - **Bold text** → translate the content inside, keep the ** markers
-   - Numbers, dates (DD/MM/YYYY), monetary amounts (Rs. X,XX,XXX/-) remain as-is
-   - Translate amount words: Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only)
-     → Rs. 4,25,000/- (रुपये चार लाख पच्चीस हज़ार मात्र) [example for Hindi]
-   - Indian numbering system (lakh, crore) — translate the words, keep the numerals
+═══ SELF-CHECK (do this before finalizing) ═══
 
-═══ TRANSLATION QUALITY STANDARDS ═══
+1. Every legal term uses the MANDATORY mapping — not a guess or transliteration
+2. Bilingual format used on first occurrence of important terms
+3. No English words transliterated into {target_name} script
+4. Consistent terminology throughout — no synonym switching
+5. Reads like drafted by an Indian lawyer, not like a translation
 
-8. The translation must read as if the document was ORIGINALLY DRAFTED in
-   {target_language.value} by a native-speaking Indian lawyer — not as a machine
-   translation or word-for-word rendering.
+═══ OUTPUT ═══
 
-9. Maintain the SAME REGISTER AND FORMALITY as the source document:
-   - Court filings: use the highest formal register
-   - Contracts: use formal but accessible language
-   - Legal notices: use assertive, formal tone
-
-10. For court documents, use the RESPECTFUL FORMS standard in that language's courts:
-    - Hindi: माननीय, श्रीमान, कृपया
-    - Bengali: মাননীয়, শ্রদ্ধেয়
-    - Tamil: மாண்புமிகு, திரு
-    - And the equivalent honorifics in other languages
-
-11. CONTEXTUAL TRANSLATION — do NOT translate word-by-word:
-    - "The petitioner humbly submits" ≠ literal word mapping
-    - Use the standard phrasing as it would appear in an actual court filing in that language
-    - "It is most respectfully submitted" → use the established courtroom phrasing
-
-12. If a legal concept has NO established equivalent in the target language,
-    keep the English term and add a brief parenthetical explanation in the target language.
-    NEVER invent new legal terminology.
-
-═══ OUTPUT FORMAT ═══
-
-Output ONLY the translated document in clean markdown.
-Do NOT add translator notes, comments, preamble, or explanations outside the document.
-Do NOT wrap the output in code fences.
-Do NOT add a "Translated by" footer or any metadata.
-The output should be the translated document and nothing else."""
+Output ONLY the translated document in clean markdown. No preamble, notes, code fences, metadata, or wrapper markers."""
 
 
-def _build_user_message(source_text: str) -> str:
-    return f"""Translate the following legal document accurately. Preserve all formatting, structure, and citations exactly as specified in your instructions.
+def _clean_output(text: str) -> str:
+    """Strip wrapper markers the LLM may echo back."""
+    text = re.sub(r"-{2,}\s*BEGIN\s+DOCUMENT\s*-{2,}", "", text)
+    text = re.sub(r"-{2,}\s*END\s+DOCUMENT\s*-{2,}", "", text)
+    return text.strip()
 
----BEGIN DOCUMENT---
-{source_text}
----END DOCUMENT---"""
+
+def _split_into_chunks(text: str, max_chars: int) -> list[str]:
+    """Split text into chunks at paragraph boundaries, respecting max_chars."""
+    if len(text) <= max_chars:
+        return [text]
+
+    paragraphs = text.split("\n\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+
+    for para in paragraphs:
+        para_len = len(para) + 2  # +2 for the \n\n separator
+        if current_len + para_len > max_chars and current:
+            chunks.append("\n\n".join(current))
+            current = [para]
+            current_len = para_len
+        else:
+            current.append(para)
+            current_len += para_len
+
+    if current:
+        chunks.append("\n\n".join(current))
+
+    return chunks
+
+
+def _build_user_message(source_text: str, part_info: str = "") -> str:
+    extra = f"\n{part_info}" if part_info else ""
+    return f"""Translate the following legal document accurately. Preserve all formatting, structure, and citations exactly as specified in your instructions.{extra}
+
+{source_text}"""
 
 
 class TranslationGenerator:
-    """Generates legal document translations via a single LLM call."""
+    """Generates legal document translations via LLM calls.
+
+    Long documents are automatically split into chunks and translated
+    sequentially to avoid hitting output token limits.
+    """
 
     def __init__(self) -> None:
         pass
@@ -229,32 +428,46 @@ class TranslationGenerator:
         source_text: str,
         target_language: TranslationLanguage,
         source_language: TranslationLanguage | None = None,
+        model: str | None = None,
     ) -> str:
         """Translate a legal document. Returns translated markdown text."""
-        settings = get_settings()
-        model = settings.llm_model
-        provider = settings.llm_provider
-        max_tokens = _PROVIDER_MAX_TOKENS.get(provider, 8192)
+        model = model or "gemini"
+        model, provider = _resolve_model(model)
+        max_tokens = _PROVIDER_MAX_TOKENS.get(provider, 16384)
 
         llm = init_chat_model(model, model_provider=provider, max_tokens=max_tokens)
-
         system_prompt = _build_system_prompt(target_language, source_language)
-        user_message = _build_user_message(source_text)
+
+        chunks = _split_into_chunks(source_text, _CHUNK_MAX_CHARS)
 
         logger.info(
             f"[translate] {source_language or 'auto'} → {target_language.value} "
-            f"| model={model} | input_chars={len(source_text)}"
+            f"| model={model} | input_chars={len(source_text)} | chunks={len(chunks)}"
         )
 
-        response = await llm.ainvoke([
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_message),
-        ])
+        translated_parts: list[str] = []
+        for i, chunk in enumerate(chunks, 1):
+            if len(chunks) > 1:
+                user_message = _build_user_message(
+                    chunk,
+                    part_info=f"This is part {i} of {len(chunks)}. Translate this part completely.",
+                )
+            else:
+                user_message = _build_user_message(chunk)
 
-        content = response.content
-        if isinstance(content, list):
-            return "".join(
-                block if isinstance(block, str) else block.get("text", "")
-                for block in content
-            )
-        return content
+            logger.info(f"[translate] Translating chunk {i}/{len(chunks)} ({len(chunk)} chars)")
+
+            response = await llm.ainvoke([
+                SystemMessage(content=system_prompt),
+                HumanMessage(content=user_message),
+            ])
+
+            content = response.content
+            if isinstance(content, list):
+                content = "".join(
+                    block if isinstance(block, str) else block.get("text", "")
+                    for block in content
+                )
+            translated_parts.append(_clean_output(content))
+
+        return "\n\n".join(translated_parts)

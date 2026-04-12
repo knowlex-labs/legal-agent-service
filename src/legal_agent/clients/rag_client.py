@@ -264,3 +264,4 @@ class MockRAGClient(RAGClient):
             f"Files: {', '.join(file_ids)}\n"
             f"This is placeholder context from mock RAG client."
         )
+
