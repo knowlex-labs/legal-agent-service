@@ -1,6 +1,7 @@
 """Amazon S3 storage client wrapper."""
 
 import asyncio
+import gzip
 import logging
 
 import boto3
@@ -55,8 +56,6 @@ class S3Client:
 
     async def download_bytes(self, s3_path: str) -> bytes:
         """Download an S3 object and return its raw bytes."""
-        import gzip
-
         loop = asyncio.get_running_loop()
 
         def _download():

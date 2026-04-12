@@ -123,7 +123,7 @@ async def lifespan(app: FastAPI):
         generator=SynopsisGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
     )
     from legal_agent.clients.decryption import DecryptionService
-    decryption_service = DecryptionService(settings)
+    decryption_service = DecryptionService(settings) if settings.document_encryption_master_key else None
     translation_service = TranslationService(
         generator=TranslationGenerator(),
         job_manager=job_manager,

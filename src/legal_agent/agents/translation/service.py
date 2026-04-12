@@ -21,7 +21,7 @@ class TranslationService:
         generator: TranslationGenerator,
         job_manager: JobManager,
         s3_client: S3Client,
-        decryption: DecryptionService,
+        decryption: DecryptionService | None,
     ):
         self._generator = generator
         self._job_manager = job_manager
@@ -109,11 +109,14 @@ class TranslationService:
             return request.content
 
         if request.file_id:
+            if not self._decryption:
+                raise ValueError("Document decryption is not configured (DOCUMENT_ENCRYPTION_MASTER_KEY missing)")
+            decryption = self._decryption
             logger.info(f"Downloading encrypted file from S3: {request.file_id}")
             encrypted = await self._s3_client.download_bytes(request.file_id)
             logger.info(f"Downloaded {len(encrypted)} bytes, decrypting...")
             plaintext = await asyncio.to_thread(
-                self._decryption.decrypt_file, encrypted, user_id
+                decryption.decrypt_file, encrypted, user_id
             )
             logger.info(f"Decrypted to {len(plaintext)} bytes, extracting text...")
             filename = request.file_id.rsplit("/", 1)[-1]

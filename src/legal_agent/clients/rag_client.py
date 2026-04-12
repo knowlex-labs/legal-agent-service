@@ -34,10 +34,6 @@ class RAGClient(ABC):
         """Query the RAG engine for relevant context."""
         pass
 
-    @abstractmethod
-    async def get_document_text(self, file_id: str, user_id: str) -> str:
-        """Fetch the full text of a document by scrolling all its indexed chunks."""
-        pass
 
 
 class LocalRAGClient(RAGClient):
@@ -126,28 +122,6 @@ class LocalRAGClient(RAGClient):
             context_parts.append(f"{header}\n{text}")
 
         return "\n\n---\n\n".join(context_parts)
-
-    async def get_document_text(self, file_id: str, user_id: str) -> str:
-        """Scroll all Qdrant chunks for file_id, ordered by page, and return full text."""
-        from legal_agent.rag_engine.repositories.qdrant_repository import QdrantRepository
-
-        collection = _collection_for_user(user_id)
-        repo = QdrantRepository()
-        chunks = repo.scroll_by_filter(
-            collection_name=collection,
-            filters={"metadata.file_id": file_id},
-            limit=10000,
-        )
-        if not chunks:
-            raise ValueError(f"No indexed chunks found for file_id={file_id}")
-
-        chunks.sort(key=lambda c: (
-            c.get("metadata", {}).get("page_start") or
-            c.get("metadata", {}).get("page_number") or 0
-        ))
-        text = "\n\n".join(c.get("text", "") for c in chunks if c.get("text"))
-        logger.info(f"[local-rag] Assembled {len(text)} chars from {len(chunks)} chunks for file_id={file_id}")
-        return text
 
     async def close(self) -> None:
         pass
@@ -264,38 +238,6 @@ class HTTPRAGClient(RAGClient):
 
         return "\n\n---\n\n".join(context_parts)
 
-    async def get_document_text(self, file_id: str, user_id: str) -> str:
-        """Fetch all indexed chunks for file_id via POST /{collection}/chunks."""
-        collection = _collection_for_user(user_id)
-        client = await self._get_client()
-        headers = {"X-User-Id": user_id}
-
-        try:
-            response = await client.post(
-                f"/api/v1/collections/{collection}/chunks",
-                json={"file_id": file_id, "limit": 10000},
-                headers=headers,
-            )
-            response.raise_for_status()
-            data = response.json()
-            chunks = data.get("chunks", [])
-            if not chunks:
-                raise ValueError(f"No indexed chunks found for file_id={file_id}")
-
-            chunks.sort(key=lambda c: (
-                c.get("metadata", {}).get("page_start") or
-                c.get("metadata", {}).get("page_number") or 0
-            ))
-            text = "\n\n".join(c.get("text", "") for c in chunks if c.get("text"))
-            logger.info(f"[http-rag] Assembled {len(text)} chars from {len(chunks)} chunks for file_id={file_id}")
-            return text
-        except httpx.HTTPStatusError as e:
-            logger.error(f"RAG HTTP error fetching chunks {e.response.status_code}: {e.response.text}")
-            raise
-        except httpx.RequestError as e:
-            logger.error(f"RAG request failed fetching chunks: {e}")
-            raise
-
     async def close(self) -> None:
         """Close the HTTP client."""
         if self._client:
@@ -324,5 +266,3 @@ class MockRAGClient(RAGClient):
             f"This is placeholder context from mock RAG client."
         )
 
-    async def get_document_text(self, file_id: str, user_id: str) -> str:
-        return f"[Mock document text for file_id={file_id}]"
