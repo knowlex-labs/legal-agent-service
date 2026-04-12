@@ -151,7 +151,7 @@ class JobManager:
     async def run_job(
         self,
         job_id: str,
-        task_fn: Callable[[], Coroutine[Any, Any, str]],
+        task_fn: Callable[[], Coroutine[Any, Any, Any]],
         timeout_seconds: int | None = None,
     ) -> None:
         """Run a job's task in the background. task_fn must handle its own completion."""
