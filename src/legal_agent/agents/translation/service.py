@@ -82,7 +82,7 @@ class TranslationService:
         out_name = f"{original_name} - ({lang_slug}).pdf" if original_name else f"{lang_slug}-translation.pdf"
 
         # Build PDF from the translated markdown
-        pdf_bytes = await asyncio.to_thread(markdown_to_pdf, translated_md)
+        pdf_bytes = await asyncio.to_thread(markdown_to_pdf, translated_md, lang_slug)
         s3_path = f"{folder}/translations/{out_name}"
         await self._s3_client.upload_bytes(
             s3_path, pdf_bytes,
