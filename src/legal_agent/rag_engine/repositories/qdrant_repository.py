@@ -124,7 +124,7 @@ class QdrantRepository:
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(
-                    size=get_settings().vector_size,
+                    size=get_settings().get_workspace_vector_size(),
                     distance=Distance.COSINE
                 )
             )
@@ -157,7 +157,7 @@ class QdrantRepository:
             self.client.create_collection(
                 collection_name=collection_name,
                 vectors_config=VectorParams(
-                    size=get_settings().vector_size,
+                    size=get_settings().get_workspace_vector_size(),
                     distance=Distance.COSINE,
                     on_disk=False  # Keep in memory for better performance
                 ),

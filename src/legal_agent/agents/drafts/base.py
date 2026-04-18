@@ -110,7 +110,7 @@ When drafting grounds, prayer, or any section citing case law:
 _PROVIDER_MAX_TOKENS: dict[str, int] = {
     "openai": 16384,
     "anthropic": 8192,
-    "google-genai": 8192,
+    "google-genai": 16384,
 }
 
 
@@ -119,6 +119,23 @@ class DraftAgentState(TypedDict):
 
     messages: Annotated[list[AnyMessage], add_messages]
     document: GeneratedDocument | None
+
+
+def _extract_text_from_message(message) -> str:
+    """Pull plain text out of a LangChain message, handling both str and
+    list-of-content-blocks shapes (Anthropic/Gemini sometimes return lists)."""
+    content = getattr(message, "content", message)
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts: list[str] = []
+        for block in content:
+            if isinstance(block, str):
+                parts.append(block)
+            elif isinstance(block, dict):
+                parts.append(block.get("text", "") or "")
+        return "".join(parts)
+    return str(content) if content is not None else ""
 
 
 
@@ -153,29 +170,35 @@ class BaseDraftingAgent:
             return {"messages": [response]}
 
         async def output_node(state: DraftAgentState):
+            # Capture the raw markdown directly from the agent's last message —
+            # this preserves all formatting (headings, bold, tables, ---) that
+            # a second structured-output LLM call tends to strip.
+            raw_draft = _extract_text_from_message(state["messages"][-1])
+
             extraction_prompt = (
-                "Extract the document you just drafted into the required structured format. "
-                "Include the full draft text, title, document type, sections, and summary.\n\n"
-                "CRITICAL: The draft field and each section's content must preserve the MARKDOWN "
-                "exactly as generated. Do NOT strip formatting, convert to plain text, or remove "
-                "table syntax. Keep all **bold**, headings, tables, and --- separators intact.\n\n"
-                "IMPORTANT - SINGLE CONTINUOUS OUTPUT:\n"
-                "- Combine all paragraphs and sections into a SINGLE CONTINUOUS draft field\n"
-                "- Do NOT add extra blank lines between paragraphs\n"
-                "- Use --- (horizontal rule) sparingly - only between major sections\n"
-                "- The document should flow as ONE continuous piece without page breaks\n\n"
-                "For sections: Split the document into its NATURAL sections as they "
-                "appear in the actual document. For court filings, use sections like:\n"
-                "- 'Cause Title' (court header + party blocks + Vs.)\n"
-                "- 'Affidavit' or 'Petition' or 'Application' (opening statement + all numbered paragraphs)\n"
-                "- 'Prayer' (prayer/closing clause)\n"
-                "- 'Verification' (verification section)\n"
-                "DO NOT create artificial sections like 'Case Header', 'Party Details', 'Body', etc. "
-                "The section titles should match what appears in the document itself."
+                "From the legal document you just drafted, extract ONLY metadata:\n"
+                "- title: the document's title\n"
+                "- summary: a 1-2 sentence summary\n"
+                "- sections: split the document into its NATURAL sections (by the "
+                "  ## headings that appear in the document). For each section, set "
+                "  'title' to the heading text and 'content' to the markdown under it.\n\n"
+                "For the 'draft' field: return an empty string (it will be overridden "
+                "with the original unmodified markdown — do NOT try to reconstruct it).\n\n"
+                "Section guidance for court filings: use natural headings like "
+                "'Cause Title', 'Facts', 'Grounds', 'Prayer', 'Verification' — "
+                "whatever appears in the actual document. Do NOT invent generic names."
             )
             msgs = [system_msg] + state["messages"] + [HumanMessage(content=extraction_prompt)]
             raw_doc = cast(GeneratedDocument, await llm_structured.ainvoke(msgs))
-            document = raw_doc.model_copy(update={"document_type": document_type})
+
+            # Override the draft field with the raw, unmodified markdown.
+            # Fallback to structured output's draft if the raw message is unusable.
+            final_draft = raw_draft if raw_draft and len(raw_draft.strip()) >= 200 else raw_doc.draft
+
+            document = raw_doc.model_copy(update={
+                "document_type": document_type,
+                "draft": final_draft,
+            })
             return {"document": document}
 
         workflow = StateGraph(DraftAgentState)

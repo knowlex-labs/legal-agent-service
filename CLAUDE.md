@@ -4,75 +4,104 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-AI-powered legal document drafting service for Indian legal firms. Uses LangGraph agents with RAG (Retrieval-Augmented Generation) to produce contracts, notices, court filings, bail applications, and criminal appeals. Multi-LLM support (OpenAI, Anthropic, Gemini).
+AI-powered legal document drafting service for Indian legal firms. Uses LangGraph agents with RAG to produce contracts, notices, court filings, bail applications, criminal appeals, and 14+ other document types. Supports multi-LLM (OpenAI, Anthropic, Gemini). This is the Python service in a two-service backend — the Java platform API (`../knowlex-platform-api/`, port 8080) calls this service (port 8001), saves results to PostgreSQL, and handles JWT auth. This service itself uses a simple `X-User-Id` header and is not exposed directly to end users.
 
 ## Commands
 
-- **Install dependencies:** `uv sync`
-- **Run service:** `uv run legal-agent` (starts on port 8001)
-- **Run tests:** `pytest tests/`
-- **Run single test:** `pytest tests/test_file.py::test_name`
-- **Lint:** `ruff check src/`
-- **Format:** `ruff format src/`
-- **Health check:** `curl http://localhost:8001/api/v1/health`
+- **Install deps:** `uv sync`
+- **Run service:** `uv run legal-agent` (port 8001)
+- **Tests:** `pytest tests/` / single: `pytest tests/test_file.py::test_name`
+- **Lint/format:** `ruff check src/` / `ruff format src/`
+- **Health:** `curl http://localhost:8001/api/v1/health`
+- **Model comparison test:** `python test_docs/compare_models.py` (fires draft jobs across multiple models for quality comparison — see `test_docs/` for Postman collections too)
 
 ## Architecture
 
-### 5-Layer Flow
+### Request flow
 
 ```
-API Routes (src/legal_agent/api/) → Services (services/) → Agents (agents/) → RAG/DB → External LLMs
+Platform API (Java) → POST /api/v1/jobs (this service)
+                    → JobManager creates job (returns job_id immediately, async)
+                    → Draft/Translation/Summary service routes to appropriate agent
+                    → Agent runs LangGraph state machine (RAG tools + LLM)
+                    → Result uploaded to S3
+                    → Job status updated (polled via GET /api/v1/jobs/{job_id})
 ```
 
-### Key Modules
+### Key modules
 
-- **`agents/`** — LangGraph state-graph agents per document type. Each extends `base.py` which provides RAG tooling. Agents: `contract_agent`, `notice_agent`, `court_filing_agent`, `bail_agent`, `criminal_appeal_agent`.
-- **`services/draft_service.py`** — Orchestrates draft creation. Routes to the correct agent based on `document_type`. Runs jobs async via `job_manager.py`.
-- **`services/job_manager.py`** — In-memory async job queue. Clients submit a draft request, get a `job_id`, then poll for results.
-- **`clients/`** — HTTP clients for external services: `rag_client.py` (RAG engine), `s3_client.py` (S3 storage), `gcs_client.py` (GCS), `google_search_client.py`.
-- **`rag_engine/`** — Optional in-process RAG stack (toggle via `RAG_IN_PROCESS=true`). Includes parsers, Qdrant vector store, chunking, reranking, and its own API layer. When disabled, delegates to a remote RAG service at `RAG_ENGINE_BASE_URL`.
-- **`legal_retrieval/`** — Case law retrieval pipeline: statute extraction → judgment filtering → pgvector semantic search → cross-encoder reranking. Uses PostgreSQL with pgvector.
-- **`chat/`** — Shared chat models and web search tool.
-- **`workspace_chat/`** — Conversational agent for workspace-level Q&A with session persistence.
-- **`draft_chat/`** — Conversational agent for iterating on existing drafts.
-- **`research_chat/`** — Research-oriented conversational agent.
-- **`summary/`** — Document summarization service.
+- **`agents/drafts/`** — 19 LangGraph agents, one per document type. All extend `base.py::BaseDraftingAgent` which builds a state graph: `agent_node` (LLM with tool calls) → `tools` (RAG/legal search) → `output_node` (extracts `GeneratedDocument`). **Important**: `output_node` captures the raw markdown from the agent's last message (preserving all formatting) and only uses structured output for metadata — see `base.py:155` for the rationale.
+- **`agents/translation/`** — Document translation pipeline. `service.py` orchestrates: extraction → LLM translation → PDF rendering. Uses Gemini Vision OCR for scanned PDFs (via `utils/ocr.py`), WeasyPrint for PDF output (falls back to fpdf2), with `html_builder.py` providing script-aware CSS for 22 Indian languages.
+- **`services/draft_service.py`** — Routes to the right agent. Supports **per-request model override** (`request.model` field) via `_agent_classes` mapping + `_build_agent()`. Without override, uses the default-model instances in `_agents`.
+- **`services/job_manager.py`** — In-memory async job queue. All jobs (draft/translation/summary/synopsis) flow through this.
+- **`utils/ocr.py`** — Shared Gemini Vision OCR utility. Used by both the translation extractor and `rag_engine/parsers/pdf_parser.py`. Returns structured markdown or plain text based on `output_format` arg.
+- **`clients/`** — HTTP clients: `rag_client.py` (LocalRAGClient vs HTTPRAGClient based on `RAG_IN_PROCESS`), `s3_client.py`, `decryption.py` (AES-256-GCM for encrypted S3 files).
+- **`rag_engine/`** — In-process RAG stack (Qdrant + embeddings + parsers + reranker). Only loaded when `RAG_IN_PROCESS=true`. The in-process mode adds ~2.5GB memory footprint — see `legal_retrieval/` for the lighter case-law-only alternative.
+- **`legal_retrieval/`** — PostgreSQL + pgvector hybrid search over Indian case law. Independent of `rag_engine/`. **Schema note**: `judgment_paragraphs.judgment_id` is the FK to `judgments.id` (not `case_id`) — see `db.py` for the hybrid RRF query.
+- **`workspace_chat/`, `draft_chat/`, `research_chat/`** — Conversational agents. `workspace_chat` uses `chat_llm_default_model` (Gemini by default) with per-request model override. These don't go through `JobManager` — they stream via SSE.
+- **`summary/`, `synopsis/`** — Document summarization/synopsis. Output markdown to S3, same async job pattern.
+- **`causelist/`** — Court cause list scraping via Camoufox (anti-detect Firefox). **Memory-heavy**: launches a fresh browser per request, consuming 400-800MB. A single instance running this + Playwright + torch needs ~2-4GB in production.
 - **`case_agent/`** — Case management from cause lists.
-- **`models/`** — Pydantic request/response models. `documents.py` has the `DocumentType` enum.
-- **`config.py`** — Pydantic Settings configuration loaded from `.env`.
-- **`main.py`** — FastAPI app entry point, registers routers and middleware.
+- **`prompts/`** — Centralized prompt templates. Per-agent prompts live in each agent file (e.g. `bail_agent.py`).
+- **`data/`** — Few-shot examples loaded at draft time via `services/examples_loader.py`.
 
-### Adding a New Document Type
+### LLM configuration
+
+- **Draft model**: `LLM_PROVIDER` + `LLM_MODEL` in `.env` (default: OpenAI gpt-4o-mini). Applied at service init; every agent gets the same model.
+- **Per-request override**: `CreateDraftJobRequest.model` lets callers override per job. The provider is inferred from the model prefix (`gemini-*` → google-genai, `gpt-*`/`o*` → openai, `claude-*` → anthropic).
+- **Max output tokens**: `base.py::_PROVIDER_MAX_TOKENS` — 16384 for OpenAI and Google, 8192 for Anthropic.
+- **Workspace chat default**: `chat_llm_default_model` (separate from drafting).
+- **Translation**: `generator.py::_MODEL_ALIASES` maps `"gemini"`/`"claude"`/`"openai"` to specific model IDs — requests can send either an alias or a full model name.
+
+### RAG modes
+
+- **In-process** (`RAG_IN_PROCESS=true`, default): Qdrant + embeddings + reranker all in this service. Use for dev or if you don't have a separate RAG service.
+- **Remote** (`RAG_IN_PROCESS=false`): Delegates to `RAG_ENGINE_BASE_URL`. Use in low-memory deployments.
+
+### Embedding configs — two independent systems
+
+Embedding configs are **split per data source** because each uses a different provider/dimension and changing one must not break the other:
+
+| System | Data | Storage | Env vars | Default |
+|---|---|---|---|---|
+| **Workspace RAG** (`rag_engine/`) | User-uploaded docs | Qdrant | `WORKSPACE_EMBEDDING_PROVIDER/MODEL`, `WORKSPACE_VECTOR_SIZE` | falls back to `EMBEDDING_*` legacy vars |
+| **Legal retrieval** (`legal_retrieval/`) | SC judgments | Postgres+pgvector `halfvec(3072)` | `LEGAL_EMBEDDING_PROVIDER/MODEL`, `LEGAL_VECTOR_SIZE` | Gemini `gemini-embedding-2-preview` @ 3072 |
+
+**Key rule**: `legal_retrieval/embeddings.py` uses only `legal_*` config and calls Gemini/OpenAI/HF directly — it does NOT go through `rag_engine/utils/embedding_client.py`. That client is reserved for workspace docs. This isolation means you can switch workspace docs to BGE without breaking case law queries.
+
+**Adding a new indexed data source** (e.g. MP High Court judgments): add `mphc_embedding_*` vars and a dedicated embedding helper that uses them. Do not reuse an existing system's config.
+
+### Adding a new document type
 
 1. Add to `DocumentType` enum in `models/documents.py`
-2. Create agent in `agents/` extending `base.py`
-3. Register in `DraftService._agents` mapping
-
-### RAG Modes
-
-- **In-process** (`RAG_IN_PROCESS=true`): Full RAG stack runs inside this service (Qdrant, embeddings, parsers, reranker)
-- **Remote** (`RAG_IN_PROCESS=false`): Delegates to external RAG service at `RAG_ENGINE_BASE_URL`
-
-### Key Patterns
-
-- **Async job queue**: Draft requests return a `job_id` immediately; clients poll `GET /api/v1/drafts/{job_id}` for results
-- **Multi-provider LLM abstraction**: LLM provider/model configured via env vars, agents are provider-agnostic
-- **Dependency injection**: FastAPI `Depends()` for service/client wiring
-- **Structured logging**: YAML-configured via `logging_config.yaml`
-- **LangGraph state graphs**: Each agent defines nodes and edges as a compiled state graph
+2. Create agent in `agents/drafts/` extending `BaseDraftingAgent` — provide a `system_prompt` and (optionally) override `_build_graph()` for custom tool wiring
+3. Register in both `DraftService._agent_classes` and `DraftService._agents` (constructor in `draft_service.py`)
+4. Add few-shot examples to `data/examples/` if desired
 
 ## Configuration
 
-Copy `.env.example` to `.env`. Key variables:
-- `LLM_PROVIDER` / `LLM_MODEL` — Which LLM to use for drafting
-- `RAG_IN_PROCESS` — Whether to run RAG stack in-process
-- `QDRANT_HOST` / `QDRANT_PORT` — Vector DB connection
-- `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` — Embedding model config
-- `DEBUG=true` — Uses MockRAGClient, enables verbose logging and hot reload
+Copy `.env.example` to `.env`. Key vars:
+- `LLM_PROVIDER` / `LLM_MODEL` — Default LLM for drafting
+- `CHAT_LLM_DEFAULT_MODEL` — Default for workspace chat
+- `GEMINI_API_KEY` — Used for Vision OCR + translation regardless of LLM_PROVIDER
+- `RAG_IN_PROCESS` — Toggle in-process RAG
+- `QDRANT_HOST` / `QDRANT_PORT`, `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` — RAG stack
+- `LEGAL_DB_URL` — Postgres for `legal_retrieval/` case law search
+- `S3_*` — AWS S3 for document storage
+- `DOCUMENT_ENCRYPTION_MASTER_KEY` — Needed for decrypting user-uploaded files in the translation flow
+- `DEBUG=true` — MockRAGClient + verbose logging + hot reload
 
 ## Style
 
-- Python 3.11+, line length 100 (`ruff`)
-- Pydantic v2 for all models
-- Async throughout (FastAPI + async agents)
+- Python 3.11+ (dev targets 3.12), ruff line-length 100
+- Pydantic v2 everywhere
+- Async throughout (FastAPI + async agents + `asyncio.to_thread` for sync libs like PyMuPDF)
 - `pytest-asyncio` with `asyncio_mode = "auto"`
+- Tool results and LangGraph state: keep messages list append-only (`add_messages` annotation)
+
+## Testing drafts
+
+The `test_docs/` folder contains:
+- `postman_draft_tests.json` — hits this service directly (`localhost:8001`)
+- `postman_platform_draft_tests.json` — hits the platform API (`localhost:8080`) so drafts are saved to DB
+- `compare_models.py` — Python script for side-by-side quality comparison across models; writes `model_comparison_report.md`

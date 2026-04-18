@@ -101,12 +101,8 @@ async def lifespan(app: FastAPI):
     except Exception:
         logger.warning("LegalCaseRetriever unavailable — drafts will not have case law tool")
     s3_client = S3Client(settings)
-    # Custom templates
-    try:
-        await asyncio.to_thread(template_db.create_table)
-        logger.info("user_templates table ready")
-    except Exception:
-        logger.warning("Failed to create user_templates table — custom templates unavailable", exc_info=True)
+    # Custom templates: table creation is now lazy (runs on first template
+    # operation). Avoids blocking startup on a cold/suspended Neon DB.
     template_service = TemplateService(s3_client=s3_client, settings=settings)
     set_template_service(template_service)
     draft_service = DraftService(

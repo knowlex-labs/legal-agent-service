@@ -107,20 +107,20 @@ def execute_hybrid_search(
 
     sql = f"""
     WITH semantic AS (
-        SELECT p.id AS paragraph_id, p.case_id, p.paragraph_number,
+        SELECT p.id AS paragraph_id, p.judgment_id AS case_id, p.paragraph_number,
                p.paragraph_text AS text,
                ROW_NUMBER() OVER (ORDER BY p.embedding <=> %(embedding)s::vector) AS rank
-        FROM judgment_paragraphs p JOIN judgments c ON c.id = p.case_id
+        FROM judgment_paragraphs p JOIN judgments c ON c.id = p.judgment_id
         WHERE 1=1 {filter_sql}
         ORDER BY p.embedding <=> %(embedding)s::vector LIMIT 100
     ),
     fulltext AS (
-        SELECT p.id AS paragraph_id, p.case_id, p.paragraph_number,
+        SELECT p.id AS paragraph_id, p.judgment_id AS case_id, p.paragraph_number,
                p.paragraph_text AS text,
                ROW_NUMBER() OVER (
                    ORDER BY ts_rank(p.full_text_search, plainto_tsquery('english', %(fts_query)s)) DESC
                ) AS rank
-        FROM judgment_paragraphs p JOIN judgments c ON c.id = p.case_id
+        FROM judgment_paragraphs p JOIN judgments c ON c.id = p.judgment_id
         WHERE p.full_text_search @@ plainto_tsquery('english', %(fts_query)s) {filter_sql}
         LIMIT 100
     ),
@@ -152,13 +152,13 @@ def get_paragraphs_for_case(case_id: str, embedding: list[float] | None = None, 
         return _query(
             "SELECT id, paragraph_number, paragraph_text AS text, "
             "embedding <=> %(embedding)s::vector AS distance "
-            "FROM judgment_paragraphs WHERE case_id = %(case_id)s "
+            "FROM judgment_paragraphs WHERE judgment_id = %(case_id)s "
             "ORDER BY embedding <=> %(embedding)s::vector LIMIT %(limit)s",
             {"case_id": case_id, "embedding": embedding, "limit": limit},
         )
     return _query(
         "SELECT id, paragraph_number, paragraph_text AS text "
-        "FROM judgment_paragraphs WHERE case_id = %(case_id)s "
+        "FROM judgment_paragraphs WHERE judgment_id = %(case_id)s "
         "ORDER BY paragraph_number LIMIT %(limit)s",
         {"case_id": case_id, "limit": limit},
     )
