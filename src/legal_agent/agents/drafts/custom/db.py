@@ -10,6 +10,7 @@ from legal_agent.config import get_settings
 logger = logging.getLogger(__name__)
 
 _pool: ConnectionPool | None = None
+_table_ensured: bool = False
 
 _CREATE_TABLE_SQL = """
 CREATE TABLE IF NOT EXISTS user_templates (
@@ -28,10 +29,17 @@ CREATE INDEX IF NOT EXISTS user_templates_user_id_idx ON user_templates(user_id)
 
 
 def _build_dsn() -> str:
+    """Build a Postgres DSN. Uses LEGAL_DB_URL if set (same DB shared with
+    legal_retrieval), otherwise builds from POSTGRES_* vars. Neon and other
+    managed Postgres providers require sslmode=require."""
     s = get_settings()
+    if s.legal_db_url:
+        return s.legal_db_url
     return (
-        f"host={s.postgres_host} port={s.postgres_port} dbname={s.postgres_db} "
-        f"user={s.postgres_username} password={s.postgres_password}"
+        f"postgresql://{s.postgres_username}:{s.postgres_password}"
+        f"@{s.postgres_host}:{s.postgres_port}/{s.postgres_db}"
+        f"?sslmode=require&connect_timeout=10"
+        f"&keepalives=1&keepalives_idle=30&keepalives_interval=10&keepalives_count=5"
     )
 
 
@@ -58,11 +66,26 @@ def close_pool() -> None:
 
 
 def create_table() -> None:
-    """Create user_templates table and index if they don't exist. Called at startup."""
+    """Create user_templates table and index if they don't exist.
+
+    Safe to call multiple times — noop after first success in the same process.
+    Not called at startup anymore (Neon wake-up can exceed pool timeout);
+    invoked lazily on the first template operation instead.
+    """
+    global _table_ensured
+    if _table_ensured:
+        return
     with get_pool().connection() as conn:
         conn.execute(_CREATE_TABLE_SQL)
         conn.commit()
+    _table_ensured = True
     logger.info("user_templates table ensured")
+
+
+def _ensure_table() -> None:
+    """Lazily create the table on first use. Errors propagate."""
+    if not _table_ensured:
+        create_table()
 
 
 def insert_template(
@@ -73,6 +96,7 @@ def insert_template(
     raw_text: str,
     generated_prompt: str,
 ) -> dict:
+    _ensure_table()
     sql = """
     INSERT INTO user_templates (user_id, name, document_type, s3_path, raw_text, generated_prompt)
     VALUES (%(user_id)s, %(name)s, %(document_type)s, %(s3_path)s, %(raw_text)s, %(generated_prompt)s)
@@ -96,6 +120,7 @@ def insert_template(
 
 
 def get_template(template_id: str, user_id: str) -> dict | None:
+    _ensure_table()
     sql = """
     SELECT id, user_id, name, document_type, s3_path, generated_prompt, created_at, updated_at
     FROM user_templates
@@ -108,6 +133,7 @@ def get_template(template_id: str, user_id: str) -> dict | None:
 
 
 def list_templates(user_id: str) -> list[dict]:
+    _ensure_table()
     sql = """
     SELECT id, user_id, name, document_type, s3_path, generated_prompt, created_at, updated_at
     FROM user_templates
@@ -122,6 +148,7 @@ def list_templates(user_id: str) -> list[dict]:
 
 def delete_template(template_id: str, user_id: str) -> bool:
     """Delete template. Returns True if a row was deleted, False if not found."""
+    _ensure_table()
     sql = "DELETE FROM user_templates WHERE id = %(id)s AND user_id = %(user_id)s"
     with get_pool().connection() as conn:
         with conn.cursor() as cur:

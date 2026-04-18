@@ -1,18 +1,54 @@
-"""Convert translated markdown to a PDF file using fpdf2."""
+"""Convert translated markdown to a PDF file.
 
+Primary: WeasyPrint (HTML/CSS → PDF) — correct Indic script rendering via Pango/HarfBuzz.
+Fallback: fpdf2 — used if WeasyPrint is unavailable.
+"""
+
+import logging
 import os
 import re
 
-from fpdf import FPDF
+logger = logging.getLogger(__name__)
 
-# Font search paths — tried in order until a suitable TTF/TTC is found.
+
+def markdown_to_pdf(md_text: str, target_language: str | None = None) -> bytes:
+    """Convert markdown text to PDF bytes.
+
+    Uses WeasyPrint for proper Indic script rendering. Falls back to fpdf2
+    if WeasyPrint is not installed or fails.
+
+    Args:
+        md_text: Markdown-formatted translated document.
+        target_language: Target language name (e.g. "hindi") for font optimization.
+
+    Returns:
+        PDF file as bytes.
+    """
+    try:
+        return _markdown_to_pdf_weasyprint(md_text, target_language)
+    except Exception as exc:
+        logger.warning(f"WeasyPrint rendering failed ({exc}), falling back to fpdf2")
+        return _markdown_to_pdf_fpdf2(md_text)
+
+
+def _markdown_to_pdf_weasyprint(md_text: str, target_language: str | None = None) -> bytes:
+    """Render markdown to PDF via WeasyPrint with legal document styling."""
+    import weasyprint
+
+    from legal_agent.agents.translation.html_builder import markdown_to_html
+
+    html_str = markdown_to_html(md_text, target_language)
+    pdf_bytes = weasyprint.HTML(string=html_str).write_pdf()
+    logger.info(f"Generated PDF via WeasyPrint ({len(pdf_bytes)} bytes)")
+    return pdf_bytes
+
+
+# ── fpdf2 fallback ──────────────────────────────────────────────────────────
+
 _FONT_CANDIDATES = [
-    # Docker / Debian (fonts-noto)
     "/usr/share/fonts/truetype/noto/NotoSans-Regular.ttf",
     "/usr/share/fonts/truetype/noto/NotoSans[wght].ttf",
-    # FreeFonts fallback
     "/usr/share/fonts/truetype/freefont/FreeSans.ttf",
-    # macOS
     "/System/Library/Fonts/Kohinoor.ttc",
     "/Library/Fonts/Arial Unicode.ttf",
     "/System/Library/Fonts/Supplemental/Arial Unicode.ttf",
@@ -34,18 +70,15 @@ def _find_font(candidates: list[str]) -> str | None:
     return None
 
 
-def markdown_to_pdf(md_text: str) -> bytes:
-    """Convert markdown text to PDF bytes.
+def _markdown_to_pdf_fpdf2(md_text: str) -> bytes:
+    """Legacy fallback: convert markdown text to PDF bytes using fpdf2."""
+    from fpdf import FPDF
 
-    Handles: headings (##, ###), bold (**), numbered lists, bullet lists,
-    horizontal rules (---), and regular paragraphs.
-    """
     pdf = FPDF()
     pdf.set_auto_page_break(auto=True, margin=25)
     pdf.set_margins(left=25, top=25, right=25)
     pdf.add_page()
 
-    # Register Unicode font
     regular_path = _find_font(_FONT_CANDIDATES)
     bold_path = _find_font(_BOLD_FONT_CANDIDATES)
 
@@ -54,7 +87,6 @@ def markdown_to_pdf(md_text: str) -> bytes:
         if bold_path and bold_path != regular_path:
             pdf.add_font("unifont", "B", bold_path)
         else:
-            # Use regular for bold too (fpdf2 will fake-bold)
             pdf.add_font("unifont", "B", regular_path)
         font_family = "unifont"
     else:
@@ -70,7 +102,6 @@ def markdown_to_pdf(md_text: str) -> bytes:
             pdf.ln(4)
             continue
 
-        # Horizontal rule
         if re.match(r"^-{3,}$", stripped):
             y = pdf.get_y()
             pdf.set_draw_color(160, 160, 160)
@@ -78,7 +109,6 @@ def markdown_to_pdf(md_text: str) -> bytes:
             pdf.ln(6)
             continue
 
-        # Headings
         heading_match = re.match(r"^(#{1,4})\s+(.*)", stripped)
         if heading_match:
             level = len(heading_match.group(1))
@@ -91,13 +121,11 @@ def markdown_to_pdf(md_text: str) -> bytes:
             pdf.set_font(font_family, size=BODY_SIZE)
             continue
 
-        # Bullet list
         if stripped.startswith("- ") or stripped.startswith("* "):
             text = stripped[2:]
             _write_list_item(pdf, font_family, BODY_SIZE, "•  ", text)
             continue
 
-        # Numbered list
         num_match = re.match(r"^(\d+)[.)]\s+(.*)", stripped)
         if num_match:
             num = num_match.group(1)
@@ -105,23 +133,20 @@ def markdown_to_pdf(md_text: str) -> bytes:
             _write_list_item(pdf, font_family, BODY_SIZE, f"{num}. ", text)
             continue
 
-        # Regular paragraph
         _write_rich_line(pdf, font_family, BODY_SIZE, stripped)
         pdf.ln(3)
 
     return bytes(pdf.output())
 
 
-def _write_list_item(pdf: FPDF, font_family: str, size: float, prefix: str, text: str) -> None:
-    """Write a list item with bullet/number prefix and rich text."""
+def _write_list_item(pdf, font_family: str, size: float, prefix: str, text: str) -> None:
     pdf.set_font(font_family, size=size)
     pdf.cell(w=12, h=size * 0.5, text=prefix)
     _write_rich_line(pdf, font_family, size, text)
     pdf.ln(2)
 
 
-def _write_rich_line(pdf: FPDF, font_family: str, size: float, text: str) -> None:
-    """Write a line with inline **bold** support using pdf.write()."""
+def _write_rich_line(pdf, font_family: str, size: float, text: str) -> None:
     parts = re.split(r"(\*\*.*?\*\*)", text)
     for part in parts:
         if part.startswith("**") and part.endswith("**"):
@@ -134,5 +159,4 @@ def _write_rich_line(pdf: FPDF, font_family: str, size: float, text: str) -> Non
 
 
 def _strip_bold(text: str) -> str:
-    """Remove ** markers from text."""
     return re.sub(r"\*\*(.*?)\*\*", r"\1", text)

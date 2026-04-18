@@ -235,6 +235,177 @@ _LEGAL_TERMS: dict[str, dict[str, str]] = {
         "Hon'ble Court": "ਮਾਨਯੋਗ ਅਦਾਲਤ",
         "Advocate": "ਵਕੀਲ",
     },
+    "urdu": {
+        "Petition": "درخواست",
+        "Application": "درخواست",
+        "Affidavit": "حلف نامہ",
+        "Applicant": "درخواست گزار",
+        "Respondent": "مدعا علیہ",
+        "Plaintiff": "مدعی",
+        "Defendant": "مدعا علیہ",
+        "Accused": "ملزم",
+        "Bail": "ضمانت",
+        "Section": "دفعہ",
+        "Act": "ایکٹ",
+        "Order": "حکم",
+        "Judgment": "فیصلہ",
+        "Witness": "گواہ",
+        "Hon'ble Court": "معزز عدالت",
+        "Advocate": "وکیل",
+        "Prayer": "التجا",
+        "Grounds": "بنیادیں",
+        "Facts": "حقائق",
+    },
+    "odia": {
+        "Petition": "ଆବେଦନ",
+        "Application": "ଦରଖାସ୍ତ",
+        "Affidavit": "ଶପଥପତ୍ର",
+        "Applicant": "ଆବେଦନକାରୀ",
+        "Respondent": "ପ୍ରତିବାଦୀ",
+        "Bail": "ଜାମିନ",
+        "Section": "ଦଫା",
+        "Act": "ଆଇନ",
+        "Order": "ଆଦେଶ",
+        "Judgment": "ରାୟ",
+        "Witness": "ସାକ୍ଷୀ",
+        "Hon'ble Court": "ମାନ୍ୟବର ନ୍ୟାୟାଳୟ",
+        "Advocate": "ଅଧିବକ୍ତା",
+    },
+    "assamese": {
+        "Petition": "আবেদন",
+        "Application": "দৰখাস্ত",
+        "Affidavit": "শপতনামা",
+        "Applicant": "আবেদনকাৰী",
+        "Respondent": "প্ৰতিবাদী",
+        "Bail": "জামিন",
+        "Section": "ধাৰা",
+        "Act": "আইন",
+        "Order": "আদেশ",
+        "Judgment": "ৰায়",
+        "Witness": "সাক্ষী",
+        "Hon'ble Court": "মাননীয় ন্যায়ালয়",
+        "Advocate": "অধিবক্তা",
+    },
+    "nepali": {
+        "Petition": "निवेदन",
+        "Application": "आवेदन",
+        "Affidavit": "शपथपत्र",
+        "Applicant": "निवेदक",
+        "Respondent": "विपक्षी",
+        "Bail": "जमानत",
+        "Section": "दफा",
+        "Act": "ऐन",
+        "Order": "आदेश",
+        "Judgment": "फैसला",
+        "Witness": "साक्षी",
+        "Hon'ble Court": "माननीय अदालत",
+        "Advocate": "अधिवक्ता",
+    },
+    "sanskrit": {
+        "Petition": "निवेदनपत्रम्",
+        "Application": "आवेदनम्",
+        "Affidavit": "शपथपत्रम्",
+        "Applicant": "आवेदकः",
+        "Respondent": "प्रत्यर्थी",
+        "Bail": "प्रतिभूतिः",
+        "Section": "अनुच्छेदः",
+        "Act": "अधिनियमः",
+        "Order": "आदेशः",
+        "Judgment": "निर्णयः",
+        "Witness": "साक्षी",
+        "Hon'ble Court": "माननीयं न्यायालयम्",
+        "Advocate": "अधिवक्ता",
+    },
+    "maithili": {
+        "Petition": "आवेदन",
+        "Application": "दरखास्त",
+        "Bail": "जमानत",
+        "Section": "धारा",
+        "Act": "अधिनियम",
+        "Order": "आदेश",
+        "Judgment": "निर्णय",
+        "Witness": "गवाह",
+        "Hon'ble Court": "माननीय न्यायालय",
+        "Advocate": "वकील",
+    },
+    "sindhi": {
+        "Petition": "درخواست",
+        "Application": "عرضي",
+        "Bail": "ضمانت",
+        "Section": "دفعو",
+        "Act": "قانون",
+        "Order": "حڪم",
+        "Judgment": "فيصلو",
+        "Witness": "گواهه",
+        "Hon'ble Court": "معزز عدالت",
+        "Advocate": "وڪيل",
+    },
+    "dogri": {
+        "Petition": "अर्जी",
+        "Application": "दरख्वास्त",
+        "Bail": "ज़मानत",
+        "Section": "धारा",
+        "Act": "कानून",
+        "Order": "हुक्म",
+        "Judgment": "फ़ैसला",
+        "Witness": "गवाह",
+        "Hon'ble Court": "माननीय अदालत",
+        "Advocate": "वकील",
+    },
+    "konkani": {
+        "Petition": "अर्ज",
+        "Application": "अर्ज",
+        "Bail": "जामीन",
+        "Section": "कलम",
+        "Act": "कायदो",
+        "Order": "हुकूम",
+        "Judgment": "निवाडो",
+        "Witness": "साक्षीदार",
+        "Hon'ble Court": "मानेस्त न्यायालय",
+        "Advocate": "वकील",
+    },
+    "kashmiri": {
+        "Petition": "عرضی",
+        "Application": "درخواست",
+        "Bail": "ضمانت",
+        "Section": "دفعہ",
+        "Act": "قانون",
+        "Order": "حکم",
+        "Judgment": "فیصلہ",
+        "Witness": "گواہ",
+        "Hon'ble Court": "محترم عدالت",
+        "Advocate": "وکیل",
+    },
+    "manipuri": {
+        "Petition": "ꯑꯄꯤꯜ",
+        "Application": "ꯑꯄ꯭ꯂꯤꯀꯦꯁꯟ",
+        "Bail": "ꯖꯥꯃꯤꯟ",
+        "Section": "ꯁꯦꯛꯁꯟ",
+        "Order": "ꯑꯣꯔꯗꯔ",
+        "Judgment": "ꯐꯩꯁꯜ",
+        "Witness": "ꯁꯥꯛꯁꯤ",
+        "Advocate": "ꯑꯦꯗꯚꯣꯀꯦꯠ",
+    },
+    "bodo": {
+        "Petition": "आर्जि",
+        "Application": "नायबिजिरनाय",
+        "Bail": "जामिन",
+        "Section": "धारा",
+        "Order": "आदेश",
+        "Judgment": "रायजोनाय",
+        "Witness": "साक्षी",
+        "Advocate": "उकिल",
+    },
+    "santali": {
+        "Petition": "ᱟᱨᱡᱤ",
+        "Application": "ᱟᱨᱡᱤ",
+        "Bail": "ᱡᱟᱢᱤᱱ",
+        "Section": "ᱫᱷᱟᱨᱟ",
+        "Order": "ᱦᱩᱠᱩᱢ",
+        "Judgment": "ᱵᱤᱪᱟᱹᱨ",
+        "Witness": "ᱜᱚᱣᱟᱦ",
+        "Advocate": "ᱣᱠᱤᱞ",
+    },
 }
 
 _LATIN_MAXIMS = (
@@ -373,6 +544,40 @@ Source may come from OCR/PDF extraction. Remove garbage strings, repeated header
 Output ONLY the translated document in clean markdown. No preamble, notes, code fences, metadata, or wrapper markers."""
 
 
+def _enforce_glossary(text: str, target_language: str) -> str:
+    """Post-process translated text to enforce mandatory legal terminology.
+
+    Scans for English legal terms that should have been translated per the glossary
+    and replaces them. Handles case-insensitive matching and common plural/possessive forms.
+    Skips terms that appear inside bilingual format like "Bail (जमानत)".
+    """
+    terms = _LEGAL_TERMS.get(target_language, {})
+    if not terms:
+        return text
+
+    for eng_term, translated_term in terms.items():
+        # Skip if the translated term is already present (LLM got it right)
+        if translated_term in text:
+            continue
+
+        # Build pattern: match the English term as a whole word, case-insensitive.
+        # Exclude matches already in bilingual format: "Term (translation)"
+        # Also handle plural forms: "Petitions" → "Petition" + "s"
+        pattern = rf"\b{re.escape(eng_term)}s?\b"
+        # Don't replace inside bilingual parenthetical format
+        # e.g., don't touch "Bail (जमानत)" — only standalone "Bail"
+        matches = list(re.finditer(pattern, text, re.IGNORECASE))
+        for match in reversed(matches):  # reverse to preserve offsets
+            start, end = match.start(), match.end()
+            # Check if followed by " (" which indicates bilingual format — skip
+            after = text[end:end + 2]
+            if after == " (":
+                continue
+            text = text[:start] + translated_term + text[end:]
+
+    return text
+
+
 def _clean_output(text: str) -> str:
     """Strip wrapper markers the LLM may echo back."""
     text = re.sub(r"-{2,}\s*BEGIN\s+DOCUMENT\s*-{2,}", "", text)
@@ -470,4 +675,9 @@ class TranslationGenerator:
                 )
             translated_parts.append(_clean_output(content))
 
-        return "\n\n".join(translated_parts)
+        result = "\n\n".join(translated_parts)
+
+        # Post-process: enforce legal glossary terms the LLM may have missed
+        result = _enforce_glossary(result, target_language.value)
+
+        return result

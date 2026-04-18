@@ -9,15 +9,15 @@ from legal_agent.config import get_settings
 class _EmbeddingConfig:
     @property
     def MODEL_NAME(self):
-        return get_settings().embedding_model
+        return get_settings().get_workspace_embedding_model()
 
     @property
     def PROVIDER(self):
-        return get_settings().embedding_provider
+        return get_settings().get_workspace_embedding_provider()
 
     @property
     def VECTOR_SIZE(self):
-        return get_settings().vector_size
+        return get_settings().get_workspace_vector_size()
 
     @property
     def DISTANCE_METRIC(self):

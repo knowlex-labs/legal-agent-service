@@ -55,8 +55,10 @@ def _markdown_for_upload(document: GeneratedDocument) -> str:
         return document.draft
     if document.sections:
         ordered = sorted(document.sections, key=lambda s: s.order)
-        parts = [f"## {s.title}\n\n{s.content.strip()}" for s in ordered if s.content and s.content.strip()]
-        assembled = "\n\n".join(parts)
+        parts = [f"## {s.title}\n{s.content.strip()}" for s in ordered if s.content and s.content.strip()]
+        # Separate major sections with a horizontal rule so the rendered document
+        # shows a clear visual break instead of running together.
+        assembled = "\n\n---\n\n".join(parts)
         if assembled.strip():
             logger.warning(
                 "Structured output had empty draft field; assembled %s sections into markdown (%s chars)",
@@ -90,28 +92,35 @@ class DraftService:
         self.retriever = retriever
         self.template_service = template_service
 
-        # Initialize agents based on settings
+        # Mapping of document type -> agent class. Used to instantiate one-off
+        # agents when the request overrides the default model.
+        self._agent_classes: dict[DocumentType, type[BaseDraftingAgent]] = {
+            DocumentType.CONTRACT: ContractAgent,
+            DocumentType.AGREEMENT: ContractAgent,
+            DocumentType.LEGAL_NOTICE: NoticeAgent,
+            DocumentType.DEMAND_NOTICE: NoticeAgent,
+            DocumentType.PETITION: CourtFilingAgent,
+            DocumentType.AFFIDAVIT: CourtFilingAgent,
+            DocumentType.APPLICATION: CourtFilingAgent,
+            DocumentType.BAIL_APPLICATION: BailApplicationAgent,
+            DocumentType.CRIMINAL_APPEAL: CriminalAppealAgent,
+            DocumentType.SLP: SLPAgent,
+            DocumentType.QUASHING_PETITION: QuashingPetitionAgent,
+            DocumentType.ANTICIPATORY_BAIL: AnticipatoryBailAgent,
+            DocumentType.REVISION_PETITION: RevisionPetitionAgent,
+            DocumentType.EXECUTION_PETITION: ExecutionPetitionAgent,
+            DocumentType.CONSUMER_COMPLAINT: ConsumerComplaintAgent,
+            DocumentType.PATENT: PatentAgent,
+            DocumentType.WRITTEN_STATEMENT: WrittenStatementAgent,
+            DocumentType.WRITTEN_ARGUMENTS: WrittenArgumentsAgent,
+            DocumentType.APPLICATION_DRAFT: ApplicationAgent,
+        }
+
+        # Default agents, initialized once with the configured model.
         model, provider = self._get_model_config()
         self._agents: dict[DocumentType, BaseDraftingAgent] = {
-            DocumentType.CONTRACT: ContractAgent(model, provider),
-            DocumentType.AGREEMENT: ContractAgent(model, provider),
-            DocumentType.LEGAL_NOTICE: NoticeAgent(model, provider),
-            DocumentType.DEMAND_NOTICE: NoticeAgent(model, provider),
-            DocumentType.PETITION: CourtFilingAgent(model, provider),
-            DocumentType.AFFIDAVIT: CourtFilingAgent(model, provider),
-            DocumentType.APPLICATION: CourtFilingAgent(model, provider),
-            DocumentType.BAIL_APPLICATION: BailApplicationAgent(model, provider),
-            DocumentType.CRIMINAL_APPEAL: CriminalAppealAgent(model, provider),
-            DocumentType.SLP: SLPAgent(model, provider),
-            DocumentType.QUASHING_PETITION: QuashingPetitionAgent(model, provider),
-            DocumentType.ANTICIPATORY_BAIL: AnticipatoryBailAgent(model, provider),
-            DocumentType.REVISION_PETITION: RevisionPetitionAgent(model, provider),
-            DocumentType.EXECUTION_PETITION: ExecutionPetitionAgent(model, provider),
-            DocumentType.CONSUMER_COMPLAINT: ConsumerComplaintAgent(model, provider),
-            DocumentType.PATENT: PatentAgent(model, provider),
-            DocumentType.WRITTEN_STATEMENT: WrittenStatementAgent(model, provider),
-            DocumentType.WRITTEN_ARGUMENTS: WrittenArgumentsAgent(model, provider),
-            DocumentType.APPLICATION_DRAFT: ApplicationAgent(model, provider),
+            doc_type: cls(model, provider)
+            for doc_type, cls in self._agent_classes.items()
         }
 
     def _get_model_config(self) -> tuple[str, str]:
@@ -131,6 +140,29 @@ class DraftService:
         if document_type not in self._agents:
             raise ValueError(f"Unsupported document type: {document_type}. Supported: {[d.value for d in self._agents.keys()]}")
         return self._agents[document_type]
+
+    def _resolve_provider(self, model: str) -> str:
+        """Infer the LangChain provider from a model ID."""
+        lower = model.lower()
+        if lower.startswith("gemini"):
+            return "google-genai"
+        if lower.startswith("claude"):
+            return "anthropic"
+        if lower.startswith("gpt") or lower.startswith("o"):
+            return "openai"
+        # Fallback to configured provider.
+        return self.settings.get_langchain_provider()
+
+    def _build_agent(self, document_type: DocumentType, model: str) -> BaseDraftingAgent:
+        """Instantiate a one-off agent with the given model (for per-request overrides)."""
+        if document_type not in self._agent_classes:
+            raise ValueError(
+                f"Unsupported document type: {document_type}. "
+                f"Supported: {[d.value for d in self._agent_classes.keys()]}"
+            )
+        agent_cls = self._agent_classes[document_type]
+        provider = self._resolve_provider(model)
+        return agent_cls(model, provider)
 
     async def create_draft_job(self, request: CreateDraftJobRequest, user_id: str) -> str:
         """Create a new draft job and start processing. Returns job_id."""
@@ -201,11 +233,19 @@ class DraftService:
 
         if request.template_id and self.template_service:
             template = await self.template_service.get_template(request.template_id, user_id)
-            model, provider = self._get_model_config()
+            if request.model:
+                model, provider = request.model, self._resolve_provider(request.model)
+            else:
+                model, provider = self._get_model_config()
             agent = CustomDraftingAgent(model, provider, template.generated_prompt)
+        elif request.model:
+            agent = self._build_agent(request.document_type, request.model)
         else:
             agent = self._get_agent(request.document_type)
-        logger.debug(f"[{job_id}] Using agent: {agent.__class__.__name__}")
+        logger.debug(
+            f"[{job_id}] Using agent: {agent.__class__.__name__} "
+            f"(model={agent.model_name}, provider={agent.provider})"
+        )
 
         # Step 3: Create dependencies and call agent
         deps = DraftingDependencies(

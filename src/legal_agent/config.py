@@ -65,9 +65,24 @@ class Settings(BaseSettings):
     # Document encryption (AES-256-GCM envelope encryption, matches platform API)
     document_encryption_master_key: str = ""
 
-    # Embeddings (RAG engine)
-    # embedding_model: str = "gemini-embedding-2-preview"  # paid Google embedding
-    # embedding_provider: str = "gemini"
+    # ── Embeddings ────────────────────────────────────────────────────────
+    # Each RAG system has its own embedding config so we can mix providers
+    # without cross-contamination. `embedding_*` (legacy, below) is the
+    # fallback for anything that hasn't been migrated yet.
+
+    # Workspace RAG (rag_engine/) — user documents in Qdrant.
+    # Default mirrors the legacy single config until we re-index to BGE.
+    workspace_embedding_provider: str | None = None  # falls back to embedding_provider
+    workspace_embedding_model: str | None = None     # falls back to embedding_model
+    workspace_vector_size: int | None = None         # falls back to vector_size
+
+    # Legal retrieval (legal_retrieval/) — Supreme Court judgments in
+    # PostgreSQL + pgvector. DB column is halfvec(3072) — must use Gemini.
+    legal_embedding_provider: str = "gemini"
+    legal_embedding_model: str = "gemini-embedding-2-preview"
+    legal_vector_size: int = 3072
+
+    # Legacy single config (kept for backward compat + workspace fallback).
     embedding_model: str = "BAAI/bge-m3"
     embedding_provider: str = "huggingface"
     vector_size: int = 1024
@@ -75,6 +90,15 @@ class Settings(BaseSettings):
     chunk_size: int = 800
     chunk_overlap: int = 100
     max_chunk_size: int = 1200
+
+    def get_workspace_embedding_provider(self) -> str:
+        return self.workspace_embedding_provider or self.embedding_provider
+
+    def get_workspace_embedding_model(self) -> str:
+        return self.workspace_embedding_model or self.embedding_model
+
+    def get_workspace_vector_size(self) -> int:
+        return self.workspace_vector_size or self.vector_size
 
     # LLM extras (RAG engine)
     openai_model: str = "gpt-4o"

@@ -96,6 +96,11 @@ class CreateDraftJobRequest(BaseModel):
         description="Custom template ID (from /api/v1/drafts/templates). "
                     "When set, drafts using the user's stored template prompt instead of the system agent.",
     )
+    model: str | None = Field(
+        None,
+        description="Override LLM for this draft (e.g. 'gemini-3-flash', 'gpt-4o', 'gpt-5.4-mini'). "
+                    "If omitted, uses the service default.",
+    )
     metadata: dict[str, Any] = Field(
         default_factory=dict, description="Optional extra context or parameters"
     )
