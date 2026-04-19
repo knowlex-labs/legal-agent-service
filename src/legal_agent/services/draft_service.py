@@ -248,6 +248,7 @@ class DraftService:
         )
 
         # Step 3: Create dependencies and call agent
+        sub_type = request.metadata.get("subtype")
         deps = DraftingDependencies(
             rag_client=self.rag_client,
             file_ids=request.file_ids,
@@ -258,6 +259,7 @@ class DraftService:
             examples=formatted_examples,
             language=language,
             retriever=self.retriever,
+            sub_type=sub_type,
         )
 
         logger.debug(f"[{job_id}] Calling agent.draft()")

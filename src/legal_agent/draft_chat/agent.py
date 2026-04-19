@@ -14,6 +14,7 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from legal_agent.chat.citation_utils import parse_legal_web_search_citations
+from legal_agent.chat.session_title import generate_session_title
 from legal_agent.chat.web_search import create_web_search_tool
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import get_settings
@@ -220,9 +221,38 @@ class DraftChatAgent:
         style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
         full_message = f"{message}\n\n---\nRESPONSE INSTRUCTIONS:{tone_suffix}{style_suffix}"
 
+        # Kick off auto-title generation in parallel if this is the session's
+        # first message. The task runs alongside the main stream; the
+        # session_title event is emitted as soon as the title is ready.
+        title_task: asyncio.Task[str | None] | None = None
+        try:
+            prior_state = await graph.aget_state(config)
+            is_first_message = not prior_state or not getattr(prior_state, "values", None) \
+                or not prior_state.values.get("messages")
+        except Exception:
+            logger.exception("[draft_chat] aget_state failed; skipping session_title")
+            is_first_message = False
+        if is_first_message and message and message.strip():
+            resolved_model = model or get_settings().chat_llm_default_model
+            title_task = asyncio.create_task(
+                generate_session_title(message, model=resolved_model)
+            )
+
         web_search_output: str | None = None
         used_legal_tools = False
         legal_search_queries: list[str] = []
+
+        async def _maybe_flush_title():
+            nonlocal title_task
+            if title_task is None or not title_task.done():
+                return None
+            try:
+                t = title_task.result()
+            except Exception:
+                logger.exception("[draft_chat] session_title task raised")
+                t = None
+            title_task = None
+            return t
 
         async for event in graph.astream_events(
             {"messages": [HumanMessage(content=full_message)]}, config=config, version="v2"
@@ -254,6 +284,10 @@ class DraftChatAgent:
                     web_search_output = str(output)
                 yield {"event": "tool_result", "data": output}
 
+            early_title = await _maybe_flush_title()
+            if early_title:
+                yield {"event": "session_title", "data": early_title}
+
         if not web_search_output and used_legal_tools and self._web_search_tool:
             try:
                 search_query = legal_search_queries[-1] if legal_search_queries else message[:200]
@@ -270,6 +304,16 @@ class DraftChatAgent:
             citations = parse_legal_web_search_citations(web_search_output)
             if citations:
                 yield {"event": "citations", "data": json.dumps(citations)}
+
+        # Drain the title task one last time before closing the stream.
+        if title_task is not None:
+            try:
+                title = await title_task
+            except Exception:
+                logger.exception("[draft_chat] awaiting session_title task failed")
+                title = None
+            if title:
+                yield {"event": "session_title", "data": title}
 
         yield {"event": "end", "data": ""}
 

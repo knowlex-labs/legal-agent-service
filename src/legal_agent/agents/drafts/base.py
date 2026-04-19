@@ -2,6 +2,7 @@
 
 import logging
 from dataclasses import dataclass
+from datetime import date
 from typing import Annotated, cast
 
 from langchain.chat_models import init_chat_model
@@ -11,6 +12,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from typing_extensions import TypedDict
 
+from legal_agent.agents.drafts.templates.loader import load_template_reference
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
 from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
@@ -32,51 +34,57 @@ class DraftingDependencies:
     examples: str = ""
     language: str = "english"
     retriever: LegalCaseRetriever | None = None
+    sub_type: str | None = None
+    template_reference: str | None = None
 
 
-# Base system prompt for all legal drafting agents
-BASE_SYSTEM_PROMPT = """You are an expert legal drafting assistant specializing in Indian law.
-Your task is to draft professional, legally sound documents based on the provided instructions.
+# Base system prompt for all legal drafting agents.
+# Output goal: a standard, professional Indian-law document in the style
+# of a practising courtroom advocate — clean, formal, complete, ready for
+# execution.
+BASE_SYSTEM_PROMPT = """=== ROLE ===
+You are an expert Indian legal drafting assistant. You produce standard, professional Indian-law documents in the style of a practising courtroom advocate — contracts and filings that are clean, formal, complete, and ready for execution.
+=== END ROLE ===
 
-CRITICAL RULES - VIOLATION IS NOT ACCEPTABLE:
-1. NEVER use placeholder text like [Name], [Address], [Amount], [Date], _____, XXXX, etc.
-2. NEVER leave blanks to be filled in later
-3. Use ONLY the actual information provided in the instructions
-4. If specific information is missing (like exact date), use contextual alternatives:
-   - Missing date → "on or about [month] [year]" or describe the event contextually
-   - Missing exact amount → use the amount mentioned or say "the agreed amount"
-   - Missing address → use whatever location info is provided
-5. The document must be COMPLETE and READY TO USE as-is
-6. Every field must have real content - no templates, no blanks
+=== DRAFTING PRINCIPLES ===
+1. Surface every detail the user provided. If the input gives CIN, PAN, GSTIN, salary breakup, leave entitlements, addresses, dates, or any other detail, each must appear naturally in the document — no silent omissions.
+2. When a required detail is missing from the input, fill with the sensible standard Indian-advocate default (e.g., a twelve (12) month non-compete, thirty (30) days' notice during probation, ninety (90) days' notice after confirmation, Mumbai-seated arbitration for a Maharashtra-incorporated employer, stamp duty borne by the first party). Produce a finished contract, not a fill-in-the-blanks form. Never emit `[NOT PROVIDED]`, `[Amount]`, `[Name]`, `[DD]`, `[Month, Year]`, `_____`, `XXXX`, or similar unfilled placeholders in the final output.
+3. Mask Aadhaar numbers to the last four digits: `XXXX-XXXX-1234`. This is standard Indian practice aligned with UIDAI guidelines. Never print a full Aadhaar number.
+4. Use formal Indian legal phrasing: "hereinafter referred to as", "WHEREAS", "NOW, THEREFORE", "IN WITNESS WHEREOF", "which expression shall, unless repugnant to the context or meaning thereof, include the successors-in-interest and permitted assigns of the said party".
+5. Use Indian numbering and currency: `Rs. 24,00,000/- (Rupees Twenty-Four Lakh Only)`. Never the international comma style (`1,250,000`).
+6. Reference applicable Indian statutes by name and year, with the section where relevant: Indian Contract Act, 1872; Employees' Provident Funds Act, 1952; Employees' State Insurance Act, 1948; Payment of Gratuity Act, 1972; Maternity Benefit Act, 1961 (as amended 2017); Sexual Harassment of Women at Workplace Act, 2013 (PoSH); Digital Personal Data Protection Act, 2023; Arbitration and Conciliation Act, 1996; Registration Act, 1908; Information Technology Act, 2000. For employment / commercial **data protection** clauses use the DPDP Act, 2023 — do NOT cite IT Act §43A or the SPDI Rules; they are superseded for most personal-data processing.
+7. Choose a single defined term per party and use it consistently throughout the draft. If you define the first party as **"Employer"**, do NOT later call it "Company"; if the second party is **"Employee"**, do NOT later call her "Executive". Drift between defined terms is a drafting defect.
+8. When the user's input is silent on the execution date, use TODAY'S DATE (supplied in the user prompt under "Today's date:"). When silent on the commencement / start date, default to the execution date. Never emit `[Date]`, `[Month]`, `[Year]`, `[Commencement Date]`, `[Details]`, or any other bracketed fill-in marker.
+=== END DRAFTING PRINCIPLES ===
 
-Key guidelines:
-1. Follow Indian legal conventions and formatting standards
-2. Use formal, precise legal language appropriate for Indian courts and tribunals
-3. Include all necessary clauses and provisions required by Indian law
-4. Reference relevant Indian statutes, acts, and regulations where appropriate
-5. Ensure the document is complete, well-structured, and ready for review
-6. Use proper Indian legal terminology and citation formats
-
-When querying reference documents returns no results, proceed using your legal knowledge
-and any case law from legal_case_search. Never write "no documents found" in the draft.
+=== TEMPLATE FIDELITY ===
+When a `<template_reference>` block is supplied in the user prompt:
+1. Your draft MUST include every clause, sub-clause, and schedule from the template — in the same order, with the same numbering structure (1.1, 1.2, 10.1, 10.2, …).
+2. Do NOT drop clauses. Do NOT summarise or merge clauses. Do NOT reorder them.
+3. If a clause heading in the template is compound (e.g., "NON-SOLICITATION AND NON-COMPETE"), the draft MUST contain both parts as separate sub-clauses. Dropping one half while keeping the compound heading is a defect.
+4. Fill each clause using the user's actual parties, amounts, dates, and terms. Where the user is silent, use the template's default phrasing (it is a gold-standard example drafted by a practising Indian advocate).
+5. Schedules (A, B, C, …) are mandatory — each must appear at the end of the contract with populated content. Never emit `Schedule A — [Details]`.
+6. Preserve statute references exactly as they appear in the template (e.g., `§27 Indian Contract Act, 1872`, `Digital Personal Data Protection Act, 2023`, `Maternity Benefit Act, 1961 (as amended 2017)`).
+=== END TEMPLATE FIDELITY ===
 
 === OUTPUT FORMAT: MARKDOWN ===
-You MUST output the document as clean, well-structured MARKDOWN.
-
-CRITICAL - SINGLE PAGE OUTPUT:
-1. The entire document must be OUTPUT AS A SINGLE CONTINUOUS BLOCK - do NOT separate sections with blank lines or extra newlines
-2. Use markdown pipe tables for ALL tabular data (always include header separator row):
+1. `##` headings for major section titles — e.g. `## RECITALS`, `## 1. APPOINTMENT AND POSITION`, `## SCHEDULE A — SALARY BREAKUP`.
+2. Proper spacing: leave a blank line between every clause, and between a heading and its body. The draft should read like a formatted legal document, not a wall of text.
+3. Use `**bold**` for:
+   - Party defined terms on first use: **"Employer"**, **"Employee"**, **"this Agreement"**
+   - Party full names in the execution block and recitals
+   - Key defined terms in Clause 1 (Definitions): **Confidential Information**, **Intellectual Property Rights**, **Effective Date**
+   - Section cross-references in body text (e.g., "subject to **Clause 12**")
+4. Use `---` (horizontal rule) BETWEEN major sections only — not between individual clauses within a section.
+5. Use markdown pipe tables (with header separator row) for salary breakups, payment schedules, leave entitlements, witness blocks, and any other tabular data:
    | Header 1 | Header 2 |
    |----------|----------|
    | Data     | Data     |
+6. Use hierarchical numbering: `1.1`, `1.2`, `1.3` for sub-clauses; `(a)`, `(b)`, `(c)` for enumerations within a sub-clause; Roman numerals `(I)`, `(II)`, `(III)` for grounds / particulars in court filings.
+7. Do NOT output raw HTML tags (`<p>`, `<div>`, `<table>`, `<br>`). Do NOT wrap output in ```code fences```.
+8. Follow your specialized prompt's section structure exactly — each required section must appear as a `##` heading. When a `<template_reference>` block is provided in the user prompt, mirror its clause coverage and ordering, but use the user's actual parties, amounts, and terms.
 
-3. Use **bold** for names, headings, and emphasis
-4. Use ## headings for major section titles (e.g., ## PRAYER, ## GROUNDS)
-5. Use --- (horizontal rule) ONLY between MAJOR sections (not between every paragraph)
-6. Do NOT output raw HTML tags (no <p>, <div>, <table>, <br>)
-7. Do NOT wrap output in ```code fences```
-8. Do NOT use page breaks, section dividers, or any markers that would cause the document to split
-9. Follow the EXACT template structure provided by your specialized prompt
+When querying reference documents returns no results, proceed using your legal knowledge and any case law from legal_case_search. Never write "no documents found" in the draft.
 === END OUTPUT FORMAT ===
 
 === LEGAL CITATION FORMAT ===
@@ -138,6 +146,13 @@ def _extract_text_from_message(message) -> str:
     return str(content) if content is not None else ""
 
 
+# Maps a document_type enum to the template-loader category folder. Only
+# sub-type-driven types need an entry; unmapped types will never load a
+# template reference.
+_TEMPLATE_CATEGORY: dict[DocumentType, str] = {
+    DocumentType.CONTRACT: "contracts",
+    DocumentType.AGREEMENT: "contracts",
+}
 
 
 class BaseDraftingAgent:
@@ -171,19 +186,20 @@ class BaseDraftingAgent:
 
         async def output_node(state: DraftAgentState):
             # Capture the raw markdown directly from the agent's last message —
-            # this preserves all formatting (headings, bold, tables, ---) that
-            # a second structured-output LLM call tends to strip.
+            # preserves all formatting (headings, bold, tables, ---) that a
+            # second structured-output LLM call tends to strip.
             raw_draft = _extract_text_from_message(state["messages"][-1])
 
             extraction_prompt = (
                 "From the legal document you just drafted, extract ONLY metadata:\n"
                 "- title: the document's title\n"
                 "- summary: a 1-2 sentence summary\n"
-                "- sections: split the document into its NATURAL sections (by the "
-                "  ## headings that appear in the document). For each section, set "
-                "  'title' to the heading text and 'content' to the markdown under it.\n\n"
-                "For the 'draft' field: return an empty string (it will be overridden "
-                "with the original unmodified markdown — do NOT try to reconstruct it).\n\n"
+                "- sections: split the document into its NATURAL sections (by "
+                "the ## headings that appear in the document). For each, set "
+                "'title' to the heading text and 'content' to the markdown "
+                "under it.\n\n"
+                "For the 'draft' field: return an empty string — it will be "
+                "overridden with the original unmodified markdown.\n\n"
                 "Section guidance for court filings: use natural headings like "
                 "'Cause Title', 'Facts', 'Grounds', 'Prayer', 'Verification' — "
                 "whatever appears in the actual document. Do NOT invent generic names."
@@ -220,12 +236,72 @@ class BaseDraftingAgent:
         """Generate a legal document draft."""
         logger.info(f"[draft] Starting: title='{deps.title}' | agent={self.__class__.__name__} | files={len(deps.file_ids)}")
 
+        # Load per-sub-type template reference. Prefer a caller-supplied
+        # deps.template_reference; otherwise resolve via sub_type + category.
+        template_reference = deps.template_reference
+        if template_reference is None and deps.sub_type:
+            category = _TEMPLATE_CATEGORY.get(deps.document_type)
+            if category:
+                template_reference = load_template_reference(category, deps.sub_type)
+                if template_reference:
+                    logger.info(
+                        "[draft] Loaded template_reference: category=%s sub_type=%s length=%d chars",
+                        category, deps.sub_type, len(template_reference),
+                    )
+                else:
+                    logger.info(
+                        "[draft] No template_reference loaded: category=%s sub_type=%s (file missing)",
+                        category, deps.sub_type,
+                    )
+            else:
+                logger.info(
+                    "[draft] No template_reference category mapped for document_type=%s (sub_type=%s)",
+                    deps.document_type.value, deps.sub_type,
+                )
+        elif template_reference is not None:
+            logger.info(
+                "[draft] Using caller-supplied deps.template_reference: length=%d chars",
+                len(template_reference),
+            )
+
+        template_section = ""
+        if template_reference:
+            template_section = f"""
+=== TEMPLATE REFERENCE (for structure only) ===
+The following is a gold-standard example of a {deps.sub_type or deps.document_type.value} document.
+
+USE this reference for:
+- Section structure and ordering
+- Clause coverage (what a complete draft of this sub-type includes)
+- Tone and formality level
+
+DO NOT copy from this reference:
+- Party names, addresses, or identifiers
+- Specific amounts, dates, or durations
+- Any content specific to the example parties
+
+Generate fresh content for this draft using ONLY the user's structured input.
+
+{template_reference}
+=== END TEMPLATE REFERENCE ===
+"""
+
         examples_section = ""
         if deps.examples:
             examples_section = f"""
-=== REFERENCE EXAMPLES AND FORMAT GUIDELINES ===
+=== REFERENCE EXAMPLES (for format only) ===
+The following shows drafting style, layout conventions, and format guidelines.
+
+USE for:
+- Layout and formatting conventions
+- Indian legal phrasing patterns
+- Clause style and tone
+
+DO NOT copy specific content (names, amounts, dates, facts) from these examples.
+Generate fresh content using ONLY the user's structured input.
+
 {deps.examples}
-=== END EXAMPLES ===
+=== END REFERENCE EXAMPLES ===
 """
 
         language_section = ""
@@ -259,12 +335,15 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
 === END LANGUAGE INSTRUCTIONS ===
 """
 
-        # Pre-fetch RAG context deterministically — no tool call needed
+        # Pre-fetch RAG context deterministically — no tool call needed.
+        # Query is sub-type / document-type aware so retrieval is keyed to the
+        # specific draft, not just the free-text title.
         rag_section = ""
         if deps.file_ids:
+            rag_query = f"{deps.sub_type or deps.document_type.value} {deps.title}: facts parties amounts"
             rag_context = await deps.rag_client.query(
                 file_ids=deps.file_ids,
-                query=f"facts parties dates amounts terms relevant to: {deps.title}",
+                query=rag_query,
                 user_id=deps.user_id,
             )
             if rag_context:
@@ -276,10 +355,16 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
             else:
                 logger.warning(f"[draft] RAG returned empty context for file_ids={deps.file_ids}")
 
-        if deps.retriever:
+        # Case-law retrieval (legal_case_search) is expensive (CPU embedding +
+        # reranker per call). Only attach it when the user has uploaded files
+        # — a strong signal that deep research is desired. Otherwise, draft
+        # without citations to keep latency bounded.
+        case_law_enabled = bool(deps.retriever and deps.file_ids)
+        if case_law_enabled:
             search_instruction = (
-                "legal_case_search is available — use it for EACH ground/section requiring case citations. "
-                "Make targeted queries per ground. Only cite cases returned by the tool. "
+                "legal_case_search is available. Make AT MOST one or two consolidated calls "
+                "covering the main legal issues — do NOT call the tool per ground. "
+                "Only cite cases returned by the tool. "
                 "Format every citation as: **Case Name** — Citation (see CITATION FORMAT above)."
             )
         else:
@@ -290,9 +375,15 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
                 "but do not write any citation numbers."
             )
 
+        today = date.today()
+        today_long = today.strftime("%d %B, %Y")
+        today_ddmmyyyy = today.strftime("%d/%m/%Y")
+
         prompt = f"""Draft the following document using ONLY the information provided.
 
 Document Title: {deps.title}
+
+Today's date: {today_long} ({today_ddmmyyyy}). Use this as the execution date when the user is silent; default the commencement / start date to the execution date when the user is silent on that too.
 
 === DRAFTING STRATEGY ===
 Before writing, do the following mentally:
@@ -310,28 +401,29 @@ Use these EXACT details - names, ages, addresses, amounts, dates - in your draft
 {deps.instructions}
 
 === END STRUCTURED INPUT ===
-{language_section}{rag_section}{examples_section}
+{template_section}{language_section}{rag_section}{examples_section}
 
 {search_instruction}
 
 === FORMATTING REMINDER ===
-- Output CLEAN MARKDOWN following your template exactly
-- SECTION HEADERS ARE MANDATORY: Output named section headers as ## headings (e.g., ## 2. FACTS AND BACKGROUND, ## GROUNDS OF APPEAL). Do NOT collapse the entire document into flat numbered paragraphs.
-- Within each section, use hierarchical sub-numbering: 2.1, 2.2, 2.3 for facts; Roman numerals (I), (II), (III) for grounds
-- Tables: Use markdown pipe syntax with header separators |---|
-- Bold: **text** for names, party roles, section headings, key terms
-- Amounts: ALWAYS in figures AND words - Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only). Use Indian numbering (lakh, crore).
-- Dates: DD/MM/YYYY for specific dates; "on or about [Month] [Year]" for approximate
-- DO NOT use placeholders like [Name], [Date], _____, XXXX. Use actual names/details from the input.
-- Use descriptive alternatives if info is genuinely missing: "the plaintiff", "the said property", "the agreed amount"
+- Output CLEAN MARKDOWN following your template exactly.
+- Section headers as ## headings (e.g., ## 1. APPOINTMENT AND POSITION, ## RECITALS, ## SCHEDULE A — SALARY BREAKUP). Do NOT collapse the entire document into flat numbered paragraphs.
+- Leave a blank line between clauses and between headings and their body.
+- Within each section, use hierarchical sub-numbering: 1.1, 1.2, 1.3 for sub-clauses; (a), (b), (c) for enumerations; Roman numerals (I), (II), (III) for grounds in court filings.
+- Tables: markdown pipe syntax with header separator row |---|.
+- Bold: **text** for party defined terms, full names in the execution block, key defined terms, section cross-references.
+- Amounts: ALWAYS in figures AND words — Rs. 4,25,000/- (Rupees Four Lakh Twenty-Five Thousand Only). Indian numbering (lakh, crore).
+- Dates: DD/MM/YYYY in clause headings; natural-language date permissible in the execution recital.
+- Do NOT emit unfilled placeholders like [Name], [Date], _____, XXXX in the final output. If a detail is missing, apply the sensible Indian-advocate default (see DRAFTING PRINCIPLES).
+- Aadhaar numbers rendered as XXXX-XXXX-<last 4>. Never emit a full Aadhaar.
 - Do NOT output HTML tags. Do NOT use code fences.
 - Follow your specialized template structure EXACTLY — each required section must be present.
 === END FORMATTING ===
 
-Generate a COMPLETE, court-ready document following the EXACT markdown template from your specialized prompt. Every major section must appear with its ## heading."""
+Generate a COMPLETE, FINISHED Indian contract following the exact markdown template from your specialized prompt. Every major section appears as a ## heading. Every input field from the structured data appears naturally in the draft. Missing details filled with sensible Indian-advocate defaults. The output must read like a document a practising courtroom advocate would hand to a client for execution."""
 
         tools = []
-        if deps.retriever:
+        if deps.retriever and deps.file_ids:
             tools.append(create_legal_search_tool(deps.retriever))
 
         graph = self._build_graph(tools, deps.document_type)
