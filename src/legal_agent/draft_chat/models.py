@@ -17,7 +17,11 @@ class DraftChatMessageRequest(BaseModel):
         default="balanced", description="Response detail level"
     )
     file_ids: list[str] = Field(default_factory=list, description="File IDs for RAG scope")
-    model: Literal["openai", "gemini"] = Field(default="openai", description="LLM provider")
+    model: Literal["openai", "gemini", "sarvam"] = Field(
+        default="gemini",
+        description="LLM provider. 'sarvam' uses Sarvam's OpenAI-compatible endpoint "
+        "(model name controlled by SARVAM_CHAT_MODEL env var).",
+    )
 
 
 class DraftChatConfigUpdate(BaseModel):

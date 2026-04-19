@@ -15,12 +15,15 @@ _PROVIDER_MAX_TOKENS: dict[str, int] = {
     "openai": 16384,
     "anthropic": 16384,
     "google-genai": 16384,
+    "sarvam": 16384,
 }
 
 # Approximate chars per chunk for splitting long documents.
 _CHUNK_MAX_CHARS = 12000
 
 # Simple aliases the frontend can send instead of full model names.
+# The "sarvam" alias resolves at call time from settings.sarvam_chat_model so
+# callers can swap sarvam-m ↔ sarvam-30b ↔ sarvam-105b without redeploys.
 _MODEL_ALIASES: dict[str, str] = {
     "gemini": "gemini-3.1-flash-lite-preview",
     "claude": "claude-haiku-4-5-20251001",
@@ -418,7 +421,14 @@ _LATIN_MAXIMS = (
 
 
 def _resolve_model(model: str) -> tuple[str, str]:
-    """Resolve a model alias or full name to (model_name, provider)."""
+    """Resolve a model alias or full name to (model_name, provider).
+
+    Provider codes returned here: "openai", "anthropic", "google-genai", "sarvam".
+    ("sarvam" is a synthetic marker — actual LangChain init uses the OpenAI
+    provider against Sarvam's OpenAI-compatible endpoint; see _init_llm.)
+    """
+    if model == "sarvam":
+        return get_settings().sarvam_chat_model, "sarvam"
     if model in _MODEL_ALIASES:
         model = _MODEL_ALIASES[model]
 
@@ -428,7 +438,32 @@ def _resolve_model(model: str) -> tuple[str, str]:
         return model, "anthropic"
     if model.startswith("gpt") or model.startswith("o"):
         return model, "openai"
+    if model.startswith("sarvam"):
+        return model, "sarvam"
     return model, get_settings().llm_provider
+
+
+def _init_llm(model: str, provider: str, max_tokens: int):
+    """Initialise the LangChain chat model for the given provider.
+
+    Sarvam is served via its OpenAI-compatible endpoint, so we init with
+    model_provider="openai" and inject base_url + api_key.
+    """
+    if provider == "sarvam":
+        settings = get_settings()
+        if not settings.sarvam_api_key:
+            raise RuntimeError(
+                "SARVAM_API_KEY is not configured but translation requested provider='sarvam'. "
+                "Set SARVAM_API_KEY in .env or pick a different model."
+            )
+        return init_chat_model(
+            model,
+            model_provider="openai",
+            max_tokens=max_tokens,
+            base_url=settings.sarvam_api_base_url,
+            api_key=settings.sarvam_api_key,
+        )
+    return init_chat_model(model, model_provider=provider, max_tokens=max_tokens)
 
 
 def _format_term_table(terms: dict[str, str]) -> str:
@@ -579,7 +614,28 @@ def _enforce_glossary(text: str, target_language: str) -> str:
 
 
 def _clean_output(text: str) -> str:
-    """Strip wrapper markers the LLM may echo back."""
+    """Strip wrapper markers and reasoning traces the LLM may echo back.
+
+    Sarvam-m (and other hybrid reasoning models) emit <think>...</think> blocks
+    before the actual answer. Strip them — and if the </think> closer is missing
+    (output was truncated mid-thinking), drop everything before the next likely
+    content marker as a safety net.
+    """
+    # Remove closed reasoning blocks (case-insensitive; supports <think> and <thinking>).
+    text = re.sub(
+        r"<think(?:ing)?>.*?</think(?:ing)?>",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE,
+    )
+    # Remove unclosed reasoning block: drop from <think> to either end-of-text
+    # or a markdown heading / --- separator that plausibly starts the answer.
+    text = re.sub(
+        r"<think(?:ing)?>.*?(?=(^#{1,6}\s|^---\s*$|\Z))",
+        "",
+        text,
+        flags=re.DOTALL | re.IGNORECASE | re.MULTILINE,
+    )
     text = re.sub(r"-{2,}\s*BEGIN\s+DOCUMENT\s*-{2,}", "", text)
     text = re.sub(r"-{2,}\s*END\s+DOCUMENT\s*-{2,}", "", text)
     return text.strip()
@@ -640,8 +696,12 @@ class TranslationGenerator:
         model, provider = _resolve_model(model)
         max_tokens = _PROVIDER_MAX_TOKENS.get(provider, 16384)
 
-        llm = init_chat_model(model, model_provider=provider, max_tokens=max_tokens)
+        llm = _init_llm(model, provider, max_tokens)
         system_prompt = _build_system_prompt(target_language, source_language)
+        # sarvam-m is a hybrid reasoning model — reasoning adds no value for
+        # deterministic translation and burns tokens. /no_think disables it.
+        if provider == "sarvam":
+            system_prompt = "/no_think\n\n" + system_prompt
 
         chunks = _split_into_chunks(source_text, _CHUNK_MAX_CHARS)
 
@@ -673,11 +733,28 @@ class TranslationGenerator:
                     block if isinstance(block, str) else block.get("text", "")
                     for block in content
                 )
-            translated_parts.append(_clean_output(content))
+            cleaned = _clean_output(content)
+            logger.info(
+                f"[translate] Chunk {i}/{len(chunks)} translated: "
+                f"{len(chunk)} → {len(cleaned)} chars "
+                f"(ratio {len(cleaned) / max(len(chunk), 1):.2f})"
+            )
+            if len(cleaned) < len(chunk) * 0.3:
+                logger.warning(
+                    f"[translate] Chunk {i}/{len(chunks)} output is <30% of input "
+                    f"({len(cleaned)} vs {len(chunk)}) — possible content loss; "
+                    "check model output truncation or _clean_output over-stripping."
+                )
+            translated_parts.append(cleaned)
 
         result = "\n\n".join(translated_parts)
 
         # Post-process: enforce legal glossary terms the LLM may have missed
         result = _enforce_glossary(result, target_language.value)
+
+        logger.info(
+            f"[translate] Complete: input={len(source_text)} chars → "
+            f"output={len(result)} chars (ratio {len(result) / max(len(source_text), 1):.2f})"
+        )
 
         return result
