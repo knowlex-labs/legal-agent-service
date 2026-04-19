@@ -182,7 +182,12 @@ def ocr_pdf_with_gemini(
     pdf_data: bytes,
     output_format: OutputFormat = "markdown",
 ) -> str:
-    """OCR a PDF using Gemini Vision, page by page."""
+    """OCR a PDF using Gemini Vision.
+
+    Pages are rasterized sequentially (fast, CPU-bound) then sent to Gemini
+    concurrently (bounded by gemini_ocr_concurrency). Output is assembled in
+    original page order regardless of completion order.
+    """
     from google import genai
     from google.genai import types
 
@@ -191,13 +196,17 @@ def ocr_pdf_with_gemini(
     prompt = _PROMPT_MARKDOWN if output_format == "markdown" else _PROMPT_PLAIN
 
     doc = fitz.open(stream=pdf_data, filetype="pdf")
-    page_texts: list[str] = []
+    total = doc.page_count
 
-    for page_num in range(doc.page_count):
+    page_images: list[bytes] = []
+    for page_num in range(total):
         page = doc[page_num]
         pixmap = page.get_pixmap(matrix=fitz.Matrix(2, 2))
-        image_bytes = pixmap.tobytes("png")
+        page_images.append(pixmap.tobytes("png"))
+    doc.close()
 
+    def _ocr_page(idx_and_image: tuple[int, bytes]) -> tuple[int, str]:
+        idx, image_bytes = idx_and_image
         response = client.models.generate_content(
             model=settings.gemini_model,
             contents=[
@@ -211,13 +220,20 @@ def ocr_pdf_with_gemini(
         )
         page_text = response.text.strip()
         logger.info(
-            f"[gemini-ocr] Page {page_num + 1}/{doc.page_count}: "
-            f"{len(page_text)} chars extracted"
+            f"[gemini-ocr] Page {idx + 1}/{total}: {len(page_text)} chars extracted"
         )
-        page_texts.append(page_text)
+        return idx, page_text
 
-    doc.close()
-    return "\n\n".join(page_texts)
+    logger.info(
+        f"[gemini-ocr] Processing {total} pages with concurrency="
+        f"{settings.gemini_ocr_concurrency}"
+    )
+    results: list[str] = [""] * total
+    with ThreadPoolExecutor(max_workers=settings.gemini_ocr_concurrency) as pool:
+        for idx, text in pool.map(_ocr_page, enumerate(page_images)):
+            results[idx] = text
+
+    return "\n\n".join(results)
 
 
 def ocr_image_with_gemini(

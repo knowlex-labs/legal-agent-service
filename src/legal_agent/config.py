@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     ocr_provider: Literal["gemini", "sarvam"] = "gemini"
     # Concurrent Sarvam jobs when chunking long PDFs. Each chunk is ≤10 pages.
     sarvam_ocr_concurrency: int = 4
+    # Concurrent Gemini Vision calls per PDF (one call per page). Gemini API
+    # rate-limits: free tier ~15 rpm, paid tier much higher. Lower if rate-limited.
+    gemini_ocr_concurrency: int = 4
     # Language hint passed to Sarvam. Examples: "en-IN", "hi-IN", "ta-IN", "unknown".
     sarvam_ocr_language: str = "unknown"
     # Sarvam chat/translation model. Options: sarvam-m (24B, default), sarvam-30b, sarvam-105b.
