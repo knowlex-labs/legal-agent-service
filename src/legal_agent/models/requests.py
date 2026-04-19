@@ -172,7 +172,11 @@ class CreateTranslationJobRequest(BaseModel):
     )
     model: str = Field(
         "gemini",
-        description="Model alias: 'gemini', 'claude', or 'openai'. Or a full model name.",
+        description=(
+            "Model alias: 'gemini' (default, gemini-3.1-flash-lite-preview), "
+            "'sarvam' (best for Indic but under evaluation), 'claude', or 'openai'. "
+            "Or a full model name (e.g. 'sarvam-30b', 'gpt-5.4')."
+        ),
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional extra context")
 

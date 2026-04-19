@@ -101,6 +101,21 @@ def _static_tools(agent: "DraftChatAgent"):
     return tools
 
 
+def _build_sarvam_llm(settings):
+    """Build a LangChain chat model bound to Sarvam's OpenAI-compatible endpoint."""
+    if not settings.sarvam_api_key:
+        raise RuntimeError(
+            "SARVAM_API_KEY is not configured but draft chat requested model='sarvam'. "
+            "Set SARVAM_API_KEY in .env or pick a different model."
+        )
+    return init_chat_model(
+        settings.sarvam_chat_model,
+        model_provider="openai",
+        base_url=settings.sarvam_api_base_url,
+        api_key=settings.sarvam_api_key,
+    )
+
+
 class DraftChatAgent:
     def __init__(self):
         self._pool: AsyncConnectionPool | None = None
@@ -177,6 +192,21 @@ class DraftChatAgent:
         await self._ready.wait()
 
         settings = get_settings()
+
+        # Sarvam uses an OpenAI-compatible endpoint. It isn't pre-compiled in
+        # _graphs (tool-calling support on sarvam-* models is less battle-tested,
+        # so we always build fresh per request to keep the request-scoped tool
+        # set explicit).
+        if model == "sarvam":
+            llm = _build_sarvam_llm(settings)
+            req_tools = self._tools_for_request(file_ids, user_id)
+            return create_react_agent(
+                model=llm,
+                tools=req_tools,
+                checkpointer=self.checkpointer,
+                prompt=SYSTEM_PROMPT,
+            )
+
         chat_models = settings.get_chat_models()
         provider_key = model if model in chat_models else settings.chat_llm_default_provider
         model_name, langchain_provider = chat_models[provider_key]

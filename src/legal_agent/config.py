@@ -16,12 +16,31 @@ _LANGCHAIN_PROVIDERS = {"openai": "openai", "anthropic": "anthropic", "gemini": 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
-    # LLM (drafting)
+    # LLM (drafting) — default is GPT-5.4 (OpenAI's current flagship as of Apr 2026).
+    # Per-request model overrides still work via CreateDraftJobRequest.model.
     llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
-    llm_model: str = "gpt-4o-mini"
+    llm_model: str = "gpt-5.4"
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
+    sarvam_api_key: str | None = None
+
+    # OCR backend selection. "gemini" = Gemini Vision (current default).
+    # "sarvam" = Sarvam Document Intelligence (22 Indian languages + English; ≤10 pages per job).
+    ocr_provider: Literal["gemini", "sarvam"] = "gemini"
+    # Concurrent Sarvam jobs when chunking long PDFs. Each chunk is ≤10 pages.
+    sarvam_ocr_concurrency: int = 4
+    # Language hint passed to Sarvam. Examples: "en-IN", "hi-IN", "ta-IN", "unknown".
+    sarvam_ocr_language: str = "unknown"
+    # Sarvam chat/translation model. Options: sarvam-m (24B, default), sarvam-30b, sarvam-105b.
+    # Used when a request selects provider "sarvam" for translation or draft chat.
+    sarvam_chat_model: str = "sarvam-m"
+    # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
+    sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
+    # Content-addressed OCR cache in S3. Same PDF bytes → same cache entry across
+    # retries, different translations, and RAG/draft flows. Disable for debugging.
+    ocr_cache_enabled: bool = True
+    ocr_cache_prefix: str = "ocr-cache"
 
     # RAG Engine — when False, use HTTPRAGClient and do not import the in-process rag_engine
     # (required for low-memory hosts e.g. Render 512MB; point rag_engine_base_url at a RAG-capable service)
@@ -48,7 +67,7 @@ class Settings(BaseSettings):
     serper_api_key: str = ""
 
     # Jobs
-    job_timeout_seconds: int = 300
+    job_timeout_seconds: int = 1800
     job_max_retries: int = 3
 
     # CORS

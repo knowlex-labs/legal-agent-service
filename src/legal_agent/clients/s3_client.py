@@ -5,6 +5,7 @@ import gzip
 import logging
 
 import boto3
+from botocore.exceptions import ClientError
 
 from legal_agent.config import Settings
 
@@ -73,6 +74,36 @@ class S3Client:
             return raw
 
         return await loop.run_in_executor(None, _download)
+
+    # ── Sync helpers ───────────────────────────────────────────────────
+    # For callers already inside a worker thread (e.g. OCR cache checks
+    # invoked from asyncio.to_thread). These avoid nested executors.
+
+    def head_sync(self, s3_path: str) -> bool:
+        """Return True if the S3 object exists. False on 404; raises on other errors."""
+        try:
+            self._client.head_object(Bucket=self._bucket_name, Key=s3_path)
+            return True
+        except ClientError as e:
+            code = e.response.get("Error", {}).get("Code", "")
+            if code in ("404", "NoSuchKey", "NotFound"):
+                return False
+            raise
+
+    def download_text_sync(self, s3_path: str) -> str:
+        """Download a UTF-8 text object."""
+        resp = self._client.get_object(Bucket=self._bucket_name, Key=s3_path)
+        return resp["Body"].read().decode("utf-8")
+
+    def upload_text_sync(self, s3_path: str, content: str) -> str:
+        """Upload UTF-8 text; mirrors upload_text but from sync contexts."""
+        self._client.put_object(
+            Bucket=self._bucket_name,
+            Key=s3_path,
+            Body=content.encode("utf-8"),
+            ContentType="text/markdown; charset=utf-8",
+        )
+        return s3_path
 
     async def signed_url(self, s3_path: str) -> str:
         """Generate a presigned GET URL for the given S3 key."""

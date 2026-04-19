@@ -3,8 +3,8 @@
 Priority chain:
 1. Plain text / markdown  → direct UTF-8 decode
 2. PDF (text-based)       → PyMuPDF with structure detection → pdfplumber fallback
-3. PDF (scanned/image)    → Gemini Vision OCR (markdown output) → pytesseract fallback
-4. Image files            → Gemini Vision OCR → pytesseract fallback
+3. PDF (scanned/image)    → Vision OCR (Gemini or Sarvam per OCR_PROVIDER) → pytesseract fallback
+4. Image files            → Vision OCR → pytesseract fallback
 """
 
 import io
@@ -123,16 +123,16 @@ def _extract_with_pdfplumber(data: bytes) -> str:
     return "\n".join(parts).strip()
 
 
-def _ocr_pdf_gemini(data: bytes) -> str:
-    """OCR a scanned PDF using Gemini Vision with markdown output."""
-    from legal_agent.utils.ocr import ocr_pdf_with_gemini
+def _ocr_pdf(data: bytes) -> str:
+    """OCR a scanned PDF using the configured backend (Gemini or Sarvam)."""
+    from legal_agent.utils.ocr import ocr_pdf
 
-    return ocr_pdf_with_gemini(data, output_format="markdown")
+    return ocr_pdf(data, output_format="markdown")
 
 
-def _ocr_image_gemini(data: bytes, filename: str) -> str:
-    """OCR an image file using Gemini Vision."""
-    from legal_agent.utils.ocr import ocr_image_with_gemini
+def _ocr_image(data: bytes, filename: str) -> str:
+    """OCR an image file using the configured backend."""
+    from legal_agent.utils.ocr import ocr_image
 
     ext = filename.lower().rsplit(".", 1)[-1]
     mime_map = {
@@ -141,7 +141,7 @@ def _ocr_image_gemini(data: bytes, filename: str) -> str:
         "webp": "image/webp",
     }
     mime_type = mime_map.get(ext, "image/png")
-    return ocr_image_with_gemini(data, mime_type=mime_type, output_format="markdown")
+    return ocr_image(data, mime_type=mime_type, output_format="markdown")
 
 
 def _ocr_pdf_tesseract(data: bytes) -> str:
@@ -167,8 +167,8 @@ def extract_text_from_bytes(data: bytes, filename: str) -> str:
     """Extract text from raw file bytes with structure preservation.
 
     For text-based PDFs, returns markdown with headings and bold detected from font metadata.
-    For scanned PDFs and images, uses Gemini Vision OCR with markdown output.
-    Falls back to pytesseract if Gemini is unavailable.
+    For scanned PDFs and images, uses Vision OCR (Gemini or Sarvam, per OCR_PROVIDER).
+    Falls back to pytesseract if the vision backend is unavailable.
 
     Args:
         data: Raw file bytes downloaded from S3.
@@ -223,15 +223,15 @@ def extract_text_from_bytes(data: bytes, filename: str) -> str:
         except Exception as exc:
             logger.debug(f"pdfplumber extraction failed: {exc}")
 
-        # Gemini Vision OCR (primary OCR for scanned PDFs)
+        # Vision OCR (primary — backend selected by OCR_PROVIDER: Gemini or Sarvam)
         try:
-            text = _ocr_pdf_gemini(data)
+            text = _ocr_pdf(data)
             if len(text) >= _MIN_TEXT_CHARS:
-                logger.debug(f"Extracted {len(text)} chars via Gemini Vision OCR")
+                logger.debug(f"Extracted {len(text)} chars via Vision OCR")
                 return text
-            logger.debug(f"Gemini Vision OCR yielded only {len(text)} chars")
+            logger.debug(f"Vision OCR yielded only {len(text)} chars")
         except Exception as exc:
-            logger.warning(f"Gemini Vision OCR failed: {exc}")
+            logger.warning(f"Vision OCR failed: {exc}")
 
         # pytesseract offline fallback
         try:
@@ -245,18 +245,18 @@ def extract_text_from_bytes(data: bytes, filename: str) -> str:
 
         raise ExtractionError(
             f"Could not extract usable text from PDF '{filename}'. "
-            "All strategies (PyMuPDF, pdfplumber, Gemini Vision, tesseract) returned too little text."
+            "All strategies (PyMuPDF, pdfplumber, Vision OCR, tesseract) returned too little text."
         )
 
     if _is_image(filename):
-        # Gemini Vision OCR (primary)
+        # Vision OCR (primary — backend selected by OCR_PROVIDER)
         try:
-            text = _ocr_image_gemini(data, filename)
+            text = _ocr_image(data, filename)
             if len(text) >= _MIN_TEXT_CHARS:
-                logger.debug(f"Extracted {len(text)} chars via Gemini Vision OCR (image)")
+                logger.debug(f"Extracted {len(text)} chars via Vision OCR (image)")
                 return text
         except Exception as exc:
-            logger.warning(f"Gemini Vision OCR (image) failed: {exc}")
+            logger.warning(f"Vision OCR (image) failed: {exc}")
 
         # pytesseract fallback
         try:

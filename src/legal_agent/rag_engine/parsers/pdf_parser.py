@@ -98,10 +98,10 @@ class PDFParser(BaseParser):
             # Detect scanned PDF: less than 100 chars per page means no text layer
             chars_per_page = len(full_text.strip()) / max(doc.page_count, 1)
             if chars_per_page < 100:
-                logger.info(f"Scanned PDF detected ({chars_per_page:.0f} chars/page) — using Gemini Vision OCR")
-                from legal_agent.utils.ocr import ocr_pdf_with_gemini
+                logger.info(f"Scanned PDF detected ({chars_per_page:.0f} chars/page) — using Vision OCR")
+                from legal_agent.utils.ocr import ocr_pdf
                 pdf_bytes = source.read_bytes()
-                full_text = ocr_pdf_with_gemini(pdf_bytes, output_format="plain")
+                full_text = ocr_pdf(pdf_bytes, output_format="plain")
                 doc.close()
                 sections = [ContentSection(level=1, text=full_text, title=metadata.title, page_number=1)]
                 return ParsedContent(
