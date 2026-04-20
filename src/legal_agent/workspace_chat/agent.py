@@ -15,7 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from legal_agent.chat.citation_utils import parse_legal_web_search_citations
 from legal_agent.chat.session_title import generate_session_title
-from legal_agent.chat.web_search import create_web_search_tool
+from legal_agent.chat.legal_web_search_firecrawl import create_legal_web_search_tool
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import get_settings
 from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
@@ -27,9 +27,17 @@ logger = logging.getLogger(__name__)
 
 SYSTEM_PROMPT = (
     LEGAL_ASSISTANT_CHAT_SYSTEM_PROMPT
-    + "\n\nCONTEXT: You are embedded in a document drafting workspace for a specific matter. "
-    "Prioritise indexed case files when the user’s question relates to their uploads; still run "
-    "legal_case_search and legal_web_search when the issue needs external authority."
+    + "\n\n═══════════════════════════════════════════════════════════════════"
+    "\nWORKSPACE CHAT CONTEXT"
+    "\n═══════════════════════════════════════════════════════════════════"
+    "\nYou are embedded in a document drafting workspace for a specific matter. "
+    "Prioritise indexed case files (query_case_documents) when the user's question "
+    "relates to their uploads. Run legal_web_search when the answer needs external "
+    "authority from LiveLaw, SCC Online, or Bar and Bench."
+    "\n\nQUALITY BAR: the user is a practising Indian advocate. A good answer names "
+    "the case, bench strength, leading opinion author, reporter citation, ratio, "
+    "and — where known — subsequent treatment. Follow the INDIAN CASE-LAW CITATION "
+    "FORM above. Do not strip detail for brevity; strip filler instead."
 )
 
 DOCUMENT_ONLY_SYSTEM_PROMPT = """You are an expert legal assistant specializing in Indian law.
@@ -38,7 +46,7 @@ GREETING RULE: If the user sends a greeting, pleasantry, or purely social messag
 
 STRICT RULE (for all legal questions): You MUST answer ONLY from the documents provided via the query_case_documents tool.
 - Call query_case_documents first for every legal question about the case.
-- Do NOT use your general knowledge, legal_case_search, or legal_web_search to answer.
+- Do NOT use your general knowledge or legal_web_search to answer (web search is disabled for this turn).
 - If the answer is not found in the documents, respond: "I could not find information about this in the provided documents."
 - Do NOT speculate, infer, or supplement with outside knowledge.
 
@@ -141,50 +149,89 @@ class WorkspaceChatAgent:
         self.session_store = WorkspaceChatSessionStore(self._pool)
         await self.session_store.setup()
 
+        # legal_case_search (internal SC/HC judgment DB via LegalCaseRetriever) is
+        # temporarily disabled from the workspace chat toolset pending pipeline
+        # readiness. When it returns, it should be always-on (no request flag) —
+        # searching our own indexed judgment DB is default-allowed. Keep the
+        # constructor wiring here so re-enabling is a one-line change.
         self._legal_search_tool = create_legal_search_tool(retriever) if retriever else None
         settings = get_settings()
-        self._web_search_tool = create_web_search_tool() if settings.serper_api_key else None
+        # Firecrawl is primary (scrapes full article text); Serper is the fallback
+        # inside create_legal_web_search_tool itself. Tool is enabled if either key
+        # is configured — its fallback chain is internal.
+        self._web_search_tool = (
+            create_legal_web_search_tool()
+            if (settings.firecrawl_api_key or settings.serper_api_key)
+            else None
+        )
         logger.info("WorkspaceChatAgent initialized")
 
     def _get_llm(self, model_id: str):
         if model_id not in self._llms:
             provider = get_settings().get_langchain_provider_for_model(model_id)
-            self._llms[model_id] = init_chat_model(model_id, model_provider=provider)
+            # Low temperature for legal chat — discourages the model from
+            # "helpfully" filling gaps with training-memory detail when the
+            # tool output is thin. Critical for Flash-class models that
+            # otherwise default to ~0.7.
+            self._llms[model_id] = init_chat_model(
+                model_id, model_provider=provider, temperature=0.2
+            )
         return self._llms[model_id]
 
-    def _get_base_graph(self, model_id: str):
-        """Cached graph with static tools only — used for history reads."""
-        if model_id not in self._base_graphs:
+    def _get_base_graph(self, model_id: str, web_search: bool = False):
+        """Cached graph with no per-request RAG tool — used when file_ids are empty.
+
+        `web_search=True` binds `legal_web_search` (Firecrawl with Serper fallback).
+        `web_search=False` binds no tools; the LLM answers from conversation state
+        and will politely decline legal research per DOCUMENT_ONLY_SYSTEM_PROMPT.
+        """
+        cache_key = (model_id, web_search)
+        if cache_key not in self._base_graphs:
             llm = self._get_llm(model_id)
             tools = []
-            if self._legal_search_tool:
-                tools.append(self._legal_search_tool)
-            if self._web_search_tool:
+            if web_search and self._web_search_tool:
                 tools.append(self._web_search_tool)
-            self._base_graphs[model_id] = create_react_agent(
-                llm, tools=tools, checkpointer=self.checkpointer, prompt=SYSTEM_PROMPT
+            prompt = SYSTEM_PROMPT if web_search else DOCUMENT_ONLY_SYSTEM_PROMPT
+            self._base_graphs[cache_key] = create_react_agent(
+                llm, tools=tools, checkpointer=self.checkpointer, prompt=prompt
             )
-        return self._base_graphs[model_id]
+        return self._base_graphs[cache_key]
 
-    def _get_graph(self, model: str, file_ids: list[str], user_id: str = ""):
+    def _get_graph(
+        self,
+        model: str,
+        file_ids: list[str],
+        user_id: str = "",
+        web_search: bool = False,
+    ):
+        """Pick a graph whose tools match the request.
+
+        Tool matrix (legal_case_search is currently disabled pipeline-wide):
+        - web_search=False, no files  → no tools (DOCUMENT_ONLY_SYSTEM_PROMPT)
+        - web_search=False, files      → RAG only (DOCUMENT_ONLY_SYSTEM_PROMPT)
+        - web_search=True,  no files  → legal_web_search only (SYSTEM_PROMPT)
+        - web_search=True,  files      → RAG + legal_web_search (SYSTEM_PROMPT)
+        """
         model_id = model or get_settings().chat_llm_default_model
         if not file_ids:
-            return self._get_base_graph(model_id)
+            return self._get_base_graph(model_id, web_search=web_search)
 
-        # Cache graphs by (model_id, sorted file_ids) — user_id is passed inside the tool
-        # closure but doesn't affect the graph structure itself.
-        cache_key = (model_id, tuple(sorted(file_ids)))
+        # Cache graphs by (model_id, web_search, sorted file_ids). user_id is
+        # passed inside the tool closure but doesn't affect graph structure.
+        cache_key = (model_id, web_search, tuple(sorted(file_ids)))
         if cache_key in self._rag_graphs:
-            # Refresh RAG tool closure so it uses the current user_id and file_ids order
+            # Refresh to LRU-tail
             self._rag_graphs[cache_key] = self._rag_graphs.pop(cache_key)
             return self._rag_graphs[cache_key]
 
         llm = self._get_llm(model_id)
-        rag_tool = _create_rag_tool(self._rag_client, file_ids, user_id)
-        # When file_ids are provided, restrict answers to those documents only.
-        # legal_case_search and web_search are intentionally excluded.
-        tools = [rag_tool]
-        graph = create_react_agent(llm, tools=tools, checkpointer=self.checkpointer, prompt=DOCUMENT_ONLY_SYSTEM_PROMPT)
+        tools = [_create_rag_tool(self._rag_client, file_ids, user_id)]
+        if web_search and self._web_search_tool:
+            tools.append(self._web_search_tool)
+        prompt = SYSTEM_PROMPT if web_search else DOCUMENT_ONLY_SYSTEM_PROMPT
+        graph = create_react_agent(
+            llm, tools=tools, checkpointer=self.checkpointer, prompt=prompt
+        )
 
         # Evict oldest entry when cache is full
         if len(self._rag_graphs) >= self._GRAPH_CACHE_SIZE:
@@ -204,14 +251,15 @@ class WorkspaceChatAgent:
         file_ids: list[str] | None = None,
         user_id: str = "",
         model: str = "",
+        web_search: bool = False,
     ):
         """Yield SSE event dicts for streaming response."""
         logger.info(
             f"[workspace_chat] session={session_id} | model={model} | tone={tone} | "
             f"style={style} | user={user_id} | "
-            f"files={len(file_ids or [])} | msg='{message[:100]}'"
+            f"files={len(file_ids or [])} | web_search={web_search} | msg='{message[:100]}'"
         )
-        graph = self._get_graph(model, file_ids or [], user_id)
+        graph = self._get_graph(model, file_ids or [], user_id, web_search=web_search)
         config = {"configurable": {"thread_id": session_id}}
 
         tone_suffix = TONE_INSTRUCTIONS.get(tone, TONE_INSTRUCTIONS["formal"])
@@ -237,8 +285,6 @@ class WorkspaceChatAgent:
 
         web_search_output: str | None = None
         rag_output: str | None = None
-        used_legal_tools = False
-        legal_search_queries: list[str] = []
 
         async def _maybe_flush_title():
             nonlocal title_task
@@ -264,12 +310,6 @@ class WorkspaceChatAgent:
                     yield {"event": "answer", "data": token.replace("\n", "\\n")}
             elif kind == "on_tool_start":
                 tool_name = event["name"]
-                if tool_name in ("query_case_documents", "legal_case_search"):
-                    used_legal_tools = True
-                if tool_name == "legal_case_search":
-                    q = event["data"].get("input", {}).get("query", "")
-                    if q:
-                        legal_search_queries.append(q)
                 yield {
                     "event": "tool_call",
                     "data": json.dumps({"name": tool_name, "args": event["data"].get("input", {})}),
@@ -287,20 +327,9 @@ class WorkspaceChatAgent:
             if early_title:
                 yield {"event": "session_title", "data": early_title}
 
-        # Force citation search if agent used legal tools but skipped web search
-        if not web_search_output and used_legal_tools and self._web_search_tool:
-            try:
-                search_query = legal_search_queries[-1] if legal_search_queries else message[:200]
-                yield {
-                    "event": "tool_call",
-                    "data": json.dumps({"name": "legal_web_search", "args": {"query": search_query}}),
-                }
-                web_search_output = await self._web_search_tool.ainvoke({"query": search_query})
-                yield {"event": "tool_result", "data": web_search_output}
-            except Exception as e:
-                logger.warning(f"[workspace_chat] Forced citation search failed: {e}")
-
-        # Emit structured citations from web search results
+        # Emit structured citations from web search results if the LLM
+        # invoked the tool on its own. No forced fallback call — tool use
+        # is opt-in per the tool's docstring.
         if web_search_output:
             citations = parse_legal_web_search_citations(web_search_output)
             if citations:

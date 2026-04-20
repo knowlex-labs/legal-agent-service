@@ -5,10 +5,44 @@ import logging
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from enum import Enum
 from typing import Any, Callable, Coroutine
 
 from legal_agent.config import get_settings
 from legal_agent.models.responses import JobStatus, JobType
+
+
+class ErrorStage(str, Enum):
+    """Which pipeline stage produced an error. Used to tag job failures so
+    the frontend can surface actionable messages (and so oncall can triage
+    quickly)."""
+    EXTRACTION = "extraction"   # PDF/image text extraction
+    OCR = "ocr"                 # Vision OCR (Gemini or Sarvam)
+    RAG = "rag"                 # Workspace RAG retrieval
+    TRANSLATION = "translation" # LLM translation
+    DRAFTING = "drafting"       # LLM drafting agent
+    PDF_RENDER = "pdf_render"   # Markdown → PDF
+    UPLOAD = "upload"           # S3 upload of final artifact
+    POSTPROCESS = "postprocess" # Placeholder / Aadhaar / length checks
+    UNKNOWN = "unknown"
+
+
+class StagedError(Exception):
+    """Wraps an underlying exception with the pipeline stage that raised it.
+
+    Caught by the job manager's exception handler; the stored error string
+    uses the `[STAGE] reason` format for frontend parsing.
+    """
+
+    def __init__(self, stage: ErrorStage, cause: BaseException):
+        self.stage = stage
+        self.cause = cause
+        super().__init__(f"[{stage.value.upper()}] {type(cause).__name__}: {cause}")
+
+
+def raise_staged(stage: ErrorStage, cause: BaseException) -> None:
+    """Helper: raise StagedError(stage, cause) from cause — preserves chain."""
+    raise StagedError(stage, cause) from cause
 
 # Maximum number of terminal (completed/failed) jobs kept in memory per restart.
 # Active (pending/processing) jobs are never evicted.
@@ -166,12 +200,26 @@ class JobManager:
                 logger.info(f"[{job_id}] Job completed successfully")
             except asyncio.TimeoutError:
                 logger.error(f"[{job_id}] Job timed out after {timeout_seconds}s")
-                await self.update_job_status(job_id, JobStatus.FAILED, error=f"Job timed out after {timeout_seconds}s")
+                await self.update_job_status(
+                    job_id,
+                    JobStatus.FAILED,
+                    error=f"[{ErrorStage.UNKNOWN.value.upper()}] Job timed out after {timeout_seconds}s",
+                )
             except asyncio.CancelledError:
                 logger.warning(f"[{job_id}] Job cancelled")
-            except Exception as e:
-                logger.error(f"[{job_id}] Job failed: {e}", exc_info=True)
+            except StagedError as e:
+                # Already tagged with stage — preserve the message shape.
+                logger.error(f"[{job_id}] Job failed at stage={e.stage.value}: {e.cause}", exc_info=True)
                 await self.update_job_status(job_id, JobStatus.FAILED, error=str(e))
+            except Exception as e:
+                # Untagged — wrap with UNKNOWN so the frontend can still
+                # parse the `[STAGE] reason` format.
+                logger.error(f"[{job_id}] Job failed (untagged): {e}", exc_info=True)
+                await self.update_job_status(
+                    job_id,
+                    JobStatus.FAILED,
+                    error=f"[{ErrorStage.UNKNOWN.value.upper()}] {type(e).__name__}: {e}",
+                )
             finally:
                 async with self._lock:
                     self._tasks.pop(job_id, None)

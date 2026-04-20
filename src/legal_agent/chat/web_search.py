@@ -49,12 +49,14 @@ def _is_judgment_url(url: str, title: str) -> bool:
         return False
     return True
 
-# Priority order: SCC Online and Manupatra first, Indian Kanoon as fallback
+# Three trusted Indian legal sources. Indian Kanoon + Manupatra are
+# intentionally excluded — Indian Kanoon is user-uploaded/unverified and
+# Manupatra is out of scope for the current product. Do not add back
+# without explicit product approval.
 SITE_SCOPED_SOURCES = [
     ("scconline.com", "SCC Online"),
-    ("manupatra.com", "Manupatra"),
     ("livelaw.in", "LiveLaw"),
-    ("indiankanoon.org", "Indian Kanoon"),
+    ("barandbench.com", "Bar and Bench"),
 ]
 
 def _serper_search(client: httpx.Client, api_key: str, query: str, num: int = 5) -> list[dict]:

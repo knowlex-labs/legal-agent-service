@@ -112,6 +112,7 @@ async def send_message(
                 file_ids=request.file_ids,
                 user_id=x_user_id,
                 model=request.model,
+                web_search=request.web_search,
             ):
                 yield {"event": event["event"], "data": event["data"]}
         except Exception:

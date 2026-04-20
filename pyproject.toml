@@ -16,6 +16,7 @@ dependencies = [
     "langchain-google-genai>=2.1.0",
     "google-genai>=1.0.0",
     "sarvamai>=0.1.0",
+    "firecrawl-py>=2.0.0",
     "langgraph>=0.2.0",
     "httpx>=0.26.0",
     "python-dotenv>=1.0.0",

@@ -37,7 +37,7 @@ from legal_agent.services.content_preprocessor import (
     preprocess_and_enhance,
     preprocess_title,
 )
-from legal_agent.services.job_manager import JobManager
+from legal_agent.services.job_manager import ErrorStage, JobManager, StagedError
 
 logger = logging.getLogger(__name__)
 
@@ -49,10 +49,21 @@ def _slugify(text: str) -> str:
 
 
 def _markdown_for_upload(document: GeneratedDocument) -> str:
-    """Use full draft text; if the LLM left `draft` empty but filled sections, assemble markdown."""
+    """Assemble final markdown and run safety post-processing.
+
+    Steps:
+    1. Prefer `document.draft` (the agent's raw markdown). Fall back to
+       assembling from `document.sections` if `draft` is empty.
+    2. Run `apply_draft_postprocess` — masks Aadhaar, asserts no unfilled
+       placeholders (`[Amount]`, `XXXX`, etc.), asserts minimum length.
+       Raises ValueError on failure → job fails loudly instead of shipping
+       malformed content.
+    """
+    from legal_agent.utils.legal_postprocess import apply_draft_postprocess
+
     body = (document.draft or "").strip()
     if body:
-        return document.draft
+        return apply_draft_postprocess(document.draft)
     if document.sections:
         ordered = sorted(document.sections, key=lambda s: s.order)
         parts = [f"## {s.title}\n{s.content.strip()}" for s in ordered if s.content and s.content.strip()]
@@ -66,7 +77,7 @@ def _markdown_for_upload(document: GeneratedDocument) -> str:
                 len(assembled),
             )
             header = f"# {document.title}\n\n" if (document.title or "").strip() else ""
-            return header + assembled
+            return apply_draft_postprocess(header + assembled)
     raise ValueError(
         "Draft generation produced no content: empty `draft` and no usable sections. "
         "Retry or adjust the model / prompt."
@@ -263,8 +274,18 @@ class DraftService:
         )
 
         logger.debug(f"[{job_id}] Calling agent.draft()")
-        document = await agent.draft(deps)
-        markdown_body = _markdown_for_upload(document)
+        try:
+            document = await agent.draft(deps)
+        except Exception as exc:
+            raise StagedError(ErrorStage.DRAFTING, exc) from exc
+
+        try:
+            markdown_body = _markdown_for_upload(document)
+        except Exception as exc:
+            # Placeholder / Aadhaar / length checks live here — surface them
+            # as POSTPROCESS so a failure says `[POSTPROCESS] unfilled placeholder`
+            # rather than a generic drafting error.
+            raise StagedError(ErrorStage.POSTPROCESS, exc) from exc
         logger.info(
             f"[{job_id}] Draft completed: {len(document.sections)} sections, markdown_len={len(markdown_body)}"
         )
@@ -273,7 +294,10 @@ class DraftService:
         # Use request title for proper naming (user-provided title)
         slug = _slugify(request.title)
         s3_path = f"{request.case_folder_id}/drafts/{slug}.md"
-        await self.s3_client.upload_text(s3_path, markdown_body)
+        try:
+            await self.s3_client.upload_text(s3_path, markdown_body)
+        except Exception as exc:
+            raise StagedError(ErrorStage.UPLOAD, exc) from exc
 
         # Get signed URL and update job with file details
         signed_url = await self.s3_client.signed_url(s3_path)

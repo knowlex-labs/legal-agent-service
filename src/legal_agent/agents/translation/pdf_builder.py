@@ -15,7 +15,9 @@ def markdown_to_pdf(md_text: str, target_language: str | None = None) -> bytes:
     """Convert markdown text to PDF bytes.
 
     Uses WeasyPrint for proper Indic script rendering. Falls back to fpdf2
-    if WeasyPrint is not installed or fails.
+    only when WeasyPrint is unavailable AND the target is English — fpdf2's
+    Indic script support is unreliable. For Indic targets with no WeasyPrint,
+    we raise rather than silently produce tofu boxes.
 
     Args:
         md_text: Markdown-formatted translated document.
@@ -27,8 +29,36 @@ def markdown_to_pdf(md_text: str, target_language: str | None = None) -> bytes:
     try:
         return _markdown_to_pdf_weasyprint(md_text, target_language)
     except Exception as exc:
+        if _is_non_latin_target(target_language):
+            logger.error(
+                f"WeasyPrint failed and target '{target_language}' requires Indic/RTL "
+                f"fonts. Refusing to fall back to fpdf2 (produces tofu boxes). Error: {exc}"
+            )
+            raise RuntimeError(
+                f"PDF rendering failed for {target_language}: WeasyPrint error: {exc}. "
+                "fpdf2 fallback is not safe for Indic/RTL scripts. "
+                "Install WeasyPrint and its dependencies (Pango, HarfBuzz, Noto fonts)."
+            ) from exc
         logger.warning(f"WeasyPrint rendering failed ({exc}), falling back to fpdf2")
-        return _markdown_to_pdf_fpdf2(md_text)
+        return _markdown_to_pdf_fpdf2(md_text, target_language)
+
+
+# Languages whose scripts CANNOT be rendered by fpdf2 + Helvetica fallback.
+# Anything not in this set is treated as Latin/English-friendly.
+_NON_LATIN_LANGUAGES = {
+    "hindi", "marathi", "sanskrit", "nepali", "konkani", "maithili", "dogri", "bodo",
+    "bengali", "assamese",
+    "tamil", "telugu", "kannada", "malayalam",
+    "gujarati", "punjabi", "odia",
+    "urdu", "kashmiri", "sindhi",
+    "manipuri", "santali",
+}
+
+
+def _is_non_latin_target(target_language: str | None) -> bool:
+    if not target_language:
+        return False
+    return target_language.lower().strip() in _NON_LATIN_LANGUAGES
 
 
 def _markdown_to_pdf_weasyprint(md_text: str, target_language: str | None = None) -> bytes:
@@ -70,8 +100,12 @@ def _find_font(candidates: list[str]) -> str | None:
     return None
 
 
-def _markdown_to_pdf_fpdf2(md_text: str) -> bytes:
-    """Legacy fallback: convert markdown text to PDF bytes using fpdf2."""
+def _markdown_to_pdf_fpdf2(md_text: str, target_language: str | None = None) -> bytes:
+    """Legacy fallback: convert markdown text to PDF bytes using fpdf2.
+
+    For non-Latin target languages, this path REQUIRES a Unicode-capable font
+    on disk. If none is found we raise rather than render Helvetica tofu.
+    """
     from fpdf import FPDF
 
     pdf = FPDF()
@@ -90,6 +124,14 @@ def _markdown_to_pdf_fpdf2(md_text: str) -> bytes:
             pdf.add_font("unifont", "B", regular_path)
         font_family = "unifont"
     else:
+        if _is_non_latin_target(target_language):
+            raise RuntimeError(
+                f"No Unicode-capable font found on this host; cannot render "
+                f"{target_language} PDF via fpdf2 fallback. Searched: {_FONT_CANDIDATES}. "
+                "Install fonts-noto (Debian/Ubuntu: apt-get install fonts-noto "
+                "fonts-noto-cjk fonts-noto-extra) or ensure WeasyPrint is available "
+                "so this fallback path is not exercised."
+            )
         font_family = "Helvetica"
 
     BODY_SIZE = 11
