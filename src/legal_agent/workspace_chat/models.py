@@ -28,6 +28,15 @@ class WorkspaceChatMessageRequest(BaseModel):
     )
     file_ids: list[str] = Field(default_factory=list, description="File IDs for RAG scope")
     model: str = Field(default="gemini-2.0-flash", description="Model ID to use")
+    web_search: bool = Field(
+        default=False,
+        description=(
+            "When True, the agent may call legal_case_search (internal SC judgment DB) "
+            "and legal_web_search (Firecrawl → LiveLaw / SCC Online / Bar and Bench). "
+            "When False (default), the agent is limited to the user's uploaded case "
+            "documents via query_case_documents only."
+        ),
+    )
 
 
 class WorkspaceChatConfigUpdate(BaseModel):

@@ -66,7 +66,14 @@ class Settings(BaseSettings):
     # Chat LLM default (frontend sends model ID directly)
     chat_llm_default_model: str = "gemini-2.0-flash"
 
-    # Web search (Serper API)
+    # Web search — Firecrawl is primary (scrapes full article text), Serper is fallback.
+    # Both restricted to the 3 trusted Indian legal sources below (no Indian Kanoon).
+    # Scrape count is chosen per call by the LLM via the `num_sources` tool arg
+    # (clamped 1-5 in legal_web_search_firecrawl.py), so it is not set here.
+    firecrawl_api_key: str = ""
+    firecrawl_search_domains: list[str] = Field(
+        default=["livelaw.in", "scconline.com", "barandbench.com"]
+    )
     serper_api_key: str = ""
 
     # Jobs

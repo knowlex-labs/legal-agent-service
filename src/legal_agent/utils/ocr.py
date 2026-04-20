@@ -207,18 +207,31 @@ def ocr_pdf_with_gemini(
 
     def _ocr_page(idx_and_image: tuple[int, bytes]) -> tuple[int, str]:
         idx, image_bytes = idx_and_image
-        response = client.models.generate_content(
-            model=settings.gemini_model,
-            contents=[
-                types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
-                prompt,
-            ],
-            config=types.GenerateContentConfig(
-                temperature=0.1,
-                max_output_tokens=settings.gemini_max_tokens,
-            ),
-        )
-        page_text = response.text.strip()
+        try:
+            response = client.models.generate_content(
+                model=settings.gemini_model,
+                contents=[
+                    types.Part.from_bytes(data=image_bytes, mime_type="image/png"),
+                    prompt,
+                ],
+                config=types.GenerateContentConfig(
+                    temperature=0.1,
+                    max_output_tokens=settings.gemini_max_tokens,
+                ),
+            )
+        except Exception as exc:
+            # Re-raise with page index so the caller knows exactly which
+            # page broke instead of seeing a generic Gemini error.
+            raise RuntimeError(
+                f"Gemini OCR failed on page {idx + 1}/{total}: {type(exc).__name__}: {exc}"
+            ) from exc
+        page_text = (response.text or "").strip()
+        if not page_text:
+            raise RuntimeError(
+                f"Gemini OCR returned empty text for page {idx + 1}/{total}. "
+                "Possible causes: content filter, blank page rendered as empty, "
+                "or max_output_tokens truncation."
+            )
         logger.info(
             f"[gemini-ocr] Page {idx + 1}/{total}: {len(page_text)} chars extracted"
         )
@@ -230,6 +243,9 @@ def ocr_pdf_with_gemini(
     )
     results: list[str] = [""] * total
     with ThreadPoolExecutor(max_workers=settings.gemini_ocr_concurrency) as pool:
+        # pool.map re-raises exceptions as the iterator advances; wrapping
+        # the worker with a page-indexed RuntimeError above guarantees the
+        # lawyer-facing error names the exact page that broke.
         for idx, text in pool.map(_ocr_page, enumerate(page_images)):
             results[idx] = text
 
@@ -288,12 +304,29 @@ def ocr_pdf_with_sarvam(
     )
 
     settings = get_settings()
-    with ThreadPoolExecutor(max_workers=settings.sarvam_ocr_concurrency) as pool:
-        results = list(
-            pool.map(lambda c: _run_sarvam_pdf_job(c["bytes"], c["page_count"]), chunks)
-        )
 
-    return "\n\n".join(results)
+    def _run_indexed(idx_and_chunk: tuple[int, dict]) -> tuple[int, str]:
+        idx, c = idx_and_chunk
+        try:
+            text = _run_sarvam_pdf_job(c["bytes"], c["page_count"])
+        except Exception as exc:
+            raise RuntimeError(
+                f"Sarvam OCR failed on chunk {idx + 1}/{len(chunks)} "
+                f"({c['page_count']} pages): {type(exc).__name__}: {exc}"
+            ) from exc
+        if not text.strip():
+            raise RuntimeError(
+                f"Sarvam OCR returned empty output for chunk {idx + 1}/{len(chunks)} "
+                f"({c['page_count']} pages)."
+            )
+        return idx, text
+
+    results_ordered: list[str] = [""] * len(chunks)
+    with ThreadPoolExecutor(max_workers=settings.sarvam_ocr_concurrency) as pool:
+        for idx, text in pool.map(_run_indexed, enumerate(chunks)):
+            results_ordered[idx] = text
+
+    return "\n\n".join(results_ordered)
 
 
 def ocr_image_with_sarvam(

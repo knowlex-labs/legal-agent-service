@@ -6,10 +6,11 @@ from datetime import date
 from typing import Annotated, cast
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage
+from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, ToolMessage
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
+from pydantic import ValidationError
 from typing_extensions import TypedDict
 
 from legal_agent.agents.drafts.templates.loader import load_template_reference
@@ -17,6 +18,7 @@ from legal_agent.clients.rag_client import RAGClient
 from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
 from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
 from legal_agent.models.documents import DocumentType, GeneratedDocument
+from legal_agent.utils.legal_postprocess import check_citation_grounding
 
 logger = logging.getLogger(__name__)
 
@@ -205,11 +207,57 @@ class BaseDraftingAgent:
                 "whatever appears in the actual document. Do NOT invent generic names."
             )
             msgs = [system_msg] + state["messages"] + [HumanMessage(content=extraction_prompt)]
-            raw_doc = cast(GeneratedDocument, await llm_structured.ainvoke(msgs))
+
+            # Structured metadata extraction — if it fails (LLM returns
+            # unparseable JSON, transient error), fall back to raw_draft +
+            # minimal metadata instead of failing the whole job. The raw
+            # markdown is what we actually ship to the lawyer; metadata is
+            # a display-layer concern.
+            try:
+                raw_doc = cast(GeneratedDocument, await llm_structured.ainvoke(msgs))
+            except (ValidationError, Exception) as exc:
+                logger.warning(
+                    f"[draft] Structured metadata extraction failed ({type(exc).__name__}: {exc}); "
+                    "falling back to raw draft with minimal metadata"
+                )
+                raw_doc = GeneratedDocument(
+                    document_type=document_type,
+                    title="",
+                    summary="",
+                    sections=[],
+                    draft=raw_draft or "",
+                )
 
             # Override the draft field with the raw, unmodified markdown.
             # Fallback to structured output's draft if the raw message is unusable.
             final_draft = raw_draft if raw_draft and len(raw_draft.strip()) >= 200 else raw_doc.draft
+
+            # Citation-grounding check (warn-only). Tells us when the LLM
+            # cited case law without ever calling legal_case_search, or when
+            # citations in the draft don't appear in the tool's returned
+            # results. Observability before enforcement.
+            try:
+                tool_results_parts: list[str] = []
+                tool_was_called = False
+                for msg in state["messages"]:
+                    if isinstance(msg, ToolMessage) and getattr(msg, "name", "") == "legal_case_search":
+                        tool_was_called = True
+                        content = _extract_text_from_message(msg)
+                        if content:
+                            tool_results_parts.append(content)
+                tool_results_joined = "\n".join(tool_results_parts)
+                # Only run the check if tools were actually wired — if the retriever
+                # wasn't available, it's pointless to warn about unverified citations.
+                tools_available = bool(tools)
+                if tools_available:
+                    check_citation_grounding(
+                        draft_markdown=final_draft or "",
+                        tool_results_joined=tool_results_joined,
+                        tool_was_called=tool_was_called,
+                        document_type=document_type.value,
+                    )
+            except Exception as exc:
+                logger.debug(f"[citation-check] internal error (non-blocking): {exc}")
 
             document = raw_doc.model_copy(update={
                 "document_type": document_type,
@@ -427,5 +475,27 @@ Generate a COMPLETE, FINISHED Indian contract following the exact markdown templ
             tools.append(create_legal_search_tool(deps.retriever))
 
         graph = self._build_graph(tools, deps.document_type)
-        result = await graph.ainvoke({"messages": [HumanMessage(content=prompt)], "document": None})
+        try:
+            # recursion_limit caps the agent tool-loop — prevents the LLM
+            # from infinitely emitting tool calls until the job-manager
+            # timeout kills the whole job. 25 is the LangGraph default but
+            # making it explicit documents the bound and lets us lower it.
+            result = await graph.ainvoke(
+                {"messages": [HumanMessage(content=prompt)], "document": None},
+                config={"recursion_limit": 25},
+            )
+        except Exception as exc:
+            logger.exception(
+                f"[draft] Graph execution failed: document_type={deps.document_type.value} "
+                f"user={deps.user_id} model={self.model_name} title='{deps.title}'"
+            )
+            raise RuntimeError(
+                f"Drafting agent failed for {deps.document_type.value}: {type(exc).__name__}: {exc}"
+            ) from exc
+        if not result.get("document"):
+            raise RuntimeError(
+                f"Drafting agent completed without producing a document "
+                f"(document_type={deps.document_type.value}). "
+                "Likely indicates the agent hit the recursion_limit without calling output_node."
+            )
         return result["document"]

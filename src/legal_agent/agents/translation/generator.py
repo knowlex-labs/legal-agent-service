@@ -584,30 +584,73 @@ def _enforce_glossary(text: str, target_language: str) -> str:
 
     Scans for English legal terms that should have been translated per the glossary
     and replaces them. Handles case-insensitive matching and common plural/possessive forms.
-    Skips terms that appear inside bilingual format like "Bail (जमानत)".
+
+    Skips replacement when:
+    - the term is already followed by a bilingual parenthetical `Term (translation)`
+    - the match is a substring of a longer glossary entry, e.g. "Code" inside
+      "Code of Civil Procedure" (the longer entry, when present, is handled
+      first via length-sorted iteration; short terms then skip if the longer
+      form exists in the text).
     """
     terms = _LEGAL_TERMS.get(target_language, {})
     if not terms:
         return text
 
-    for eng_term, translated_term in terms.items():
+    # Build a set of compound entries that embed other glossary keys as
+    # whole words — e.g. {"Code of Civil Procedure"} embeds "Code". When
+    # a short key's match falls inside one of these compound phrases, we
+    # skip the replacement so "Code of Civil Procedure" is preserved.
+    all_keys = list(terms.keys())
+    compound_by_short: dict[str, list[str]] = {}
+    for short in all_keys:
+        for longer in all_keys:
+            if longer is short or len(longer) <= len(short):
+                continue
+            if re.search(rf"\b{re.escape(short)}\b", longer, re.IGNORECASE):
+                compound_by_short.setdefault(short, []).append(longer)
+
+    # Process longer keys first so "Code of Civil Procedure" consumes its
+    # occurrences before "Code" is considered. This keeps offsets sane and
+    # avoids double-translation.
+    for eng_term in sorted(all_keys, key=len, reverse=True):
+        translated_term = terms[eng_term]
         # Skip if the translated term is already present (LLM got it right)
         if translated_term in text:
             continue
 
-        # Build pattern: match the English term as a whole word, case-insensitive.
-        # Exclude matches already in bilingual format: "Term (translation)"
-        # Also handle plural forms: "Petitions" → "Petition" + "s"
-        pattern = rf"\b{re.escape(eng_term)}s?\b"
-        # Don't replace inside bilingual parenthetical format
-        # e.g., don't touch "Bail (जमानत)" — only standalone "Bail"
+        # Require word boundaries AND reject matches that are followed by
+        # an ASCII lowercase letter or underscore — prevents matching the
+        # start of a longer English phrase (e.g. "Code" in "Codebook").
+        # The `s?` still allows simple plurals.
+        pattern = rf"\b{re.escape(eng_term)}s?\b(?![A-Za-z_])"
         matches = list(re.finditer(pattern, text, re.IGNORECASE))
         for match in reversed(matches):  # reverse to preserve offsets
             start, end = match.start(), match.end()
-            # Check if followed by " (" which indicates bilingual format — skip
-            after = text[end:end + 2]
-            if after == " (":
+
+            # Skip if the match sits inside a longer glossary compound
+            # that also appears in the text. "Code" in "Code of Civil
+            # Procedure" must be preserved because the compound has its
+            # own canonical translation.
+            longer_variants = compound_by_short.get(eng_term, [])
+            if longer_variants:
+                # Widen the inspection window to the length of the longest
+                # compound candidate, centred on the match.
+                max_len = max(len(v) for v in longer_variants) + 4
+                window_start = max(0, start - max_len)
+                window_end = min(len(text), end + max_len)
+                window = text[window_start:window_end]
+                if any(
+                    re.search(rf"\b{re.escape(v)}\b", window, re.IGNORECASE)
+                    for v in longer_variants
+                ):
+                    continue
+
+            # Skip if the term is already presented in bilingual format:
+            # `Term (translation)` — tolerate any whitespace before the paren.
+            after = text[end:end + 4]
+            if re.match(r"\s*\(", after):
                 continue
+
             text = text[:start] + translated_term + text[end:]
 
     return text
@@ -739,6 +782,15 @@ class TranslationGenerator:
                 f"{len(chunk)} → {len(cleaned)} chars "
                 f"(ratio {len(cleaned) / max(len(chunk), 1):.2f})"
             )
+            # Empty chunk → abort instead of quietly assembling a translation
+            # with a hole. An empty response is almost always API failure,
+            # content filter trip, or over-aggressive _clean_output stripping.
+            if not cleaned.strip():
+                raise RuntimeError(
+                    f"Translation chunk {i}/{len(chunks)} returned empty output "
+                    f"(input was {len(chunk)} chars). Aborting to avoid partial translation. "
+                    "Possible causes: model API error, content filter, or <think>-stripping overreach."
+                )
             if len(cleaned) < len(chunk) * 0.3:
                 logger.warning(
                     f"[translate] Chunk {i}/{len(chunks)} output is <30% of input "
@@ -752,9 +804,19 @@ class TranslationGenerator:
         # Post-process: enforce legal glossary terms the LLM may have missed
         result = _enforce_glossary(result, target_language.value)
 
+        ratio = len(result) / max(len(source_text), 1)
         logger.info(
             f"[translate] Complete: input={len(source_text)} chars → "
-            f"output={len(result)} chars (ratio {len(result) / max(len(source_text), 1):.2f})"
+            f"output={len(result)} chars (ratio {ratio:.2f})"
         )
+        # Hard bound on translation length ratio. Outside 0.4–3.0 is almost
+        # certainly either content loss or runaway generation — fail loudly
+        # so the lawyer doesn't silently receive a corrupted document.
+        if ratio < 0.4 or ratio > 3.0:
+            raise RuntimeError(
+                f"Translation length ratio {ratio:.2f} is outside the sanity band "
+                f"[0.4, 3.0] (input={len(source_text)} chars → output={len(result)} chars). "
+                "Likely content loss or runaway generation. Retry or check model output."
+            )
 
         return result
