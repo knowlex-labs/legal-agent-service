@@ -23,6 +23,7 @@ class JobType(str, Enum):
     SUMMARY = "summary"
     SYNOPSIS = "synopsis"
     TRANSLATION = "translation"
+    PRECEDENT = "precedent"
 
 
 class CreateJobResponse(BaseModel):

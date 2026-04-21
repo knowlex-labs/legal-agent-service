@@ -8,6 +8,7 @@ from legal_agent.clients.s3_client import S3Client
 from legal_agent.models.requests import (
     CreateDraftJobRequest,
     CreateJobRequest,
+    CreatePrecedentJobRequest,
     CreateSummaryJobRequest,
     CreateSynopsisJobRequest,
     CreateTranslationJobRequest,
@@ -19,6 +20,7 @@ from legal_agent.models.responses import (
     JobStatus,
     JobType,
 )
+from legal_agent.precedents.service import PrecedentService
 from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
 from legal_agent.summary.service import SummaryService
@@ -34,6 +36,7 @@ _draft_service: DraftService | None = None
 _summary_service: SummaryService | None = None
 _synopsis_service: SynopsisService | None = None
 _translation_service: TranslationService | None = None
+_precedent_service: PrecedentService | None = None
 _job_manager: JobManager | None = None
 _s3_client: S3Client | None = None
 
@@ -43,14 +46,16 @@ def set_services(
     summary_service: SummaryService,
     synopsis_service: SynopsisService,
     translation_service: TranslationService,
+    precedent_service: PrecedentService,
     job_manager: JobManager,
     s3_client: S3Client,
 ) -> None:
-    global _draft_service, _summary_service, _synopsis_service, _translation_service, _job_manager, _s3_client
+    global _draft_service, _summary_service, _synopsis_service, _translation_service, _precedent_service, _job_manager, _s3_client
     _draft_service = draft_service
     _summary_service = summary_service
     _synopsis_service = synopsis_service
     _translation_service = translation_service
+    _precedent_service = precedent_service
     _job_manager = job_manager
     _s3_client = s3_client
 
@@ -79,6 +84,12 @@ def get_translation_service() -> TranslationService:
     return _translation_service
 
 
+def get_precedent_service() -> PrecedentService:
+    if _precedent_service is None:
+        raise RuntimeError("Precedent service not initialized")
+    return _precedent_service
+
+
 def get_job_manager() -> JobManager:
     if _job_manager is None:
         raise RuntimeError("Job manager not initialized")
@@ -99,9 +110,10 @@ async def create_job(
     summary_service: SummaryService = Depends(get_summary_service),
     synopsis_service: SynopsisService = Depends(get_synopsis_service),
     translation_service: TranslationService = Depends(get_translation_service),
+    precedent_service: PrecedentService = Depends(get_precedent_service),
     job_manager: JobManager = Depends(get_job_manager),
 ) -> CreateJobResponse:
-    """Create a new job (draft, summary, synopsis, or translation)."""
+    """Create a new job (draft, summary, synopsis, translation, or precedent)."""
     if isinstance(request, CreateDraftJobRequest):
         logger.info(
             f"POST /jobs [draft]: type={request.document_type.value}, "
@@ -124,6 +136,11 @@ async def create_job(
             f"POST /jobs [synopsis]: case_folder_id={request.case_folder_id}, user={x_user_id}"
         )
         job_id = await synopsis_service.create_synopsis_job(request, user_id=x_user_id)
+    elif isinstance(request, CreatePrecedentJobRequest):
+        logger.info(
+            f"POST /jobs [precedent]: case_folder_id={request.case_folder_id}, user={x_user_id}"
+        )
+        job_id = await precedent_service.create_precedent_job(request, user_id=x_user_id)
     else:
         raise HTTPException(status_code=400, detail=f"Unknown job type: {request.type}")
 

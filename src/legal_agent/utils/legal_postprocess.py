@@ -35,6 +35,13 @@ _PLACEHOLDER_WORDS = re.compile(
 )
 
 
+# Legitimate "value not yet known" phrasing used in Indian legal drafts —
+# e.g. "[To be assigned by Indian Patent Office]" on a patent application,
+# "[To be allotted by Registrar]" on a company filing. These are real-world
+# TBDs resolved by an external authority, not forgotten template variables.
+_EXTERNAL_TBD = re.compile(r"(?i)^to be \w+(?:\s+\w+)*\s+by\s+\w+")
+
+
 def detect_placeholders(markdown: str) -> list[str]:
     """Return a list of placeholder snippets found in the draft, empty if clean.
 
@@ -51,6 +58,8 @@ def detect_placeholders(markdown: str) -> list[str]:
             found.append(snippet)
 
     for m in _PLACEHOLDER_BRACKET.finditer(markdown):
+        if _EXTERNAL_TBD.match(m.group(1)):
+            continue
         _add(m.group(0))
     for m in _PLACEHOLDER_MUSTACHE.finditer(markdown):
         _add(m.group(0))

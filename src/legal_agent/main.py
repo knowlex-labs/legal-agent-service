@@ -41,6 +41,8 @@ from legal_agent.config import get_settings
 from legal_agent.legal_retrieval import LegalCaseRetriever
 from legal_agent.legal_retrieval.config import get_legal_db_url
 from legal_agent.legal_retrieval.db import close_pool
+from legal_agent.precedents.generator import PrecedentGenerator
+from legal_agent.precedents.service import PrecedentService
 from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
 from legal_agent.summary.generator import SummaryGenerator
@@ -119,6 +121,11 @@ async def lifespan(app: FastAPI):
     synopsis_service = SynopsisService(
         generator=SynopsisGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
     )
+    precedent_service = PrecedentService(
+        generator=PrecedentGenerator(rag_client=rag_client, retriever=legal_retriever),
+        job_manager=job_manager,
+        s3_client=s3_client,
+    )
     decryption_service = DecryptionService(settings) if settings.document_encryption_master_key else None
     translation_service = TranslationService(
         generator=TranslationGenerator(),
@@ -126,7 +133,15 @@ async def lifespan(app: FastAPI):
         s3_client=s3_client,
         decryption=decryption_service,
     )
-    set_services(draft_service, summary_service, synopsis_service, translation_service, job_manager, s3_client)
+    set_services(
+        draft_service,
+        summary_service,
+        synopsis_service,
+        translation_service,
+        precedent_service,
+        job_manager,
+        s3_client,
+    )
     workspace_chat_init_task = asyncio.create_task(_init_workspace_chat_agent(legal_retriever))
     logger.info("Service ready")
     yield

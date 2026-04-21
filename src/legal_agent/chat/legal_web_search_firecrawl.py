@@ -158,6 +158,63 @@ def _format_block(
     return "\n".join(parts) + "\n"
 
 
+async def firecrawl_search_only(
+    query: str,
+    num_results: int = 3,
+    scope_to_legal_domains: bool = False,
+) -> list[dict[str, Any]] | None:
+    """Firecrawl SEARCH only — no scrape. 1 credit per call.
+
+    Returns a list of ``{url, title, snippet}`` dicts (at most ``num_results``) or
+    ``None`` if Firecrawl is unavailable. Used by the verify-before-emit pipeline
+    to check claims cheaply without paying per-scrape credits.
+
+    By default the query is unscoped so the verifier can confirm facts that live
+    outside the 3 trusted legal domains (business news, govt notifications, etc.).
+    Set ``scope_to_legal_domains=True`` to replicate the tool's restricted search
+    (e.g. when verifying a case-law claim specifically).
+    """
+    settings = get_settings()
+    try:
+        from firecrawl import AsyncFirecrawl  # type: ignore
+    except ImportError:
+        logger.warning("[firecrawl-search] firecrawl-py not installed")
+        return None
+
+    if not settings.firecrawl_api_key:
+        return None
+
+    client = AsyncFirecrawl(api_key=settings.firecrawl_api_key)
+    if scope_to_legal_domains:
+        site_filter = " OR ".join(f"site:{d}" for d in settings.firecrawl_search_domains)
+        scoped_query = f"({site_filter}) {query}"
+    else:
+        scoped_query = query
+
+    try:
+        search_resp = await client.search(query=scoped_query, limit=max(num_results, 3))
+    except Exception as exc:
+        logger.warning(f"[firecrawl-search] search failed: {exc}")
+        return None
+
+    hits_raw = getattr(search_resp, "web", None) or (
+        search_resp.get("web") if isinstance(search_resp, dict) else None
+    ) or []
+    hits: list[dict[str, Any]] = []
+    for h in hits_raw:
+        url = getattr(h, "url", None) or (h.get("url") if isinstance(h, dict) else None)
+        title = getattr(h, "title", None) or (h.get("title") if isinstance(h, dict) else None)
+        snippet = getattr(h, "description", None) or (
+            h.get("description") if isinstance(h, dict) else None
+        )
+        if not url:
+            continue
+        hits.append({"url": url, "title": title or "", "snippet": snippet or ""})
+        if len(hits) >= num_results:
+            break
+    return hits
+
+
 async def _firecrawl_search_and_scrape(
     query: str, num_sources: int
 ) -> list[dict[str, Any]] | None:
