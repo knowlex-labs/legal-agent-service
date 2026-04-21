@@ -14,13 +14,19 @@ from psycopg.rows import dict_row
 from psycopg_pool import AsyncConnectionPool
 
 from legal_agent.chat.citation_utils import parse_legal_web_search_citations
+from legal_agent.chat.firecrawl_verify import ClaimList, ClaimVerification, verify_claims
 from legal_agent.chat.session_title import generate_session_title
 from legal_agent.chat.legal_web_search_firecrawl import create_legal_web_search_tool
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import get_settings
 from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
 from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
+from legal_agent.prompts.fact_dense_draft import FACT_DENSE_DRAFT_SYSTEM_PROMPT
 from legal_agent.prompts.legal_assistant_chat import LEGAL_ASSISTANT_CHAT_SYSTEM_PROMPT
+from legal_agent.prompts.verify_rewrite import (
+    CLAIM_EXTRACTION_SYSTEM_PROMPT,
+    VERIFY_REWRITE_SYSTEM_PROMPT,
+)
 from legal_agent.workspace_chat.session_store import WorkspaceChatSessionStore
 
 logger = logging.getLogger(__name__)
@@ -259,6 +265,23 @@ class WorkspaceChatAgent:
             f"style={style} | user={user_id} | "
             f"files={len(file_ids or [])} | web_search={web_search} | msg='{message[:100]}'"
         )
+
+        # web_search=True routes through the draft → extract → verify → rewrite
+        # pipeline so answers are factually dense but each claim is verified via
+        # Firecrawl search-only (1 credit per claim, no scrape).
+        if web_search:
+            async for sse in self._run_verify_pipeline(
+                session_id=session_id,
+                message=message,
+                tone=tone,
+                style=style,
+                file_ids=file_ids or [],
+                user_id=user_id,
+                model=model,
+            ):
+                yield sse
+            return
+
         graph = self._get_graph(model, file_ids or [], user_id, web_search=web_search)
         config = {"configurable": {"thread_id": session_id}}
 
@@ -352,6 +375,201 @@ class WorkspaceChatAgent:
                 yield {"event": "session_title", "data": title}
 
         yield {"event": "end", "data": ""}
+
+    async def _run_verify_pipeline(
+        self,
+        session_id: str,
+        message: str,
+        tone: str,
+        style: str,
+        file_ids: list[str],
+        user_id: str,
+        model: str,
+    ):
+        """Draft from training memory, verify each claim via Firecrawl search-only, rewrite.
+
+        Stages emit ``status`` SSE events; stage 4 streams the rewritten answer
+        as ``answer`` events. The final rewritten answer is persisted to the
+        session's checkpointer so conversation history reflects what the user
+        actually saw (not the draft).
+        """
+        settings = get_settings()
+        model_id = model or settings.chat_llm_default_model
+        llm = self._get_llm(model_id)
+        config = {"configurable": {"thread_id": session_id}}
+
+        tone_suffix = TONE_INSTRUCTIONS.get(tone, TONE_INSTRUCTIONS["formal"])
+        style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
+
+        # Session title: matches the behaviour of the normal pipeline so the
+        # UI doesn't regress on first-message rename.
+        base_graph = self._get_base_graph(model_id, web_search=False)
+        title_task: asyncio.Task[str | None] | None = None
+        try:
+            prior_state = await base_graph.aget_state(config)
+            is_first_message = not prior_state or not getattr(prior_state, "values", None) \
+                or not prior_state.values.get("messages")
+        except Exception:
+            logger.exception("[verify-pipeline] aget_state failed; skipping session_title")
+            is_first_message = False
+        if is_first_message and message and message.strip():
+            title_task = asyncio.create_task(
+                generate_session_title(message, model=model_id)
+            )
+
+        document_context = ""
+        if file_ids and self._rag_client:
+            try:
+                document_context = await self._rag_client.query(
+                    file_ids, message, user_id=user_id
+                )
+            except Exception:
+                logger.exception("[verify-pipeline] RAG query failed; proceeding without it")
+
+        # Stage 1: draft from training knowledge
+        yield {"event": "status", "data": "drafting"}
+        draft_user_content = message
+        if document_context:
+            draft_user_content = (
+                f"{message}\n\n---\n"
+                f"Relevant passages from the user's case files (for context):\n{document_context}"
+            )
+        try:
+            draft_response = await llm.ainvoke([
+                SystemMessage(
+                    content=FACT_DENSE_DRAFT_SYSTEM_PROMPT + tone_suffix + style_suffix
+                ),
+                HumanMessage(content=draft_user_content),
+            ])
+            draft = self._normalize_content(draft_response.content)
+        except Exception:
+            logger.exception("[verify-pipeline] draft stage failed")
+            yield {"event": "answer", "data": "An error occurred while drafting the answer."}
+            yield {"event": "end", "data": ""}
+            return
+
+        if not draft or not draft.strip():
+            yield {"event": "answer", "data": "I could not generate an answer for this query."}
+            yield {"event": "end", "data": ""}
+            return
+
+        # Stage 2: extract claims
+        yield {"event": "status", "data": "extracting claims"}
+        claims: list = []
+        try:
+            extraction_llm = llm.with_structured_output(ClaimList)
+            extracted = await extraction_llm.ainvoke([
+                SystemMessage(content=CLAIM_EXTRACTION_SYSTEM_PROMPT),
+                HumanMessage(content=f"DRAFT TO EXTRACT CLAIMS FROM:\n\n{draft}"),
+            ])
+            claims = list(extracted.claims) if extracted and getattr(extracted, "claims", None) else []
+        except Exception:
+            logger.exception("[verify-pipeline] claim extraction failed; emitting draft verbatim")
+            claims = []
+
+        # Stage 3: verify each claim in parallel
+        verifications: list[ClaimVerification] = []
+        if claims:
+            yield {"event": "status", "data": f"verifying {len(claims)} claim(s)"}
+            try:
+                verifications = await verify_claims(claims)
+            except Exception:
+                logger.exception("[verify-pipeline] verification failed; emitting draft verbatim")
+                verifications = []
+        else:
+            logger.info("[verify-pipeline] no verifiable claims found in draft")
+
+        # Stage 4: rewrite (stream tokens) or emit draft verbatim
+        yield {"event": "status", "data": "finalizing"}
+
+        final_answer = ""
+        if not verifications:
+            final_answer = draft
+            yield {"event": "answer", "data": final_answer.replace("\n", "\\n")}
+        else:
+            rewrite_input = self._format_rewrite_input(draft, verifications)
+            chunks: list[str] = []
+            try:
+                async for chunk in llm.astream([
+                    SystemMessage(
+                        content=VERIFY_REWRITE_SYSTEM_PROMPT + tone_suffix + style_suffix
+                    ),
+                    HumanMessage(content=rewrite_input),
+                ]):
+                    token = self._normalize_content(chunk.content)
+                    if token:
+                        chunks.append(token)
+                        yield {"event": "answer", "data": token.replace("\n", "\\n")}
+            except Exception:
+                logger.exception("[verify-pipeline] rewrite stream failed; falling back to draft")
+                if not chunks:
+                    yield {"event": "answer", "data": draft.replace("\n", "\\n")}
+                    chunks = [draft]
+            final_answer = "".join(chunks) or draft
+
+            if not final_answer.strip():
+                # Rewrite produced nothing usable — surface the draft so the user
+                # isn't left with an empty response.
+                final_answer = draft
+                yield {"event": "answer", "data": draft.replace("\n", "\\n")}
+
+        # Emit citations for any supporting URLs the verifier returned.
+        citations_out: list[dict] = []
+        seen_urls: set[str] = set()
+        for v in verifications:
+            if v.supported and v.supporting_url and v.supporting_url not in seen_urls:
+                seen_urls.add(v.supporting_url)
+                citations_out.append(
+                    {
+                        "url": v.supporting_url,
+                        "snippet": (v.supporting_snippet or "")[:300],
+                        "claim_type": v.claim.type,
+                    }
+                )
+        if citations_out:
+            yield {"event": "citations", "data": json.dumps(citations_out)}
+
+        # Persist human message + final (rewritten) answer to checkpointer.
+        try:
+            await base_graph.aupdate_state(
+                config,
+                {
+                    "messages": [
+                        HumanMessage(content=message),
+                        AIMessage(content=final_answer),
+                    ]
+                },
+            )
+        except Exception:
+            logger.exception("[verify-pipeline] failed to persist session history")
+
+        # Drain title task and emit if ready
+        if title_task is not None:
+            try:
+                title = await title_task
+            except Exception:
+                logger.exception("[verify-pipeline] awaiting session_title failed")
+                title = None
+            if title:
+                yield {"event": "session_title", "data": title}
+
+        yield {"event": "end", "data": ""}
+
+    @staticmethod
+    def _format_rewrite_input(draft: str, verifications: list[ClaimVerification]) -> str:
+        lines: list[str] = ["# DRAFT", "", draft, "", "# VERIFICATION REPORT", ""]
+        for i, v in enumerate(verifications, 1):
+            status = "SUPPORTED" if v.supported else "NOT SUPPORTED"
+            lines.append(f"## Claim {i} — {status}")
+            lines.append(f"- Type: {v.claim.type}")
+            lines.append(f"- Claim text: {v.claim.text}")
+            if v.supporting_url:
+                lines.append(f"- Supporting URL: {v.supporting_url}")
+            if v.supporting_snippet:
+                snippet = v.supporting_snippet[:500]
+                lines.append(f"- Supporting snippet: {snippet}")
+            lines.append("")
+        return "\n".join(lines)
 
     def _parse_rag_citations(self, rag_output: str) -> list[dict]:
         """Parse RAG tool output to extract citation metadata from [Indexed chunk N] format.

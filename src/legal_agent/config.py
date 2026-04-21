@@ -76,6 +76,12 @@ class Settings(BaseSettings):
     )
     serper_api_key: str = ""
 
+    # Draft+verify pipeline for workspace chat with web_search=True.
+    # Each claim verified = 1 Firecrawl search credit (no scrape).
+    # Cap extraction to keep cost bounded; lower if credits spike.
+    firecrawl_verify_max_claims: int = 7
+    firecrawl_verify_concurrency: int = 5
+
     # Jobs
     job_timeout_seconds: int = 1800
     job_max_retries: int = 3

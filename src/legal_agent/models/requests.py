@@ -212,7 +212,46 @@ class CreateSynopsisJobRequest(BaseModel):
         return v
 
 
+class CreatePrecedentJobRequest(BaseModel):
+    """Request to find precedents relevant to a case folder.
+
+    Pipeline: build a brief from the case documents, search the internal
+    Supreme Court judgments DB first, supplement with Firecrawl on trusted
+    legal domains if needed, then synthesise a ranked precedent list.
+    """
+
+    type: Literal["precedent"]
+    case_folder_id: str = Field(..., description="Case folder identifier")
+    file_ids: list[str] = Field(
+        default_factory=list,
+        description="File IDs to fetch from RAG engine for case-brief extraction",
+    )
+    top_k: int = Field(
+        8,
+        ge=1,
+        le=20,
+        description="Number of precedents to return from the internal DB before synthesis",
+    )
+    model: str = "gemini-3.1-flash-lite-preview"
+    metadata: dict[str, Any] = Field(
+        default_factory=dict, description="Optional extra context or parameters"
+    )
+
+    @field_validator("case_folder_id")
+    @classmethod
+    def validate_case_folder_id(cls, v: str) -> str:
+        if not re.match(r"^[a-zA-Z0-9_-]+$", v):
+            raise ValueError(
+                "case_folder_id must contain only alphanumeric characters, underscores, or dashes"
+            )
+        return v
+
+
 CreateJobRequest = Annotated[
-    CreateDraftJobRequest | CreateSummaryJobRequest | CreateSynopsisJobRequest | CreateTranslationJobRequest,
+    CreateDraftJobRequest
+    | CreateSummaryJobRequest
+    | CreateSynopsisJobRequest
+    | CreateTranslationJobRequest
+    | CreatePrecedentJobRequest,
     Field(discriminator="type"),
 ]
