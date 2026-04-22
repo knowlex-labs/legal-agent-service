@@ -50,14 +50,30 @@ class SummaryService:
     ) -> None:
         """Execute the summary generation task."""
         logger.debug(f"[{job_id}] Starting summary execution")
+        logger.info(f"[DEBUG] SummaryService received file_ids: {request.file_ids}")
 
-        summary_md = await self._generator.generate(
-            file_ids=request.file_ids,
-            user_id=user_id,
-            drafts=request.drafts,
-            chat_highlights=request.chat_highlights,
-            model=request.model,
-        )
+        all_summaries = []
+        for i, file_id in enumerate(request.file_ids, start=1):
+            logger.info(f"[DEBUG] Generating summary for file {i}: {file_id}")
+            summary = await self._generator.generate(
+                file_ids=[file_id],  #  single doc
+                user_id=user_id,
+                drafts=[],  # optional: avoid mixing drafts per doc
+                chat_highlights=[],  # optional: avoid noise
+                model=request.model,
+            )
+            formatted = f"# Summary of Document - ({i})\n\n{summary}"
+            all_summaries.append(formatted)
+        #  Merge into one document
+        summary_md = "\n\n---\n\n".join(all_summaries)
+        
+        # summary_md = await self._generator.generate(
+        #     file_ids=request.file_ids,
+        #     user_id=user_id,
+        #     drafts=request.drafts,
+        #     chat_highlights=request.chat_highlights,
+        #     model=request.model,
+        # )
 
         s3_path = f"{request.case_folder_id}/summary.md"
         await self._s3_client.upload_text(s3_path, summary_md)
