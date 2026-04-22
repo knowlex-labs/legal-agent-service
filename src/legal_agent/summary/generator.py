@@ -59,7 +59,7 @@ _SUMMARY_RAG_QUERY = (
 class SummaryGenerator:
     def __init__(self, rag_client: RAGClient):
         self._rag_client = rag_client
-
+    
     async def generate(
         self,
         file_ids: list[str],
@@ -68,6 +68,7 @@ class SummaryGenerator:
         chat_highlights: list[str],
         model: str = "openai",
     ) -> str:
+        logger.info(f"[DEBUG] Generator received file_ids: {file_ids}")
         """Fetch document context from RAG, assemble with drafts/highlights, call LLM."""
         settings = get_settings()
         model_id = model if model else settings.chat_llm_default_model
@@ -77,13 +78,15 @@ class SummaryGenerator:
         document_context = ""
         if file_ids:
             logger.info(
-                f"[summary] Fetching RAG context | user={user_id} | files={len(file_ids)}"
+                f"[DEBUG] Calling RAG | user={user_id} | file_ids={file_ids}"
             )
             document_context = await self._rag_client.query(
                 file_ids=file_ids,
                 query=_SUMMARY_RAG_QUERY,
                 user_id=user_id,
             )
+            logger.info(f"[DEBUG] RAG context length: {len(document_context)}")
+            logger.info(f"[DEBUG] RAG context preview: {document_context[:500]}")
 
         # Step 2: Assemble full context
         context = self._assemble_context(document_context, drafts, chat_highlights)

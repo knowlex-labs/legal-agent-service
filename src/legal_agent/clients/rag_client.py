@@ -1,6 +1,7 @@
 """RAG client for querying document context from the RAG engine."""
 
 import logging
+import asyncio
 from abc import ABC, abstractmethod
 
 import httpx
@@ -78,18 +79,70 @@ class LocalRAGClient(RAGClient):
 
         try:
             query_service = self._get_query_service()
-            results = await query_service.retrieve_context(
-                query=query,
-                user_id=collection,
-                top_k=10,
-                file_ids=filters_file_ids,
-            )
+            all_results = []
+            for file_id in file_ids:
+                file_results = []
+                for attempt in range(3):
+                    try:
+                        file_results = await query_service.retrieve_context(
+                            query=query,
+                            user_id=collection,
+                            top_k=5,
+                            file_ids=[file_id],
+                        )
+                        break
+                    except Exception as e:
+                        if "429" in str(e):
+                            wait = 2**attempt #exponential backoff
+                            logger.warning(
+                                f"[RAG] Rate limited for {file_id}. Retrying in {wait}s..."
+                            )
+                            await asyncio.sleep(wait)
+                        else:
+                            logger.error(f"[RAG] Failed for file {file_id}: {e}")
+                            break
 
+                if file_results:
+                    logger.info(f"[RAG] {file_id} → {len(file_results)} chunks")
+                    all_results.extend(file_results)
+                else:
+                    logger.warning(f"[RAG] {file_id} → 0 chunks after retries")
+                # ✅ small delay to avoid burst limits
+                await asyncio.sleep(0.3)
+
+            results = all_results
             if not results:
-                logger.info(f"No results from RAG for query: {query[:50]}...")
+                logger.warning(f"[RAG] No results for ANY file_ids: {file_ids}")
                 return ""
 
-            logger.info(f"RAG returned {len(results)} chunks")
+            logger.info(f"[RAG] Total chunks collected: {len(results)}")
+
+            return self._format_chunks(results)
+            #Multiple summaries together 
+            # all_results = []
+            # for file_id in file_ids:
+            #     file_results = await query_service.retrieve_context(
+            #         query=query,
+            #         user_id=collection,
+            #         top_k=5,  # per file
+            #         file_ids=[file_id],  # 🔥 key change
+            #     )
+            #     if file_results:
+            #         all_results.extend(file_results)
+            # results = all_results
+            #Earlier code
+            # results = await query_service.retrieve_context(
+            #     query=query,
+            #     user_id=collection,
+            #     top_k=10,
+            #     file_ids=filters_file_ids,
+            # )
+
+            if not results:
+                logger.warning(f"[RAG] No results for ANY file_ids: {file_ids}")
+                return ""
+
+            logger.info(f"[RAG] Total chunks collected: {len(results)}")
             return self._format_chunks(results)
 
         except Exception as e:
