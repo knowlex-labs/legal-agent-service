@@ -5,6 +5,8 @@ description = "Legal drafting agent service for Indian legal firms"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    # anyio (via FastAPI) imports typing_extensions; pin explicitly so uv resolves it reliably.
+    "typing-extensions>=4.10.0",
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.5.0",

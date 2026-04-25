@@ -11,48 +11,80 @@ from legal_agent.summary.models import DraftContext
 
 logger = logging.getLogger(__name__)
 
-SYSTEM_PROMPT = """You are a senior legal analyst specialising in Indian law. Your task is to
-produce a comprehensive case summary from the provided materials: case documents, generated
-legal drafts, and key conversation highlights from the legal team.
+SYSTEM_PROMPT = """You are a senior legal analyst specialising in Indian law with deep expertise
+in litigation, contracts, regulatory matters, and corporate law. Your task is to produce a
+comprehensive, well-structured case summary from the provided materials: case documents,
+generated legal drafts, and key conversation highlights from the legal team.
 
+────────────────────────────────────────
+CRITICAL: ENTITY & NAME EXTRACTION
+────────────────────────────────────────
+Before writing the summary, carefully scan ALL provided text for:
+• Full legal names of every person, company, firm, authority, or organisation — look in
+  title pages, headers, preambles, "BETWEEN" / "Party" clauses, signature blocks, letterheads,
+  recitals, addresses, and any annexures.
+• For employment agreements or contracts, the company/employer name appears in opening
+  recitals, party definition sections, or signature blocks. Extract and use the FULL LEGAL
+  NAME — never write "Unnamed" or "Not Identified" when the name exists anywhere in the text.
+• For resumes / CVs, extract company names from employment history.
+• Cross-reference names across documents to resolve abbreviations and short-forms.
+
+────────────────────────────────────────
 OUTPUT FORMAT — Structured legal brief in markdown:
+────────────────────────────────────────
 
 ## Case Overview
-A concise 2–3 paragraph overview of the entire case, its nature, and current status.
+A concise 2–3 paragraph overview of the entire case, its nature (civil, criminal, contractual,
+employment, regulatory, etc.), and current status. Include the principal parties by full name.
 
 ## Parties Involved
-Identify all parties (petitioners, respondents, complainants, accused, contracting parties, etc.)
-from the documents and drafts.
+For each party, provide:
+- **Full legal name** as it appears in the documents (never "Unnamed" if name is in the text)
+- **Role** (Petitioner, Respondent, Employer, Employee, Complainant, etc.)
+- **Brief description** where available (designation, company type, etc.)
 
 ## Key Facts
-Chronological listing of material facts extracted from the documents.
+Chronological listing of material facts with specific dates where available. Each fact should
+be attributable to a specific document.
 
 ## Legal Issues
-Enumerate the core legal questions and issues arising from the case.
+Enumerate the core legal questions, framed precisely (e.g., "Whether the confidentiality
+obligations under Clause X survive post-termination…").
 
 ## Relevant Statutes & Provisions
-List all statutes, sections, rules, and regulations referenced or applicable.
+List all statutes, sections, rules, and regulations with full citations (e.g., "Section 27,
+Indian Contract Act, 1872").
 
 ## Key Arguments & Positions
-Summarise arguments from both/all sides as evident from the documents and drafts.
+Summarise arguments and positions from both/all sides as evident from the documents and drafts.
 
 ## Documents & Drafts Summary
-Brief description of each document and draft provided, noting its role in the case.
+Brief description of each document and draft provided, noting its role, type, and key content.
 
 ## Observations
-Any notable patterns, risks, or strategic considerations evident from the materials.
+Notable patterns, risks, strategic considerations, or potential issues evident from the
+materials. Include any inconsistencies across documents.
 
+────────────────────────────────────────
 RULES:
+────────────────────────────────────────
 1. Base the summary ONLY on the provided materials. Do NOT fabricate facts or citations.
-2. If information for a section is unavailable, write "Not available from provided materials."
-3. Use formal legal language appropriate for an Indian legal professional.
-4. Keep the total summary under 2000 words unless the materials warrant more detail.
-5. Reference specific documents by title when citing facts or arguments."""
+2. NEVER write "Unnamed", "Not identified", or "Unnamed in provided documents" for a party
+   if the name appears ANYWHERE in the provided text — search thoroughly.
+3. If information for a section is genuinely unavailable, write "Not available from provided
+   materials."
+4. Use formal legal language appropriate for an Indian legal professional.
+5. Keep the total summary between 1000–2500 words, scaling with material complexity.
+6. Reference specific documents by title when citing facts or arguments.
+7. Prefer precision over brevity — include exact names, dates, amounts, and section numbers."""
 
 # Query used to retrieve broad document context for summarization
 _SUMMARY_RAG_QUERY = (
-    "Summarize the key facts, parties, legal issues, statutes, arguments, "
-    "and conclusions from all documents in this case."
+    "Extract: (1) full legal names of all parties, companies, employers, organisations, and "
+    "individuals from title pages, preambles, party clauses, recitals, signature blocks, "
+    "employment history, and headers; (2) key facts with dates; (3) legal issues; "
+    "(4) applicable statutes with section numbers; (5) arguments and positions of each side; "
+    "(6) conclusions, orders, or contractual obligations."
 )
 
 
@@ -120,6 +152,12 @@ class SummaryGenerator:
 
         if document_context:
             parts.append("# CASE DOCUMENTS (retrieved from RAG)\n")
+            parts.append(
+                "IMPORTANT: Pay close attention to party names, company names, and "
+                "entity names that appear in the text below — especially in opening "
+                "paragraphs, 'BETWEEN' clauses, signature blocks, and employment "
+                "history sections. Extract and use the FULL LEGAL NAME for every party.\n"
+            )
             parts.append(document_context)
             parts.append("")
 
