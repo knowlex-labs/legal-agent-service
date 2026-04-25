@@ -181,7 +181,7 @@ class QueryService:
                     concepts=key_terms if isinstance(key_terms, list) else []
                 ))
 
-        return chunks[:5]
+        return chunks[:10]
 
     def _calculate_confidence(self, results: List[Dict]) -> float:
         if not results:

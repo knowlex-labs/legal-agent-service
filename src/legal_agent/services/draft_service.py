@@ -54,10 +54,9 @@ def _markdown_for_upload(document: GeneratedDocument) -> str:
     Steps:
     1. Prefer `document.draft` (the agent's raw markdown). Fall back to
        assembling from `document.sections` if `draft` is empty.
-    2. Run `apply_draft_postprocess` — masks Aadhaar, asserts no unfilled
-       placeholders (`[Amount]`, `XXXX`, etc.), asserts minimum length.
-       Raises ValueError on failure → job fails loudly instead of shipping
-       malformed content.
+    2. Run `apply_draft_postprocess` — masks Aadhaar, warns on any unfilled
+       placeholders (`[Amount]`, `XXXX`, etc.) without failing, and asserts
+       minimum length. Length is still a hard failure.
     """
     from legal_agent.utils.legal_postprocess import apply_draft_postprocess
 

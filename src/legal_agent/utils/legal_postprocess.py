@@ -221,13 +221,20 @@ def check_citation_grounding(
 # ──────────────────────────────────────────────────────────────────────
 
 def apply_draft_postprocess(markdown: str) -> str:
-    """Run Aadhaar masking, then assert placeholders + length. Returns cleaned text.
+    """Run Aadhaar masking, log (don't raise on) placeholders, assert length.
 
-    Mutating step (Aadhaar) runs first so the assertion sees the post-mask text
-    and doesn't mistake a real Aadhaar number for a placeholder. Placeholder
-    and length assertions raise ValueError on failure.
+    Mutating step (Aadhaar) runs first so detection sees the post-mask text
+    and doesn't mistake a real Aadhaar number for a placeholder. Unfilled
+    placeholders are logged as a warning and shipped as-is — the lawyer can
+    edit them downstream. Length assertion still raises.
     """
     masked, _ = mask_aadhaar(markdown)
-    assert_no_placeholders(masked)
+    placeholders = detect_placeholders(masked)
+    if placeholders:
+        preview = ", ".join(f"'{p}'" for p in placeholders[:8])
+        more = f" (+{len(placeholders) - 8} more)" if len(placeholders) > 8 else ""
+        logger.warning(
+            "Draft shipped with unfilled placeholders: %s%s", preview, more
+        )
     assert_draft_length(masked)
     return masked
