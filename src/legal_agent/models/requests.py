@@ -161,6 +161,23 @@ class CreateTranslationJobRequest(BaseModel):
     source_language: TranslationLanguage | None = Field(
         None, description="Source language (auto-detected if omitted)"
     )
+    document_type: DocumentType | None = Field(
+        None,
+        description=(
+            "Type of legal document (court filing, contract, letter, etc.). "
+            "Drives layout CSS, terminology register, and structure inference. "
+            "If omitted and `auto_detect_document_type=True`, a cheap classifier "
+            "infers it from the source text."
+        ),
+    )
+    auto_detect_document_type: bool = Field(
+        True,
+        description=(
+            "When `document_type` is not provided, run a lightweight LLM classifier "
+            "over the first ~2000 chars of the source to infer it. Set to False to "
+            "skip classification and use the default profile."
+        ),
+    )
     file_id: str | None = Field(
         None, description="S3 key of the encrypted source document to decrypt and translate"
     )

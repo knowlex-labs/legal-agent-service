@@ -23,13 +23,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-ben \
     poppler-utils \
     fonts-noto \
+    fonts-noto-cjk \
     fonts-noto-extra \
+    fonts-noto-color-emoji \
+    fonts-liberation \
+    fonts-sahadeva \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf-xlib-2.0-0 \
     libcairo2 \
     libffi-dev \
+    curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Shobhika (Devanagari serif used in Indian legal documents).
+# Not packaged in apt, so fetch the upstream release directly.
+RUN curl -fsSL -o /tmp/shobhika.zip \
+        https://github.com/Sandhi-IITBombay/Shobhika/releases/download/v1.04/Shobhika-v1.04.zip \
+    && mkdir -p /usr/share/fonts/truetype/shobhika \
+    && unzip -j /tmp/shobhika.zip -d /usr/share/fonts/truetype/shobhika/ "*.otf" "*.ttf" \
+    && rm /tmp/shobhika.zip \
+    && fc-cache -f -v
 
 RUN useradd --create-home --uid 1000 appuser
 

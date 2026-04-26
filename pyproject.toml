@@ -71,7 +71,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-legal_agent = ["**/*.md", "**/*.json", "**/*.yaml"]
+legal_agent = ["**/*.md", "**/*.json", "**/*.yaml", "**/*.css"]
 
 [tool.ruff]
 line-length = 100

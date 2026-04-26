@@ -16,14 +16,17 @@ class ErrorStage(str, Enum):
     """Which pipeline stage produced an error. Used to tag job failures so
     the frontend can surface actionable messages (and so oncall can triage
     quickly)."""
-    EXTRACTION = "extraction"   # PDF/image text extraction
-    OCR = "ocr"                 # Vision OCR (Gemini or Sarvam)
-    RAG = "rag"                 # Workspace RAG retrieval
-    TRANSLATION = "translation" # LLM translation
-    DRAFTING = "drafting"       # LLM drafting agent
-    PDF_RENDER = "pdf_render"   # Markdown → PDF
-    UPLOAD = "upload"           # S3 upload of final artifact
-    POSTPROCESS = "postprocess" # Placeholder / Aadhaar / length checks
+    EXTRACTION = "extraction"           # PDF/image text extraction
+    OCR = "ocr"                         # Vision OCR (Gemini or Sarvam)
+    RAG = "rag"                         # Workspace RAG retrieval
+    TRANSLATION = "translation"         # LLM translation
+    DRAFTING = "drafting"               # LLM drafting agent
+    PDF_RENDER = "pdf_render"           # Markdown → PDF
+    UPLOAD = "upload"                   # S3 upload of final artifact
+    POSTPROCESS = "postprocess"         # Placeholder / Aadhaar / length checks
+    STRUCTURE = "structure"             # LLM structure-inference pass
+    CLASSIFICATION = "classification"   # Document-type auto-detect
+    RENDER_GUARD = "render_guard"       # Post-render validation (tofu / ledger / size)
     UNKNOWN = "unknown"
 
 
@@ -181,6 +184,23 @@ class JobManager:
 
             logger.debug(f"[{job_id}] Status: {old_status.value} -> {status.value}")
             return job
+
+    async def update_job_metadata(self, job_id: str, **kv: Any) -> None:
+        """Merge keyword args into the job's metadata dict.
+
+        None values are skipped so callers can pass optional fields without
+        clobbering existing entries. Used by the translation pipeline to
+        attach `detected_document_type`, `layout_family`, `ledger_entry_count`,
+        and `render_warnings` for observability.
+        """
+        async with self._lock:
+            job = self._jobs.get(job_id)
+            if job is None:
+                return
+            for k, v in kv.items():
+                if v is None:
+                    continue
+                job.metadata[k] = v
 
     async def run_job(
         self,
