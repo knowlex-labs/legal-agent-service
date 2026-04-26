@@ -1,8 +1,11 @@
 """API routes for the Legal Agent Service."""
 
+import asyncio
 import logging
+import pathlib
+import tempfile
 
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
 
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.models.requests import (
@@ -265,3 +268,52 @@ async def health_check(job_manager: JobManager = Depends(get_job_manager)) -> di
         "service": "legal-agent-service",
         "jobs_count": len(job_manager._jobs),
     }
+
+
+def _pdf2docx_convert(in_path: str, out_path: str) -> None:
+    # Imported lazily so the (PyMuPDF-backed) module is only loaded on first use.
+    from pdf2docx import Converter
+
+    cv = Converter(in_path)
+    try:
+        cv.convert(out_path)
+    finally:
+        cv.close()
+
+
+@router.post("/documents/convert/pdf-to-docx")
+async def convert_pdf_to_docx(request: Request) -> Response:
+    """Sync PDF→DOCX via pdf2docx.
+
+    Body: raw application/pdf bytes.
+    Response: application/vnd.openxmlformats-officedocument.wordprocessingml.document.
+
+    Used by the Java platform API as a fallback when LibreOffice can't handle the
+    input (Microsoft Print-to-PDF, certain scans, etc.). pdf2docx is CPU-bound and
+    sync, so we run it in a thread to avoid blocking the event loop.
+    """
+    pdf_bytes = await request.body()
+    if not pdf_bytes:
+        raise HTTPException(status_code=400, detail="empty body")
+
+    with tempfile.TemporaryDirectory(prefix="pdf2docx-") as tmp:
+        in_path = pathlib.Path(tmp) / "input.pdf"
+        out_path = pathlib.Path(tmp) / "output.docx"
+        in_path.write_bytes(pdf_bytes)
+
+        try:
+            await asyncio.to_thread(_pdf2docx_convert, str(in_path), str(out_path))
+        except Exception as e:
+            logger.warning("pdf2docx conversion failed: %s", e)
+            raise HTTPException(status_code=422, detail=f"pdf2docx failed: {e}")
+
+        if not out_path.exists() or out_path.stat().st_size == 0:
+            raise HTTPException(status_code=422, detail="pdf2docx produced no output")
+
+        return Response(
+            content=out_path.read_bytes(),
+            media_type=(
+                "application/vnd.openxmlformats-officedocument."
+                "wordprocessingml.document"
+            ),
+        )
