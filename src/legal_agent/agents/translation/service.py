@@ -3,10 +3,24 @@
 import asyncio
 import logging
 
-from legal_agent.agents.drafts.custom.extractor import extract_text_from_bytes
+from legal_agent.agents.translation.doc_profiles import (
+    classify_document,
+    resolve_profile,
+)
 from legal_agent.agents.translation.pdf_builder import markdown_to_pdf
+from legal_agent.agents.translation.render_guard import (
+    has_critical,
+    summarize,
+    validate_rendered_pdf,
+)
+from legal_agent.agents.translation.structure_aware_extractor import (
+    LedgerEntry,
+    enhance_with_llm_structure,
+    extract_for_translation,
+)
 from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
+from legal_agent.models.documents import DocumentType
 from legal_agent.models.requests import CreateTranslationJobRequest
 from legal_agent.models.responses import JobStatus, JobType
 from legal_agent.services.job_manager import ErrorStage, JobManager, StagedError
@@ -74,11 +88,37 @@ class TranslationService:
         logger.debug(f"[{job_id}] Starting translation execution")
 
         try:
-            source_text = await self._resolve_source_text(request, user_id)
+            source_text, ledger = await self._resolve_source_text(request, user_id)
         except StagedError:
             raise  # already tagged by _resolve_source_text
         except Exception as exc:
             raise StagedError(ErrorStage.EXTRACTION, exc) from exc
+
+        # Doc-type pivot: caller override > auto-detect > default profile.
+        document_type: DocumentType | None = request.document_type
+        if document_type is None and request.auto_detect_document_type:
+            try:
+                document_type = await classify_document(source_text)
+            except Exception as exc:
+                raise StagedError(ErrorStage.CLASSIFICATION, exc) from exc
+            if document_type is not None:
+                logger.info(f"[{job_id}] Auto-detected document_type={document_type.value}")
+        profile = resolve_profile(document_type)
+        await self._job_manager.update_job_metadata(
+            job_id,
+            detected_document_type=document_type.value if document_type else None,
+            layout_family=profile.layout_family,
+        )
+
+        # Optional LLM structure pass — court_filing family + short docs only.
+        try:
+            source_text, structure_ledger = await enhance_with_llm_structure(
+                source_text, document_type
+            )
+        except Exception as exc:
+            raise StagedError(ErrorStage.STRUCTURE, exc) from exc
+        if structure_ledger:
+            ledger.extend(structure_ledger)
 
         try:
             translated_md = await self._generator.generate(
@@ -86,6 +126,7 @@ class TranslationService:
                 target_language=request.target_language,
                 source_language=request.source_language,
                 model=request.model,
+                profile=profile,
             )
         except Exception as exc:
             raise StagedError(ErrorStage.TRANSLATION, exc) from exc
@@ -96,9 +137,38 @@ class TranslationService:
         out_name = f"{original_name} - ({lang_slug}).pdf" if original_name else f"{lang_slug}-translation.pdf"
 
         try:
-            pdf_bytes = await asyncio.to_thread(markdown_to_pdf, translated_md, lang_slug)
+            pdf_bytes = await asyncio.to_thread(
+                markdown_to_pdf, translated_md, lang_slug, profile
+            )
         except Exception as exc:
             raise StagedError(ErrorStage.PDF_RENDER, exc) from exc
+
+        # Render guard — catch tofu, ledger drops, page-count surprises.
+        try:
+            guard_warnings = await asyncio.to_thread(
+                validate_rendered_pdf,
+                pdf_bytes,
+                lang_slug,
+                len(source_text),
+                ledger,
+            )
+        except Exception as exc:
+            raise StagedError(ErrorStage.RENDER_GUARD, exc) from exc
+
+        await self._job_manager.update_job_metadata(
+            job_id,
+            ledger_entry_count=len(ledger) or None,
+            render_warnings=summarize(guard_warnings) or None,
+        )
+
+        if has_critical(guard_warnings):
+            critical_msgs = "; ".join(
+                f"[{w.code}] {w.message}" for w in guard_warnings if w.severity == "critical"
+            )
+            raise StagedError(
+                ErrorStage.RENDER_GUARD,
+                RuntimeError(critical_msgs or "Render guard found critical issues"),
+            )
 
         s3_path = f"{folder}/translations/{out_name}"
         try:
@@ -123,13 +193,15 @@ class TranslationService:
 
     async def _resolve_source_text(
         self, request: CreateTranslationJobRequest, user_id: str
-    ) -> str:
-        """Get source document text from content or by decrypting an S3 file.
+    ) -> tuple[str, list[LedgerEntry]]:
+        """Get source document text + ledger from content or by decrypting an S3 file.
 
         Stage-tags errors so the job manager produces `[STAGE] reason` output.
+        Ledger is empty for raw `content` payloads and for the conservative
+        extraction path; only the optional LLM structure pass populates it.
         """
         if request.content and request.content.strip():
-            return request.content
+            return request.content, []
 
         if request.file_id:
             if not self._decryption:
@@ -150,15 +222,14 @@ class TranslationService:
             logger.info(f"Decrypted to {len(plaintext)} bytes, extracting text...")
             filename = request.file_id.rsplit("/", 1)[-1]
             try:
-                text = await asyncio.to_thread(extract_text_from_bytes, plaintext, filename)
+                text, ledger = await asyncio.to_thread(
+                    extract_for_translation, plaintext, filename, request.document_type
+                )
             except Exception as exc:
-                # extract_text_from_bytes may internally call OCR — tag as OCR if
-                # the error message suggests so, otherwise EXTRACTION. The
-                # staged error gives us a starting point either way.
                 stage = ErrorStage.OCR if "ocr" in str(exc).lower() or "gemini" in str(exc).lower() or "sarvam" in str(exc).lower() else ErrorStage.EXTRACTION
                 raise StagedError(stage, exc) from exc
             logger.info(f"Extracted {len(text)} chars from {filename}")
-            return text
+            return text, ledger
 
         raise ValueError("Either content or file_id must be provided")
 
