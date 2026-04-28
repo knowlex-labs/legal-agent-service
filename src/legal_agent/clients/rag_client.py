@@ -87,7 +87,7 @@ class LocalRAGClient(RAGClient):
                         file_results = await query_service.retrieve_context(
                             query=query,
                             user_id=collection,
-                            top_k=5,
+                            top_k=8,
                             file_ids=[file_id],
                         )
                         break
