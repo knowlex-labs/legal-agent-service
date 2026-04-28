@@ -6,8 +6,10 @@ import pathlib
 import tempfile
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request, Response
+from pydantic import BaseModel, Field
 
 from legal_agent.clients.s3_client import S3Client
+from legal_agent.config import get_settings
 from legal_agent.models.requests import (
     CreateDraftJobRequest,
     CreateJobRequest,
@@ -317,3 +319,131 @@ async def convert_pdf_to_docx(request: Request) -> Response:
                 "wordprocessingml.document"
             ),
         )
+
+
+def _mammoth_to_html(body: bytes) -> str:
+    import mammoth
+    from io import BytesIO
+    # Strip embedded image src so the output stays text-only — v1 does not host images.
+    # mammoth still emits the alt text / placeholder, so structure is preserved.
+    convert_image = mammoth.images.inline(lambda _image: {"src": ""})
+    result = mammoth.convert_to_html(BytesIO(body), convert_image=convert_image)
+    if result.messages:
+        logger.info(
+            "mammoth extraction notes: %s",
+            [m.message for m in result.messages[:5]],
+        )
+    return result.value
+
+
+@router.post("/convert/pdf-to-html")
+async def convert_pdf_to_html(request: Request) -> Response:
+    """Convert a document to clean structured HTML for in-place editing.
+
+    Body: raw application/pdf or DOCX bytes.
+    Response: text/html (UTF-8) — a fragment (no <html>/<body> wrapper),
+    suitable for Tiptap setContent() on the frontend.
+
+    PDFs go through the multimodal OCR pipeline with output_format='html'
+    (Gemini 3.1 Flash primary; Mistral Pixtral as configurable fallback).
+    DOCX goes through mammoth's native HTML converter.
+    """
+    body = await request.body()
+    if not body:
+        raise HTTPException(status_code=400, detail="empty body")
+
+    ctype = (request.headers.get("content-type") or "").lower()
+
+    try:
+        if "pdf" in ctype:
+            from legal_agent.utils.ocr import ocr_pdf
+            html = await asyncio.to_thread(ocr_pdf, body, "html")
+        elif "wordprocessingml" in ctype or "msword" in ctype:
+            html = await asyncio.to_thread(_mammoth_to_html, body)
+        else:
+            raise HTTPException(
+                status_code=415,
+                detail=f"unsupported content type: {ctype or '(missing)'}",
+            )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.warning("html conversion failed (ctype=%s): %s", ctype, e)
+        raise HTTPException(status_code=422, detail=f"conversion failed: {e}")
+
+    if not html or not html.strip():
+        raise HTTPException(status_code=422, detail="conversion produced no content")
+
+    return Response(content=html.encode("utf-8"), media_type="text/html; charset=utf-8")
+
+
+class TranslateRequest(BaseModel):
+    """Inline-translation request used by the in-place document editor."""
+
+    text: str = Field(..., min_length=1, max_length=8000)
+    source_language: str = Field(
+        ...,
+        description="BCP-47 / Sarvam language code, e.g. 'en-IN', 'hi-IN', 'ta-IN', 'auto'",
+        max_length=16,
+    )
+    target_language: str = Field(..., max_length=16)
+
+
+class TranslateResponse(BaseModel):
+    translated_text: str
+    source_language: str
+    target_language: str
+
+
+def _sarvam_translate(text: str, source_lang: str, target_lang: str) -> str:
+    """Call Sarvam's text translation API. Synchronous SDK; runs in a thread."""
+    from sarvamai import SarvamAI  # type: ignore
+
+    settings = get_settings()
+    if not settings.sarvam_api_key:
+        raise RuntimeError(
+            "SARVAM_API_KEY is not configured; cannot serve /translate."
+        )
+    client = SarvamAI(api_subscription_key=settings.sarvam_api_key)
+    response = client.text.translate(
+        input=text,
+        source_language_code=source_lang,
+        target_language_code=target_lang,
+    )
+    out = getattr(response, "translated_text", None) or ""
+    if not out.strip():
+        raise RuntimeError("Sarvam translate returned empty output")
+    return out
+
+
+@router.post("/translate", response_model=TranslateResponse)
+async def translate_text(payload: TranslateRequest) -> TranslateResponse:
+    """Translate a paragraph between English and an Indic language via Sarvam.
+
+    Used by the document editor's "Translate selection" action. Single short call
+    per request (paragraph-sized, ≤8000 chars), so we run it inline in a thread
+    rather than going through JobManager.
+    """
+    if payload.source_language == payload.target_language:
+        return TranslateResponse(
+            translated_text=payload.text,
+            source_language=payload.source_language,
+            target_language=payload.target_language,
+        )
+
+    try:
+        translated = await asyncio.to_thread(
+            _sarvam_translate,
+            payload.text,
+            payload.source_language,
+            payload.target_language,
+        )
+    except Exception as e:
+        logger.warning("sarvam translate failed: %s", e)
+        raise HTTPException(status_code=502, detail=f"translation failed: {e}")
+
+    return TranslateResponse(
+        translated_text=translated,
+        source_language=payload.source_language,
+        target_language=payload.target_language,
+    )

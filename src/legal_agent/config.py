@@ -24,15 +24,22 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
     sarvam_api_key: str | None = None
+    mistral_api_key: str | None = None
 
-    # OCR backend selection. "gemini" = Gemini Vision (current default).
-    # "sarvam" = Sarvam Document Intelligence (22 Indian languages + English; ≤10 pages per job).
-    ocr_provider: Literal["gemini", "sarvam"] = "gemini"
+    # OCR backend selection. "gemini" = Gemini Vision (default, primary path).
+    # "mistral" = Mistral Pixtral (free tier; secondary path / Gemini fallback).
+    # "sarvam" = Sarvam Document Intelligence (markdown only; ≤10 pages per job).
+    ocr_provider: Literal["gemini", "mistral", "sarvam"] = "gemini"
     # Concurrent Sarvam jobs when chunking long PDFs. Each chunk is ≤10 pages.
     sarvam_ocr_concurrency: int = 4
     # Concurrent Gemini Vision calls per PDF (one call per page). Gemini API
     # rate-limits: free tier ~15 rpm, paid tier much higher. Lower if rate-limited.
     gemini_ocr_concurrency: int = 4
+    # Concurrent Mistral Pixtral calls per PDF (one call per page).
+    mistral_ocr_concurrency: int = 4
+    # Mistral vision-capable model. Pixtral 12B is general-purpose; Pixtral Large
+    # is higher accuracy. Both work as drop-in.
+    mistral_vision_model: str = "pixtral-12b-2409"
     # Language hint passed to Sarvam. Examples: "en-IN", "hi-IN", "ta-IN", "unknown".
     sarvam_ocr_language: str = "unknown"
     # Sarvam chat/translation model. Options: sarvam-m (24B, default), sarvam-30b, sarvam-105b.
@@ -139,7 +146,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     openai_max_tokens: int = 1000
     openai_temperature: float = 0.1
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.1-flash"
     gemini_max_tokens: int = 4000
     gemini_temperature: float = 0.1
     enable_json_response: bool = False
