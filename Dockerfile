@@ -40,7 +40,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Install Shobhika (Devanagari serif used in Indian legal documents).
 # Not packaged in apt, so fetch the upstream release directly.
 RUN curl -fsSL -o /tmp/shobhika.zip \
-        https://github.com/Sandhi-IITBombay/Shobhika/releases/download/v1.04/Shobhika-v1.04.zip \
+        https://github.com/Sandhi-IITBombay/Shobhika/releases/download/v1.05/Shobhika-1.05.zip \
     && mkdir -p /usr/share/fonts/truetype/shobhika \
     && unzip -j /tmp/shobhika.zip -d /usr/share/fonts/truetype/shobhika/ "*.otf" "*.ttf" \
     && rm /tmp/shobhika.zip \
