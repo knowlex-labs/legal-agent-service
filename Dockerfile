@@ -42,7 +42,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 RUN curl -fsSL -o /tmp/shobhika.zip \
         https://github.com/Sandhi-IITBombay/Shobhika/releases/download/v1.05/Shobhika-1.05.zip \
     && mkdir -p /usr/share/fonts/truetype/shobhika \
-    && unzip -j /tmp/shobhika.zip -d /usr/share/fonts/truetype/shobhika/ "*.otf" "*.ttf" \
+    && unzip -j /tmp/shobhika.zip -d /usr/share/fonts/truetype/shobhika/ "*.otf" \
     && rm /tmp/shobhika.zip \
     && fc-cache -f -v
 
