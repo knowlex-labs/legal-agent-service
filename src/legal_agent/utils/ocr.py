@@ -21,6 +21,7 @@ Entry points:
 import base64
 import hashlib
 import logging
+import re
 import tempfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -235,39 +236,97 @@ def ocr_image(
     return text
 
 
+# Top-level bullet glyphs Sarvam (and other OCR engines) commonly emit instead
+# of standard markdown `-`. All map to `- `.
+_TOP_BULLETS = ("• ", "● ", "◦ ", "▪ ", "▫ ", "‣ ", "⦁ ", "· ", "• ", "·  ")
+# Sub-bullet glyphs → indented `- ` so the parser nests them.
+_SUB_BULLETS = ("– ", "— ", "‒ ", "⁃ ", "○ ")
+
+# LaTeX math-mode bullet macros Sarvam emits when the source PDF was compiled
+# from LaTeX (resumes / academic CVs). Each maps to a top-level `- ` marker.
+_LATEX_BULLET_RE = re.compile(
+    r"^(\s*)\$\\(circ|bullet|diamond|square|star|cdot|ast|triangleleft|triangleright)\$\s*",
+    re.MULTILINE,
+)
+# `\text{X}` is LaTeX's text-in-math wrapper. Unwrap to bare X.
+_LATEX_TEXT_RE = re.compile(r"\\text\{([^}]*)\}")
+# `$ ... $` math delimiters that survived. Strip the dollar signs and keep
+# the inner content. We strip them all (not just those with backslash
+# commands) because Sarvam wraps numeric expressions like `$40K+$` too;
+# legitimate dollar amounts in legal docs are normally written "Rs. 40,000"
+# or "$40,000" without a closing `$` so collisions are rare.
+_LATEX_DOLLAR_RE = re.compile(r"\$([^$\n]*)\$")
+# Drop any orphan `\macro` artefacts left behind.
+_LATEX_BARE_MACRO_RE = re.compile(r"\\([a-zA-Z]+)(?![a-zA-Z])")
+
+
+def _strip_latex_artifacts(text: str) -> str:
+    """Convert Sarvam's LaTeX residue to plain markdown.
+
+    Order matters: line-start `$\\circ$` etc must be converted to `- ` BEFORE
+    we unwrap `$...$`, otherwise they'd just become `\\circ` strays.
+    """
+    text = _LATEX_BULLET_RE.sub(r"\1- ", text)
+    text = _LATEX_TEXT_RE.sub(r"\1", text)
+    text = _LATEX_DOLLAR_RE.sub(r"\1", text)
+    text = _LATEX_BARE_MACRO_RE.sub("", text)
+    return text
+
+
+def _normalize_ocr_markdown(md_text: str) -> str:
+    """Convert OCR-emitted Unicode bullet glyphs and LaTeX residue to standard
+    markdown markers.
+
+    Without this, `markdown.markdown` treats lines like `• Foo` and
+    `$\\circ$ Foo` as plain paragraphs because they don't match the list-marker
+    grammar. Same for `–` / `—` sub-bullets. We also normalise leading
+    whitespace (NBSP, tabs) so indentation is detected consistently.
+    """
+    md_text = _strip_latex_artifacts(md_text)
+
+    out: list[str] = []
+    for raw in md_text.splitlines():
+        # Replace NBSP with regular space, tabs with two spaces, in leading whitespace.
+        line = raw.replace(" ", " ").replace("\t", "  ")
+        stripped = line.lstrip(" ")
+        leading = line[: len(line) - len(stripped)]
+
+        matched = False
+        for glyph in _TOP_BULLETS:
+            if stripped.startswith(glyph):
+                out.append(f"{leading}- {stripped[len(glyph):]}")
+                matched = True
+                break
+        if matched:
+            continue
+        for glyph in _SUB_BULLETS:
+            if stripped.startswith(glyph):
+                out.append(f"{leading}  - {stripped[len(glyph):]}")
+                matched = True
+                break
+        if matched:
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
 def _markdown_to_html(md_text: str) -> str:
-    """Render markdown to HTML for the in-place Tiptap editor.
+    """Render OCR-produced markdown to HTML for the in-place Tiptap editor.
 
-    Sarvam Document Intelligence emits two quirks the standard markdown parser
-    does not handle:
+    Sarvam (and other markdown-emitting OCR backends) commonly use Unicode
+    bullet glyphs and unusual whitespace that the stock `markdown` parser does
+    not recognise. We normalise via `_normalize_ocr_markdown` first.
 
-    1. Unicode glyphs (`•`, `–`, `—`) for bullets instead of markdown markers
-       (`-`/`*`). Without normalisation these render as plain paragraphs.
-    2. Hard newlines inside paragraphs that the `markdown` library would join,
-       but only when there's no blank line between them — handled fine by the
-       default joiner, so we deliberately do NOT enable `nl2br` (which would
-       break list-item detection).
-
-    We avoid `nl2br` even though it would help with single-newline preservation,
-    because it injects `<br>` tags between `- foo` and `- bar` and the parser
-    then refuses to merge them into a single `<ul>`.
+    We deliberately do NOT enable `nl2br` — it injects `<br>` between every
+    line of a list, which prevents the parser from merging consecutive `- `
+    items into a single `<ul>`.
     """
     import markdown
 
-    normalized: list[str] = []
-    for line in md_text.splitlines():
-        stripped = line.lstrip()
-        leading = line[: len(line) - len(stripped)]
-        if stripped.startswith("• "):
-            # Top-level bullet → standard `-` marker.
-            normalized.append(f"{leading}- {stripped[2:]}")
-        elif stripped.startswith("– ") or stripped.startswith("— "):
-            # Sub-bullets (en-/em-dash) → indented `-` so the parser nests them.
-            normalized.append(f"{leading}  - {stripped[2:]}")
-        else:
-            normalized.append(line)
-    md_clean = "\n".join(normalized)
-
+    md_clean = _normalize_ocr_markdown(md_text)
+    # Trim to first 400 chars for the log — enough to spot bullet/heading patterns
+    # without flooding logs on long documents.
+    logger.info("[ocr-md] sample after normalize: %r", md_clean[:400])
     return markdown.markdown(
         md_clean,
         extensions=["tables", "fenced_code"],
