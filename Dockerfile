@@ -23,13 +23,28 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr-ben \
     poppler-utils \
     fonts-noto \
+    fonts-noto-cjk \
     fonts-noto-extra \
+    fonts-noto-color-emoji \
+    fonts-liberation \
+    fonts-sahadeva \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
     libgdk-pixbuf-xlib-2.0-0 \
     libcairo2 \
     libffi-dev \
+    curl \
+    unzip \
     && rm -rf /var/lib/apt/lists/*
+
+# Install Shobhika (Devanagari serif used in Indian legal documents).
+# Not packaged in apt, so fetch the upstream release directly.
+RUN curl -fsSL -o /tmp/shobhika.zip \
+        https://github.com/Sandhi-IITBombay/Shobhika/releases/download/v1.05/Shobhika-1.05.zip \
+    && mkdir -p /usr/share/fonts/truetype/shobhika \
+    && unzip -j /tmp/shobhika.zip -d /usr/share/fonts/truetype/shobhika/ "*.otf" \
+    && rm /tmp/shobhika.zip \
+    && fc-cache -f -v
 
 RUN useradd --create-home --uid 1000 appuser
 
@@ -45,9 +60,15 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8080
 
-# Install Camoufox browser (Firefox-based anti-detect) and Playwright deps
-RUN /app/.venv/bin/python -m camoufox fetch && \
-    /app/.venv/bin/playwright install-deps
+# Install Camoufox browser (Firefox-based anti-detect) and Playwright deps.
+# Camoufox stores the browser under user_cache_dir (~/.cache/camoufox); pin it
+# to a shared path so the appuser can read what root fetched at build time.
+ENV CAMOUFOX_CACHE_DIR=/app/.cache/camoufox \
+    XDG_CACHE_HOME=/app/.cache
+RUN mkdir -p /app/.cache/camoufox && \
+    /app/.venv/bin/playwright install-deps && \
+    /app/.venv/bin/python -m camoufox fetch && \
+    chown -R appuser:appuser /app/.cache
 
 USER appuser
 
