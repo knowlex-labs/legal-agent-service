@@ -324,9 +324,9 @@ def _markdown_to_html(md_text: str) -> str:
     import markdown
 
     md_clean = _normalize_ocr_markdown(md_text)
-    # Trim to first 400 chars for the log — enough to spot bullet/heading patterns
-    # without flooding logs on long documents.
-    logger.info("[ocr-md] sample after normalize: %r", md_clean[:400])
+    # DEBUG only: legal documents contain PII (party names, case numbers,
+    # addresses), so the normalised content sample must not land in INFO logs.
+    logger.debug("[ocr-md] sample after normalize: %r", md_clean[:400])
     return markdown.markdown(
         md_clean,
         extensions=["tables", "fenced_code"],

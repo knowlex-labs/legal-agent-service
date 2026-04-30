@@ -283,6 +283,30 @@ def _pdf2docx_convert(in_path: str, out_path: str) -> None:
         cv.close()
 
 
+_MAX_CONVERT_BODY_BYTES = 50 * 1024 * 1024  # 50 MB
+
+
+async def _read_capped_body(request: Request, max_bytes: int) -> bytes:
+    """Read the request body with a hard size cap.
+
+    Reject early on Content-Length when the client declares the size, and
+    re-check after read in case the header was stripped or lied.
+    """
+    declared = request.headers.get("content-length")
+    if declared and declared.isdigit() and int(declared) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"body exceeds {max_bytes // (1024 * 1024)} MB limit",
+        )
+    body = await request.body()
+    if len(body) > max_bytes:
+        raise HTTPException(
+            status_code=413,
+            detail=f"body exceeds {max_bytes // (1024 * 1024)} MB limit",
+        )
+    return body
+
+
 @router.post("/documents/convert/pdf-to-docx")
 async def convert_pdf_to_docx(request: Request) -> Response:
     """Sync PDF→DOCX via pdf2docx.
@@ -294,7 +318,7 @@ async def convert_pdf_to_docx(request: Request) -> Response:
     input (Microsoft Print-to-PDF, certain scans, etc.). pdf2docx is CPU-bound and
     sync, so we run it in a thread to avoid blocking the event loop.
     """
-    pdf_bytes = await request.body()
+    pdf_bytes = await _read_capped_body(request, _MAX_CONVERT_BODY_BYTES)
     if not pdf_bytes:
         raise HTTPException(status_code=400, detail="empty body")
 
@@ -306,8 +330,8 @@ async def convert_pdf_to_docx(request: Request) -> Response:
         try:
             await asyncio.to_thread(_pdf2docx_convert, str(in_path), str(out_path))
         except Exception as e:
-            logger.warning("pdf2docx conversion failed: %s", e)
-            raise HTTPException(status_code=422, detail=f"pdf2docx failed: {e}")
+            logger.warning("pdf2docx conversion failed: %s", e, exc_info=True)
+            raise HTTPException(status_code=422, detail="pdf-to-docx conversion failed")
 
         if not out_path.exists() or out_path.stat().st_size == 0:
             raise HTTPException(status_code=422, detail="pdf2docx produced no output")
@@ -348,7 +372,7 @@ async def convert_pdf_to_html(request: Request) -> Response:
     (Gemini 3.1 Flash primary; Mistral Pixtral as configurable fallback).
     DOCX goes through mammoth's native HTML converter.
     """
-    body = await request.body()
+    body = await _read_capped_body(request, _MAX_CONVERT_BODY_BYTES)
     if not body:
         raise HTTPException(status_code=400, detail="empty body")
 
@@ -368,8 +392,8 @@ async def convert_pdf_to_html(request: Request) -> Response:
     except HTTPException:
         raise
     except Exception as e:
-        logger.warning("html conversion failed (ctype=%s): %s", ctype, e)
-        raise HTTPException(status_code=422, detail=f"conversion failed: {e}")
+        logger.warning("html conversion failed (ctype=%s): %s", ctype, e, exc_info=True)
+        raise HTTPException(status_code=422, detail="document conversion failed")
 
     if not html or not html.strip():
         raise HTTPException(status_code=422, detail="conversion produced no content")
@@ -439,8 +463,8 @@ async def translate_text(payload: TranslateRequest) -> TranslateResponse:
             payload.target_language,
         )
     except Exception as e:
-        logger.warning("sarvam translate failed: %s", e)
-        raise HTTPException(status_code=502, detail=f"translation failed: {e}")
+        logger.warning("sarvam translate failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=502, detail="translation failed")
 
     return TranslateResponse(
         translated_text=translated,
