@@ -2,21 +2,26 @@
 
 Backends:
 - Gemini Vision — per-page image → LLM call. Good general accuracy, weaker on Indic scripts.
+- Mistral Pixtral — per-page image → LLM call. Acts as the Gemini fallback (free tier).
 - Sarvam Document Intelligence — async job API. 22 Indian languages + English. ≤10 pages/job
-  (long PDFs are chunked and processed concurrently).
+  (long PDFs are chunked and processed concurrently). Markdown only.
 
 Output formats:
 - "markdown": Structured (headings, bold, tables) — used for translation and drafting.
-- "plain": Flat transcription — used for RAG indexing.
+- "plain":    Flat transcription — used for RAG indexing.
+- "html":     Structured HTML (paragraphs, headings, lists, tables) — used by the
+              in-place document editor. Sarvam does not support HTML output.
 
 Entry points:
 - ocr_pdf(...) / ocr_image(...) — dispatch to the configured backend.
-- ocr_pdf_with_gemini / ocr_image_with_gemini — force Gemini (comparison scripts, fallback).
-- ocr_pdf_with_sarvam / ocr_image_with_sarvam — force Sarvam.
+- ocr_pdf_with_{gemini,mistral,sarvam} / ocr_image_with_{gemini,mistral,sarvam} —
+  force a specific backend (used by comparison scripts / explicit fallback wiring).
 """
 
+import base64
 import hashlib
 import logging
+import re
 import tempfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
@@ -29,8 +34,8 @@ from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
 
-OutputFormat = Literal["markdown", "plain"]
-Provider = Literal["gemini", "sarvam"]
+OutputFormat = Literal["markdown", "plain", "html"]
+Provider = Literal["gemini", "mistral", "sarvam"]
 
 # Module-level S3 client for the OCR cache. Lazily constructed — avoids paying
 # the boto3 init cost when caching is disabled or OCR is never called.
@@ -52,11 +57,15 @@ def _get_cache_s3_client():
     return _s3_client_singleton
 
 
+_FORMAT_EXT = {"markdown": "md", "plain": "txt", "html": "html"}
+
+
 def _cache_key(content_bytes: bytes, provider: str, output_format: str) -> tuple[str, str]:
     """Return (sha256_hex, full_s3_key) for a given input + config."""
     sha = hashlib.sha256(content_bytes).hexdigest()
     settings = get_settings()
-    key = f"{settings.ocr_cache_prefix}/{provider}/{output_format}/{sha}.md"
+    ext = _FORMAT_EXT.get(output_format, "md")
+    key = f"{settings.ocr_cache_prefix}/{provider}/{output_format}/{sha}.{ext}"
     return sha, key
 
 
@@ -110,6 +119,45 @@ _PROMPT_PLAIN = (
     "numbers, handwritten notes, and footers. Preserve structure and formatting."
 )
 
+_PROMPT_HTML = (
+    "You are a legal document layout expert. Output clean, semantic HTML that "
+    "preserves the visible structure of this page. Rules:\n"
+    "- Use <h1>/<h2>/<h3> for headings (use visual hierarchy and font weight)\n"
+    "- Use <p> for body paragraphs (one <p> per visual paragraph)\n"
+    "- Use <ol>/<ul> with <li> for numbered/bulleted lists\n"
+    "- Use <table>/<thead>/<tbody>/<tr>/<th>/<td> for tables\n"
+    "- Use <strong> and <em> for bold and italic text\n"
+    "- Use <br> only for hard line breaks inside a paragraph (e.g. addresses, signature blocks)\n"
+    "- Preserve Hindi, Devanagari, and other Indic scripts exactly — do not translate or romanise\n"
+    "- Preserve clause numbers, dates, case citations, statute references verbatim\n"
+    "- Describe stamps and seals inline as <em>[STAMP: ...]</em> or <em>[SEAL: ...]</em>\n"
+    "- Include handwritten notes in <em>[HANDWRITTEN: ...]</em>\n"
+    "- Do NOT add or omit content. Only add structural tags around the existing text.\n"
+    "- Do NOT include <html>, <head>, <body>, or <!DOCTYPE>. Output a fragment only.\n"
+    "- Do NOT wrap output in markdown code fences. No commentary, no preamble."
+)
+
+
+def _select_prompt(output_format: OutputFormat) -> str:
+    if output_format == "html":
+        return _PROMPT_HTML
+    if output_format == "plain":
+        return _PROMPT_PLAIN
+    return _PROMPT_MARKDOWN
+
+
+def _strip_code_fence(text: str) -> str:
+    """LLMs sometimes wrap output in ```html ... ``` despite the prompt; strip it."""
+    s = text.strip()
+    if s.startswith("```"):
+        first_newline = s.find("\n")
+        if first_newline != -1:
+            s = s[first_newline + 1 :]
+        if s.endswith("```"):
+            s = s[: -3]
+    return s.strip()
+
+
 _SARVAM_MAX_PAGES_PER_JOB = 10  # API limit
 
 
@@ -142,7 +190,15 @@ def ocr_pdf(
         return cached
 
     if backend == "sarvam":
-        text = ocr_pdf_with_sarvam(pdf_data, output_format)
+        if output_format == "html":
+            # Sarvam Document Intelligence emits markdown only; render that to
+            # HTML so the Tiptap editor can ingest tables/lists/headings.
+            md = ocr_pdf_with_sarvam(pdf_data, "markdown")
+            text = _markdown_to_html(md)
+        else:
+            text = ocr_pdf_with_sarvam(pdf_data, output_format)
+    elif backend == "mistral":
+        text = ocr_pdf_with_mistral(pdf_data, output_format)
     else:
         text = ocr_pdf_with_gemini(pdf_data, output_format)
 
@@ -166,12 +222,115 @@ def ocr_image(
         return cached
 
     if backend == "sarvam":
-        text = ocr_image_with_sarvam(image_bytes, mime_type, output_format)
+        if output_format == "html":
+            md = ocr_image_with_sarvam(image_bytes, mime_type, "markdown")
+            text = _markdown_to_html(md)
+        else:
+            text = ocr_image_with_sarvam(image_bytes, mime_type, output_format)
+    elif backend == "mistral":
+        text = ocr_image_with_mistral(image_bytes, mime_type, output_format)
     else:
         text = ocr_image_with_gemini(image_bytes, mime_type, output_format)
 
     _cache_store(key, sha_short, text)
     return text
+
+
+# Top-level bullet glyphs Sarvam (and other OCR engines) commonly emit instead
+# of standard markdown `-`. All map to `- `.
+_TOP_BULLETS = ("• ", "● ", "◦ ", "▪ ", "▫ ", "‣ ", "⦁ ", "· ", "• ", "·  ")
+# Sub-bullet glyphs → indented `- ` so the parser nests them.
+_SUB_BULLETS = ("– ", "— ", "‒ ", "⁃ ", "○ ")
+
+# LaTeX math-mode bullet macros Sarvam emits when the source PDF was compiled
+# from LaTeX (resumes / academic CVs). Each maps to a top-level `- ` marker.
+_LATEX_BULLET_RE = re.compile(
+    r"^(\s*)\$\\(circ|bullet|diamond|square|star|cdot|ast|triangleleft|triangleright)\$\s*",
+    re.MULTILINE,
+)
+# `\text{X}` is LaTeX's text-in-math wrapper. Unwrap to bare X.
+_LATEX_TEXT_RE = re.compile(r"\\text\{([^}]*)\}")
+# `$ ... $` math delimiters that survived. Strip the dollar signs and keep
+# the inner content. We strip them all (not just those with backslash
+# commands) because Sarvam wraps numeric expressions like `$40K+$` too;
+# legitimate dollar amounts in legal docs are normally written "Rs. 40,000"
+# or "$40,000" without a closing `$` so collisions are rare.
+_LATEX_DOLLAR_RE = re.compile(r"\$([^$\n]*)\$")
+# Drop any orphan `\macro` artefacts left behind.
+_LATEX_BARE_MACRO_RE = re.compile(r"\\([a-zA-Z]+)(?![a-zA-Z])")
+
+
+def _strip_latex_artifacts(text: str) -> str:
+    """Convert Sarvam's LaTeX residue to plain markdown.
+
+    Order matters: line-start `$\\circ$` etc must be converted to `- ` BEFORE
+    we unwrap `$...$`, otherwise they'd just become `\\circ` strays.
+    """
+    text = _LATEX_BULLET_RE.sub(r"\1- ", text)
+    text = _LATEX_TEXT_RE.sub(r"\1", text)
+    text = _LATEX_DOLLAR_RE.sub(r"\1", text)
+    text = _LATEX_BARE_MACRO_RE.sub("", text)
+    return text
+
+
+def _normalize_ocr_markdown(md_text: str) -> str:
+    """Convert OCR-emitted Unicode bullet glyphs and LaTeX residue to standard
+    markdown markers.
+
+    Without this, `markdown.markdown` treats lines like `• Foo` and
+    `$\\circ$ Foo` as plain paragraphs because they don't match the list-marker
+    grammar. Same for `–` / `—` sub-bullets. We also normalise leading
+    whitespace (NBSP, tabs) so indentation is detected consistently.
+    """
+    md_text = _strip_latex_artifacts(md_text)
+
+    out: list[str] = []
+    for raw in md_text.splitlines():
+        # Replace NBSP with regular space, tabs with two spaces, in leading whitespace.
+        line = raw.replace(" ", " ").replace("\t", "  ")
+        stripped = line.lstrip(" ")
+        leading = line[: len(line) - len(stripped)]
+
+        matched = False
+        for glyph in _TOP_BULLETS:
+            if stripped.startswith(glyph):
+                out.append(f"{leading}- {stripped[len(glyph):]}")
+                matched = True
+                break
+        if matched:
+            continue
+        for glyph in _SUB_BULLETS:
+            if stripped.startswith(glyph):
+                out.append(f"{leading}  - {stripped[len(glyph):]}")
+                matched = True
+                break
+        if matched:
+            continue
+        out.append(line)
+    return "\n".join(out)
+
+
+def _markdown_to_html(md_text: str) -> str:
+    """Render OCR-produced markdown to HTML for the in-place Tiptap editor.
+
+    Sarvam (and other markdown-emitting OCR backends) commonly use Unicode
+    bullet glyphs and unusual whitespace that the stock `markdown` parser does
+    not recognise. We normalise via `_normalize_ocr_markdown` first.
+
+    We deliberately do NOT enable `nl2br` — it injects `<br>` between every
+    line of a list, which prevents the parser from merging consecutive `- `
+    items into a single `<ul>`.
+    """
+    import markdown
+
+    md_clean = _normalize_ocr_markdown(md_text)
+    # DEBUG only: legal documents contain PII (party names, case numbers,
+    # addresses), so the normalised content sample must not land in INFO logs.
+    logger.debug("[ocr-md] sample after normalize: %r", md_clean[:400])
+    return markdown.markdown(
+        md_clean,
+        extensions=["tables", "fenced_code"],
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -193,7 +352,7 @@ def ocr_pdf_with_gemini(
 
     settings = get_settings()
     client = genai.Client(api_key=settings.gemini_api_key or "")
-    prompt = _PROMPT_MARKDOWN if output_format == "markdown" else _PROMPT_PLAIN
+    prompt = _select_prompt(output_format)
 
     doc = fitz.open(stream=pdf_data, filetype="pdf")
     total = doc.page_count
@@ -225,13 +384,15 @@ def ocr_pdf_with_gemini(
             raise RuntimeError(
                 f"Gemini OCR failed on page {idx + 1}/{total}: {type(exc).__name__}: {exc}"
             ) from exc
-        page_text = (response.text or "").strip()
+        page_text = _strip_code_fence(response.text or "")
         if not page_text:
             raise RuntimeError(
                 f"Gemini OCR returned empty text for page {idx + 1}/{total}. "
                 "Possible causes: content filter, blank page rendered as empty, "
                 "or max_output_tokens truncation."
             )
+        if output_format == "html":
+            page_text = f'<section data-page="{idx + 1}">\n{page_text}\n</section>'
         logger.info(
             f"[gemini-ocr] Page {idx + 1}/{total}: {len(page_text)} chars extracted"
         )
@@ -243,13 +404,11 @@ def ocr_pdf_with_gemini(
     )
     results: list[str] = [""] * total
     with ThreadPoolExecutor(max_workers=settings.gemini_ocr_concurrency) as pool:
-        # pool.map re-raises exceptions as the iterator advances; wrapping
-        # the worker with a page-indexed RuntimeError above guarantees the
-        # lawyer-facing error names the exact page that broke.
         for idx, text in pool.map(_ocr_page, enumerate(page_images)):
             results[idx] = text
 
-    return "\n\n".join(results)
+    separator = "\n" if output_format == "html" else "\n\n"
+    return separator.join(results)
 
 
 def ocr_image_with_gemini(
@@ -263,7 +422,7 @@ def ocr_image_with_gemini(
 
     settings = get_settings()
     client = genai.Client(api_key=settings.gemini_api_key or "")
-    prompt = _PROMPT_MARKDOWN if output_format == "markdown" else _PROMPT_PLAIN
+    prompt = _select_prompt(output_format)
 
     response = client.models.generate_content(
         model=settings.gemini_model,
@@ -276,7 +435,123 @@ def ocr_image_with_gemini(
             max_output_tokens=settings.gemini_max_tokens,
         ),
     )
-    return response.text.strip()
+    return _strip_code_fence(response.text or "")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Mistral backend (Pixtral; secondary path / Gemini fallback)
+# ──────────────────────────────────────────────────────────────────────────
+
+def ocr_pdf_with_mistral(
+    pdf_data: bytes,
+    output_format: OutputFormat = "markdown",
+) -> str:
+    """OCR a PDF using Mistral Pixtral.
+
+    Mirrors `ocr_pdf_with_gemini`: rasterise each page (PyMuPDF), send images
+    concurrently to Mistral, reassemble in original page order.
+    """
+    from mistralai.client import Mistral
+
+    settings = get_settings()
+    if not settings.mistral_api_key:
+        raise RuntimeError(
+            "MISTRAL_API_KEY is not configured but ocr_provider='mistral'. "
+            "Set MISTRAL_API_KEY in .env or switch OCR_PROVIDER=gemini."
+        )
+
+    client = Mistral(api_key=settings.mistral_api_key)
+    prompt = _select_prompt(output_format)
+
+    doc = fitz.open(stream=pdf_data, filetype="pdf")
+    total = doc.page_count
+    page_images: list[bytes] = []
+    for page_num in range(total):
+        pixmap = doc[page_num].get_pixmap(matrix=fitz.Matrix(2, 2))
+        page_images.append(pixmap.tobytes("png"))
+    doc.close()
+
+    def _ocr_page(idx_and_image: tuple[int, bytes]) -> tuple[int, str]:
+        idx, image_bytes = idx_and_image
+        b64 = base64.b64encode(image_bytes).decode("ascii")
+        try:
+            response = client.chat.complete(
+                model=settings.mistral_vision_model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": prompt},
+                            {
+                                "type": "image_url",
+                                "image_url": f"data:image/png;base64,{b64}",
+                            },
+                        ],
+                    }
+                ],
+                temperature=0.1,
+            )
+        except Exception as exc:
+            raise RuntimeError(
+                f"Mistral OCR failed on page {idx + 1}/{total}: {type(exc).__name__}: {exc}"
+            ) from exc
+        page_text = _strip_code_fence(response.choices[0].message.content or "")
+        if not page_text:
+            raise RuntimeError(
+                f"Mistral OCR returned empty text for page {idx + 1}/{total}."
+            )
+        if output_format == "html":
+            page_text = f'<section data-page="{idx + 1}">\n{page_text}\n</section>'
+        logger.info(
+            f"[mistral-ocr] Page {idx + 1}/{total}: {len(page_text)} chars extracted"
+        )
+        return idx, page_text
+
+    logger.info(
+        f"[mistral-ocr] Processing {total} pages with concurrency="
+        f"{settings.mistral_ocr_concurrency}"
+    )
+    results: list[str] = [""] * total
+    with ThreadPoolExecutor(max_workers=settings.mistral_ocr_concurrency) as pool:
+        for idx, text in pool.map(_ocr_page, enumerate(page_images)):
+            results[idx] = text
+
+    separator = "\n" if output_format == "html" else "\n\n"
+    return separator.join(results)
+
+
+def ocr_image_with_mistral(
+    image_bytes: bytes,
+    mime_type: str = "image/png",
+    output_format: OutputFormat = "markdown",
+) -> str:
+    """OCR a single image using Mistral Pixtral."""
+    from mistralai.client import Mistral
+
+    settings = get_settings()
+    if not settings.mistral_api_key:
+        raise RuntimeError(
+            "MISTRAL_API_KEY is not configured but ocr_provider='mistral'."
+        )
+
+    client = Mistral(api_key=settings.mistral_api_key)
+    prompt = _select_prompt(output_format)
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+
+    response = client.chat.complete(
+        model=settings.mistral_vision_model,
+        messages=[
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": f"data:{mime_type};base64,{b64}"},
+                ],
+            }
+        ],
+        temperature=0.1,
+    )
+    return _strip_code_fence(response.choices[0].message.content or "")
 
 
 # ──────────────────────────────────────────────────────────────────────────

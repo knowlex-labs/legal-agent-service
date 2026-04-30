@@ -79,11 +79,16 @@ class EmbeddingClient:
             return all_embeddings
 
         elif provider == "openai":
-            response = EmbeddingClient._client.embeddings.create(
-                input=texts,
-                model=EmbeddingClient._model_name
-            )
-            return [data.embedding for data in response.data]
+            BATCH_SIZE = 20  # ada-002 limit is 8192 tokens; Hindi text is token-heavy
+            all_embeddings = []
+            for i in range(0, len(texts), BATCH_SIZE):
+                batch = texts[i:i + BATCH_SIZE]
+                response = EmbeddingClient._client.embeddings.create(
+                    input=batch,
+                    model=EmbeddingClient._model_name
+                )
+                all_embeddings.extend([data.embedding for data in response.data])
+            return all_embeddings
 
         else:
             return EmbeddingClient._client.encode(texts).tolist()
