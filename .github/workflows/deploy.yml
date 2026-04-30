@@ -53,6 +53,13 @@ jobs:
 
             echo ">>> Restarting container"
             docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+
+            OTHERS=$(docker ps -q --filter "publish=$HOST_PORT")
+            if [ -n "$OTHERS" ]; then
+              echo ">>> Removing other containers on port $HOST_PORT: $OTHERS"
+              docker rm -f $OTHERS || true
+            fi
+
             docker run -d \
               --name "$CONTAINER_NAME" \
               --restart unless-stopped \
