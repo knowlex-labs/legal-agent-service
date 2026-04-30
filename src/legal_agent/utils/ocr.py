@@ -190,11 +190,12 @@ def ocr_pdf(
 
     if backend == "sarvam":
         if output_format == "html":
-            raise RuntimeError(
-                "Sarvam does not support HTML output. Use provider='gemini' or 'mistral' "
-                "for HTML, or output_format='markdown' with Sarvam."
-            )
-        text = ocr_pdf_with_sarvam(pdf_data, output_format)
+            # Sarvam Document Intelligence emits markdown only; render that to
+            # HTML so the Tiptap editor can ingest tables/lists/headings.
+            md = ocr_pdf_with_sarvam(pdf_data, "markdown")
+            text = _markdown_to_html(md)
+        else:
+            text = ocr_pdf_with_sarvam(pdf_data, output_format)
     elif backend == "mistral":
         text = ocr_pdf_with_mistral(pdf_data, output_format)
     else:
@@ -221,10 +222,10 @@ def ocr_image(
 
     if backend == "sarvam":
         if output_format == "html":
-            raise RuntimeError(
-                "Sarvam does not support HTML output. Use provider='gemini' or 'mistral'."
-            )
-        text = ocr_image_with_sarvam(image_bytes, mime_type, output_format)
+            md = ocr_image_with_sarvam(image_bytes, mime_type, "markdown")
+            text = _markdown_to_html(md)
+        else:
+            text = ocr_image_with_sarvam(image_bytes, mime_type, output_format)
     elif backend == "mistral":
         text = ocr_image_with_mistral(image_bytes, mime_type, output_format)
     else:
@@ -232,6 +233,45 @@ def ocr_image(
 
     _cache_store(key, sha_short, text)
     return text
+
+
+def _markdown_to_html(md_text: str) -> str:
+    """Render markdown to HTML for the in-place Tiptap editor.
+
+    Sarvam Document Intelligence emits two quirks the standard markdown parser
+    does not handle:
+
+    1. Unicode glyphs (`•`, `–`, `—`) for bullets instead of markdown markers
+       (`-`/`*`). Without normalisation these render as plain paragraphs.
+    2. Hard newlines inside paragraphs that the `markdown` library would join,
+       but only when there's no blank line between them — handled fine by the
+       default joiner, so we deliberately do NOT enable `nl2br` (which would
+       break list-item detection).
+
+    We avoid `nl2br` even though it would help with single-newline preservation,
+    because it injects `<br>` tags between `- foo` and `- bar` and the parser
+    then refuses to merge them into a single `<ul>`.
+    """
+    import markdown
+
+    normalized: list[str] = []
+    for line in md_text.splitlines():
+        stripped = line.lstrip()
+        leading = line[: len(line) - len(stripped)]
+        if stripped.startswith("• "):
+            # Top-level bullet → standard `-` marker.
+            normalized.append(f"{leading}- {stripped[2:]}")
+        elif stripped.startswith("– ") or stripped.startswith("— "):
+            # Sub-bullets (en-/em-dash) → indented `-` so the parser nests them.
+            normalized.append(f"{leading}  - {stripped[2:]}")
+        else:
+            normalized.append(line)
+    md_clean = "\n".join(normalized)
+
+    return markdown.markdown(
+        md_clean,
+        extensions=["tables", "fenced_code"],
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────
@@ -352,7 +392,7 @@ def ocr_pdf_with_mistral(
     Mirrors `ocr_pdf_with_gemini`: rasterise each page (PyMuPDF), send images
     concurrently to Mistral, reassemble in original page order.
     """
-    from mistralai import Mistral
+    from mistralai.client import Mistral
 
     settings = get_settings()
     if not settings.mistral_api_key:
@@ -427,7 +467,7 @@ def ocr_image_with_mistral(
     output_format: OutputFormat = "markdown",
 ) -> str:
     """OCR a single image using Mistral Pixtral."""
-    from mistralai import Mistral
+    from mistralai.client import Mistral
 
     settings = get_settings()
     if not settings.mistral_api_key:

@@ -40,8 +40,10 @@ class Settings(BaseSettings):
     # Mistral vision-capable model. Pixtral 12B is general-purpose; Pixtral Large
     # is higher accuracy. Both work as drop-in.
     mistral_vision_model: str = "pixtral-12b-2409"
-    # Language hint passed to Sarvam. Examples: "en-IN", "hi-IN", "ta-IN", "unknown".
-    sarvam_ocr_language: str = "unknown"
+    # Language hint passed to Sarvam (BCP-47, must match Sarvam's accepted list).
+    # Sarvam's API rejects "unknown" — pick the document's primary script.
+    # Common: en-IN, hi-IN, mr-IN, ta-IN, te-IN, bn-IN, gu-IN.
+    sarvam_ocr_language: str = "en-IN"
     # Sarvam chat/translation model. Options: sarvam-m (24B, default), sarvam-30b, sarvam-105b.
     # Used when a request selects provider "sarvam" for translation or draft chat.
     sarvam_chat_model: str = "sarvam-m"
