@@ -346,10 +346,14 @@ async def convert_pdf_to_docx(request: Request) -> Response:
 
 
 def _mammoth_to_html(body: bytes) -> str:
-    import mammoth
+    import re
     from io import BytesIO
-    # Strip embedded image src so the output stays text-only — v1 does not host images.
-    # mammoth still emits the alt text / placeholder, so structure is preserved.
+
+    import mammoth
+
+    # v1 is text-only. The no-op image converter avoids reading image bytes
+    # (mammoth's default data_uri converter inlines them as base64, bloating
+    # the response); we then strip the resulting empty <img> tags.
     convert_image = mammoth.images.inline(lambda _image: {"src": ""})
     result = mammoth.convert_to_html(BytesIO(body), convert_image=convert_image)
     if result.messages:
@@ -357,10 +361,10 @@ def _mammoth_to_html(body: bytes) -> str:
             "mammoth extraction notes: %s",
             [m.message for m in result.messages[:5]],
         )
-    return result.value
+    return re.sub(r"<img\b[^>]*/?>", "", result.value)
 
 
-@router.post("/convert/pdf-to-html")
+@router.post("/documents/convert/pdf-to-html")
 async def convert_pdf_to_html(request: Request) -> Response:
     """Convert a document to clean structured HTML for in-place editing.
 
@@ -379,10 +383,10 @@ async def convert_pdf_to_html(request: Request) -> Response:
     ctype = (request.headers.get("content-type") or "").lower()
 
     try:
-        if "pdf" in ctype:
+        if ctype.startswith("application/pdf"):
             from legal_agent.utils.ocr import ocr_pdf
             html = await asyncio.to_thread(ocr_pdf, body, "html")
-        elif "wordprocessingml" in ctype or "msword" in ctype:
+        elif "wordprocessingml" in ctype:
             html = await asyncio.to_thread(_mammoth_to_html, body)
         else:
             raise HTTPException(
