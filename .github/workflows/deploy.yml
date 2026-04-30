@@ -32,6 +32,15 @@ jobs:
             CONTAINER_NAME="legal-agent-service"
             HOST_PORT="${{ secrets.LEGAL_AGENT_PORT || '8001' }}"
 
+            if [ -z "$APP_DIR" ]; then
+              echo "ERROR: secret LEGAL_AGENT_DIR is not set in GitHub Actions"
+              exit 1
+            fi
+            if [ ! -d "$APP_DIR" ]; then
+              echo "ERROR: APP_DIR=$APP_DIR does not exist on EC2"
+              exit 1
+            fi
+
             cd "$APP_DIR"
 
             echo ">>> Fetching latest production"
