@@ -29,8 +29,9 @@ jobs:
 
             APP_DIR="${{ secrets.LEGAL_AGENT_DIR }}"
             IMAGE_NAME="legal-agent-service"
-            CONTAINER_NAME="legal-agent-service"
+            CONTAINER_NAME="legal-agent"
             HOST_PORT="${{ secrets.LEGAL_AGENT_PORT || '8001' }}"
+            NETWORK_NAME="knowlex-net"
 
             if [ -z "$APP_DIR" ]; then
               echo "ERROR: secret LEGAL_AGENT_DIR is not set in GitHub Actions"
@@ -48,11 +49,19 @@ jobs:
             git checkout production
             git reset --hard origin/production
 
+            echo ">>> Pre-build disk cleanup"
+            df -h /
+            docker builder prune -af --filter "until=72h" || true
+            docker image prune -af --filter "until=72h" || true
+
             echo ">>> Building image"
             docker build -t "$IMAGE_NAME:latest" .
 
+            echo ">>> Ensuring docker network exists"
+            docker network create "$NETWORK_NAME" 2>/dev/null || true
+
             echo ">>> Restarting container"
-            docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
+            docker rm -f "$CONTAINER_NAME" legal-agent-service 2>/dev/null || true
 
             OTHERS=$(docker ps -q --filter "publish=$HOST_PORT")
             if [ -n "$OTHERS" ]; then
@@ -62,6 +71,7 @@ jobs:
 
             docker run -d \
               --name "$CONTAINER_NAME" \
+              --network "$NETWORK_NAME" \
               --restart unless-stopped \
               --env-file "$APP_DIR/.env" \
               -p "$HOST_PORT:8001" \
