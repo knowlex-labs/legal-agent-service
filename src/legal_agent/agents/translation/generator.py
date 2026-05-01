@@ -188,7 +188,21 @@ TASK: Translate the provided legal document into {target_language.value} ({targe
 - Court names, statute titles, case citations — keep EXACTLY as-is in English
 - Official designations: "Additional Sessions Judge", "District Magistrate", etc.
 - Numbers, dates (DD/MM/YYYY), monetary amounts (Rs. X,XX,XXX/-)
+- Time references: 10:30 AM, 14:00 hrs, 9:00 a.m., etc.
 - Statute references on first occurrence: "Section 438 of CrPC, 1973 (धारा 438, दं.प्र.सं., 1973)"
+- Email addresses: advocate@lawfirm.com, court@nic.in, etc.
+- URLs and website addresses: https://districts.ecourts.gov.in, www.sci.gov.in, etc.
+- Phone and fax numbers: +91-11-23456789, 011-23456789, Fax: 011-XXXXXXXX
+- Personal names: parties, witnesses, advocates, judges — keep EXACTLY as written
+- Company and firm names: M/s ABC Pvt. Ltd., XYZ Industries, LLP names, etc.
+- Case numbers and filing numbers: W.P. (C) No. 1234/2024, Crl. A. No. 56/2023, Diary No. 45678/2024
+- Document reference numbers: F.No. 12/34/2024-Judl., Office Order No., Circular No., etc.
+- ID numbers: PAN, Aadhaar, CIN, GSTIN, passport number, driving licence number, etc.
+- Bank details: account numbers, IFSC codes, MICR codes
+- PIN codes and police station codes: 110001, PS: Connaught Place, P.S. Saket, etc.
+- Annexure and exhibit labels: Annexure A, Exhibit P-1, Schedule I, Appendix II, etc.
+- Signature markers: Sd/-, (Seal), (Thumb Impression), (L.T.I.), etc.
+- Full postal addresses — preserve exactly including street names, landmarks, district, state
 
 ═══ FORMATTING ═══
 
