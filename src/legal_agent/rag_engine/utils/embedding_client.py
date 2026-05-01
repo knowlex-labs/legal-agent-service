@@ -79,7 +79,7 @@ class EmbeddingClient:
             return all_embeddings
 
         elif provider == "openai":
-            BATCH_SIZE = 20  # ada-002 limit is 8192 tokens; Hindi text is token-heavy
+            BATCH_SIZE = 20  # text-embedding-3-* accepts ≤8192 tokens per input; batch of 20 fits Tier 1 TPM headroom even for Indic text
             all_embeddings = []
             for i in range(0, len(texts), BATCH_SIZE):
                 batch = texts[i:i + BATCH_SIZE]
