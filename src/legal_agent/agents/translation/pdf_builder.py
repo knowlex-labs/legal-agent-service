@@ -14,10 +14,10 @@ logger = logging.getLogger(__name__)
 def markdown_to_pdf(md_text: str, target_language: str | None = None) -> bytes:
     """Convert markdown text to PDF bytes.
 
-    Uses WeasyPrint for proper Indic script rendering. Falls back to fpdf2
-    only when WeasyPrint is unavailable AND the target is English — fpdf2's
-    Indic script support is unreliable. For Indic targets with no WeasyPrint,
-    we raise rather than silently produce tofu boxes.
+    Renderer priority:
+    1. WeasyPrint  — best Indic shaping via Pango/HarfBuzz; requires GTK libs (Linux/Docker).
+    2. Playwright  — headless Chromium; works on Windows/Mac/Linux; excellent Indic/RTL support.
+    3. fpdf2       — last resort, Latin/English only (raises for Indic targets).
 
     Args:
         md_text: Markdown-formatted translated document.
@@ -26,21 +26,31 @@ def markdown_to_pdf(md_text: str, target_language: str | None = None) -> bytes:
     Returns:
         PDF file as bytes.
     """
+    weasy_exc: Exception | None = None
     try:
         return _markdown_to_pdf_weasyprint(md_text, target_language)
     except Exception as exc:
+        weasy_exc = exc
+        logger.warning(f"WeasyPrint failed ({exc}), trying Playwright fallback")
+
+    try:
+        return _markdown_to_pdf_playwright(md_text, target_language)
+    except Exception as playwright_exc:
         if _is_non_latin_target(target_language):
             logger.error(
-                f"WeasyPrint failed and target '{target_language}' requires Indic/RTL "
-                f"fonts. Refusing to fall back to fpdf2 (produces tofu boxes). Error: {exc}"
+                f"Both WeasyPrint and Playwright failed for '{target_language}'. "
+                f"WeasyPrint: {weasy_exc}. Playwright: {playwright_exc}"
             )
             raise RuntimeError(
-                f"PDF rendering failed for {target_language}: WeasyPrint error: {exc}. "
-                "fpdf2 fallback is not safe for Indic/RTL scripts. "
-                "Install WeasyPrint and its dependencies (Pango, HarfBuzz, Noto fonts)."
-            ) from exc
-        logger.warning(f"WeasyPrint rendering failed ({exc}), falling back to fpdf2")
-        return _markdown_to_pdf_fpdf2(md_text, target_language)
+                f"PDF rendering failed for {target_language}. "
+                f"WeasyPrint: {weasy_exc}. "
+                f"Playwright: {playwright_exc}. "
+                "For Indic/RTL scripts, ensure one of: (a) WeasyPrint GTK libs installed "
+                "(Linux/Docker), or (b) Playwright Chromium installed: `playwright install chromium`."
+            ) from playwright_exc
+        logger.warning(f"Playwright failed ({playwright_exc}), falling back to fpdf2")
+
+    return _markdown_to_pdf_fpdf2(md_text, target_language)
 
 
 # Languages whose scripts CANNOT be rendered by fpdf2 + Helvetica fallback.
@@ -70,6 +80,50 @@ def _markdown_to_pdf_weasyprint(md_text: str, target_language: str | None = None
     html_str = markdown_to_html(md_text, target_language)
     pdf_bytes = weasyprint.HTML(string=html_str).write_pdf()
     logger.info(f"Generated PDF via WeasyPrint ({len(pdf_bytes)} bytes)")
+    return pdf_bytes
+
+
+def _markdown_to_pdf_playwright(md_text: str, target_language: str | None = None) -> bytes:
+    """Render markdown to PDF via headless Chromium (Playwright).
+
+    Fallback for environments where WeasyPrint's GTK/Pango libs are unavailable
+    (e.g. Windows local dev). Chromium handles Indic scripts and RTL natively.
+    Requires: playwright install chromium
+
+    Uses the async API with an explicit ProactorEventLoop because:
+    - This runs inside asyncio.to_thread (clean thread, no running loop)
+    - Playwright needs subprocess support which SelectorEventLoop lacks on Windows
+    """
+    import asyncio
+
+    from legal_agent.agents.translation.html_builder import markdown_to_html
+
+    html_str = markdown_to_html(md_text, target_language)
+
+    async def _render() -> bytes:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            try:
+                page = await browser.new_page()
+                await page.set_content(html_str, wait_until="networkidle")
+                return await page.pdf(
+                    format="A4",
+                    print_background=True,
+                    margin={"top": "2.5cm", "bottom": "2.5cm", "left": "2cm", "right": "2cm"},
+                )
+            finally:
+                await browser.close()
+
+    # ProactorEventLoop is required on Windows for subprocess support.
+    # Safe to create a fresh loop here — we're in asyncio.to_thread with no running loop.
+    loop = asyncio.ProactorEventLoop() if hasattr(asyncio, "ProactorEventLoop") else asyncio.new_event_loop()
+    try:
+        pdf_bytes = loop.run_until_complete(_render())
+    finally:
+        loop.close()
+
+    logger.info(f"Generated PDF via Playwright ({len(pdf_bytes)} bytes)")
     return pdf_bytes
 
 
