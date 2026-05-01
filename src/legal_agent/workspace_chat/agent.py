@@ -59,7 +59,7 @@ STRICT RULE (for all legal questions): You MUST answer ONLY from the documents p
 CITATION DISCIPLINE (non-negotiable):
 - Every material proposition must cite the source chunk from query_case_documents.
 - Cite inline as [D1], [D2], … in the order chunks appear in the tool result.
-- In ### References, each [Dn] must include: chunk/page (or file id) and a short quoted phrase (≤25 words) so the reader can locate it.
+- In ### References, each [Dn] must include a short quoted phrase (≤25 words) from the source so the reader can locate it. If multiple documents are referenced, include the file name; do not include page numbers.
 - Do not invent citations.
 
 OUTPUT FORMAT:
