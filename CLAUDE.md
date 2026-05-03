@@ -37,8 +37,8 @@ Platform API (Java) → POST /api/v1/jobs (this service)
 - **`services/content_preprocessor.py`** — Pre-processes uploaded content before agents consume it (chunk budgeting, text extraction normalisation).
 - **`utils/ocr.py`** — Shared OCR utility with dual backends: Gemini Vision (default) and Sarvam (better for Indic scripts; chunks >10-page PDFs via `SARVAM_OCR_CONCURRENCY`). Content-hashed S3 cache (`OCR_CACHE_ENABLED`, `OCR_CACHE_PREFIX`) avoids re-OCRing the same file. Used by both the translation extractor and `rag_engine/parsers/pdf_parser.py`. Returns structured markdown or plain text based on `output_format` arg.
 - **`utils/legal_postprocess.py`** — Post-processing pass over generated legal drafts (citation normalisation, structure fixes).
-- **`clients/`** — HTTP clients: `rag_client.py` (LocalRAGClient vs HTTPRAGClient based on `RAG_IN_PROCESS`), `s3_client.py`, `decryption.py` (AES-256-GCM for encrypted S3 files).
-- **`rag_engine/`** — In-process RAG stack (Qdrant + embeddings + parsers + reranker). Only loaded when `RAG_IN_PROCESS=true`. The in-process mode adds ~2.5GB memory footprint — see `legal_retrieval/` for the lighter case-law-only alternative.
+- **`clients/`** — `rag_client.py` (`LocalRAGClient` for in-process workspace RAG), `s3_client.py`, `decryption.py` (AES-256-GCM for encrypted S3 files).
+- **`rag_engine/`** — In-process RAG stack (Qdrant + embeddings + parsers + reranker), mounted at `/api/v1/collections/*`. Heavy memory footprint (~2.5GB with full stack) — see `legal_retrieval/` for the lighter case-law-only alternative.
 - **`legal_retrieval/`** — PostgreSQL + pgvector hybrid search over Indian case law. Independent of `rag_engine/`. **Schema note**: `judgment_paragraphs.judgment_id` is the FK to `judgments.id` (not `case_id`) — see `db.py` for the hybrid RRF query.
 - **`workspace_chat/`** — Conversational agent over workspace docs. Uses `chat_llm_default_model` (Gemini by default) with per-request model override. Does not go through `JobManager` — streams via SSE.
 - **`chat/`** — Chat-side utilities shared across conversational flows: `citation_utils.py`, `session_title.py`, `web_search.py` (Serper), and Firecrawl-based legal web search (`legal_web_search_firecrawl.py`, `firecrawl_verify.py`).
@@ -56,10 +56,9 @@ Platform API (Java) → POST /api/v1/jobs (this service)
 - **Workspace chat default**: `chat_llm_default_model` (separate from drafting).
 - **Translation**: `generator.py::_MODEL_ALIASES` maps `"gemini"`/`"claude"`/`"openai"` to specific model IDs — requests can send either an alias or a full model name.
 
-### RAG modes
+### Workspace RAG
 
-- **In-process** (`RAG_IN_PROCESS=true`, default): Qdrant + embeddings + reranker all in this service. Use for dev or if you don't have a separate RAG service.
-- **Remote** (`RAG_IN_PROCESS=false`): Delegates to `RAG_ENGINE_BASE_URL`. Use in low-memory deployments.
+Workspace document RAG (user uploads) always runs in-process in this service (`LocalRAGClient` + `rag_engine/` HTTP routes under `/api/v1/collections`).
 
 ### Embedding configs — two independent systems
 
@@ -91,8 +90,7 @@ Copy `.env.example` to `.env`. Key vars:
 - `OCR_CACHE_ENABLED` / `OCR_CACHE_PREFIX` — S3-backed content-hashed OCR cache; disable only for debugging
 - `SARVAM_API_KEY`, `SARVAM_CHAT_MODEL`, `SARVAM_API_BASE_URL` — Sarvam OCR + OpenAI-compatible chat
 - `SERPER_API_KEY`, `FIRECRAWL_API_KEY` — web search + legal web research tools (chat flows)
-- `RAG_IN_PROCESS` — Toggle in-process RAG
-- `QDRANT_HOST` / `QDRANT_PORT`, `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` — RAG stack
+- `QDRANT_HOST` / `QDRANT_PORT`, `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` — workspace RAG stack
 - `LEGAL_DB_URL` — Postgres for `legal_retrieval/` case law search
 - `S3_*` — AWS S3 for document storage
 - `DOCUMENT_ENCRYPTION_MASTER_KEY` — Needed for decrypting user-uploaded files in the translation flow

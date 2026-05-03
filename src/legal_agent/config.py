@@ -54,11 +54,6 @@ class Settings(BaseSettings):
     ocr_cache_enabled: bool = True
     ocr_cache_prefix: str = "ocr-cache"
 
-    # RAG Engine — when False, use HTTPRAGClient and do not import the in-process rag_engine
-    # (required for low-memory hosts e.g. Render 512MB; point rag_engine_base_url at a RAG-capable service)
-    rag_in_process: bool = True
-    rag_engine_base_url: str = "http://localhost:8000"
-
     # Service
     service_host: str = "0.0.0.0"
     service_port: int = 8001
