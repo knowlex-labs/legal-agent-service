@@ -51,7 +51,7 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONPATH="/app/src" \
     PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
-    PORT=8080
+    PORT=8001
 
 # Install Camoufox browser (Firefox-based anti-detect) and Playwright deps.
 # Camoufox stores the browser under user_cache_dir (~/.cache/camoufox); pin it
@@ -65,6 +65,7 @@ RUN mkdir -p /app/.cache/camoufox && \
 
 USER appuser
 
-EXPOSE $PORT
+# Matches deploy.yml -p HOST:8001 and knowlex-platform-api AGENT_SERVICE_URL (default :8001).
+EXPOSE 8001
 
 CMD sh -c "python -m uvicorn legal_agent.main:app --host 0.0.0.0 --port $PORT"
