@@ -1,17 +1,8 @@
-# ---- builder stage ----
-FROM python:3.12-slim AS builder
+# Install the venv inside the runtime image (no COPY --from builder of .venv).
+# BuildKit copying a torch/sentence-transformers venv fails on some CI hosts with:
+# "open .../torch/lib/libtorch_global_deps.so: no such file or directory"
+# (symlink/hardlink layout in PyTorch wheels vs CreateDiff/copy walker).
 
-# Install uv
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
-
-WORKDIR /app
-
-# Install dependencies (skip the local package — no README.md needed)
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-
-
-# ---- runtime stage ----
 FROM python:3.12-slim AS runtime
 
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
@@ -50,8 +41,10 @@ RUN useradd --create-home --uid 1000 appuser
 
 WORKDIR /app
 
-# Copy venv and source
-COPY --from=builder /app/.venv /app/.venv
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --frozen --no-dev --no-install-project
+
 COPY src/ src/
 
 ENV PATH="/app/.venv/bin:$PATH" \
