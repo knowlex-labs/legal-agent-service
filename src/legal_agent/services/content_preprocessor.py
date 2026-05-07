@@ -176,9 +176,6 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
     field_labels: list[tuple[str, str]] = [
         ("party_one_details", party_one_label),
         ("party_two_details", party_two_label),
-        # Bug 12 — explicit party / role fields supplied by the drafting form.
-        # Listed alongside the legacy party_one/two_details so both paths can
-        # coexist (the FE sends one set or the other depending on template).
         ("applicant", "APPLICANT DETAILS"),
         ("opposite_party", "OPPOSITE PARTY / COMPLAINANT DETAILS"),
         ("appellant", "APPELLANT DETAILS"),

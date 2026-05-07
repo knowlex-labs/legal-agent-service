@@ -58,11 +58,6 @@ class DraftConfig(BaseModel):
     co_accused_details: str | None = Field(
         None, description="Details of co-accused persons and their bail status"
     )
-    # Bug 12 — explicit party / role fields. The drafting form (FE) sends
-    # these as separate keys per template (CRIMINAL_CONFIG_KEYS in
-    # draft-helpers.ts). Without declaring them here Pydantic dropped
-    # them silently, so applicant / respondent values never reached the
-    # prompt.
     applicant: str | None = Field(
         None, description="Applicant name (bail / anticipatory bail / generic application)"
     )

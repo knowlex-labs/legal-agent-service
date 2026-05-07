@@ -91,9 +91,8 @@ def _markdown_for_upload(document: GeneratedDocument) -> str:
 class DraftService:
     """Service that orchestrates the document drafting workflow."""
 
-    # Per-job total cap on parsed-upload text injected into the prompt.
-    # Sized so a typical Tier 1 LLM context window has plenty of room for
-    # the system prompt, examples, and the generated draft itself.
+    # ~20K tokens; leaves room in a Tier 1 context for system prompt,
+    # examples, and the generated draft.
     _UPLOAD_TEXT_CHAR_CAP = 80_000
 
     def __init__(
@@ -189,13 +188,7 @@ class DraftService:
     async def _fetch_and_parse_uploads(
         self, file_ids: list[str], user_id: str, job_id: str
     ) -> str | None:
-        """Download + decrypt + parse user-uploaded source PDFs for prompt context.
-
-        Replaces the semantic-RAG path for drafting: top_k retrieval on a
-        generic query loses content from short uploaded drafts, and frequently
-        the upload hasn't finished indexing when the job fires. Direct
-        text extraction sidesteps both problems.
-        """
+        """Download + decrypt + parse user-uploaded source PDFs for prompt context."""
         if not file_ids:
             return None
         if not self.decryption:
@@ -231,7 +224,7 @@ class DraftService:
             header = f"\n\n--- {filename} ---\n"
             if total + len(header) + len(text) > cap:
                 remaining = cap - total - len(header)
-                if remaining > 200:  # only worth including if a usable slice fits
+                if remaining > 200:
                     parts.append(header)
                     parts.append(text[:remaining])
                     total = cap
@@ -287,8 +280,6 @@ class DraftService:
         """Execute the drafting task. Returns s3_path."""
         logger.debug(f"[{job_id}] Starting draft execution")
 
-        # Step 0: Pre-fetch uploaded docs as full text so the agent can inject
-        # them deterministically (Bug 1 — semantic RAG was losing content).
         uploaded_doc_text: str | None = None
         if request.file_ids:
             uploaded_doc_text = await self._fetch_and_parse_uploads(

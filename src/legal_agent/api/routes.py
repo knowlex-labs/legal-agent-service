@@ -488,10 +488,8 @@ async def extract_draft_fields_route(
 ) -> ExtractDraftFieldsResponse:
     """Synchronously extract suggested form-field values from an uploaded doc.
 
-    Used by the drafting page to auto-fill the form when the advocate
-    attaches a source PDF (Bug 5). One short LLM call per request — runs
-    inline rather than via JobManager so the FE can render suggestions
-    immediately.
+    Single short LLM call — runs inline rather than via JobManager so the
+    FE can render suggestions immediately.
     """
     try:
         suggested = await extract_draft_fields(

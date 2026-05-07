@@ -104,12 +104,7 @@ class Settings(BaseSettings):
     # Document encryption (AES-256-GCM envelope encryption, matches platform API)
     document_encryption_master_key: str = ""
 
-    # Translation render-guard tolerance (Bug 13). When the post-render check
-    # finds N "do-not-translate" ledger entries missing from the rendered PDF,
-    # the warning is surfaced only if N exceeds this tolerance. The check is
-    # demoted from `critical` to `warning` regardless — the job no longer
-    # fails on dropped ledger entries; the missing list is recorded in
-    # `render_warnings` job metadata so the FE can surface a soft notice.
+    # Suppresses the ledger-drop warning when N missing entries <= tolerance.
     translation_ledger_drop_tolerance: int = 2
 
     # ── Embeddings ────────────────────────────────────────────────────────

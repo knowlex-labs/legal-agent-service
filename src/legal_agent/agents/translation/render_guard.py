@@ -64,34 +64,26 @@ _MIN_PDF_BYTES = 1024
 _PAGE_RATIO_LO = 0.25  # source_chars / 3000 / 2x
 _PAGE_RATIO_HI = 4.0   # source_chars / 3000 * 2x
 
-# Devanagari ↔ Latin digit translation tables. PDF text extraction (and
-# locale-aware number rendering) often substitutes one for the other,
-# producing false-positive ledger drops on a literal substring check.
+# PDF text extraction and locale-aware number rendering substitute one
+# numeral form for the other; without these tables the ledger check
+# false-positives on every translated document.
 _DEV_TO_LATIN = str.maketrans("०१२३४५६७८९", "0123456789")
 _LATIN_TO_DEV = str.maketrans("0123456789", "०१२३४५६७८९")
 
 
 def _normalize_for_match(text: str) -> str:
-    """Collapse whitespace + lowercase ASCII, leaving Indic chars intact."""
     if not text:
         return ""
-    # Collapse any run of whitespace (spaces, newlines, tabs) into one space.
-    out = " ".join(text.split())
-    # Lowercase ASCII portions; non-ASCII (Devanagari etc.) is unchanged.
-    return out.casefold()
+    return " ".join(text.split()).casefold()
 
 
 def _ledger_text_present(ledger_text: str, rendered_text: str) -> bool:
-    """Substring match that's resilient to whitespace collapsing and
-    locale-driven Latin↔Devanagari numeral substitution."""
     if not ledger_text:
         return True
     needle = _normalize_for_match(ledger_text)
     haystack = _normalize_for_match(rendered_text)
     if needle in haystack:
         return True
-    # Try the alternative numeral form: "Section 302" should still match
-    # "धारा ३०२" (and vice versa).
     needle_dev = needle.translate(_LATIN_TO_DEV)
     if needle_dev != needle and needle_dev in haystack:
         return True
@@ -139,12 +131,8 @@ def validate_rendered_pdf(
     if coverage_warning:
         warnings.append(coverage_warning)
 
-    # 3. Ledger preservation. Bug 13 — was a hard `critical` failure, now
-    # downgraded to `warning` after a normalized substring check (collapses
-    # whitespace + handles Latin↔Devanagari numeral substitution). The PDF
-    # still uploads; missing entries surface as a soft notice in job
-    # metadata. A configurable tolerance suppresses the warning entirely
-    # when the drop count is small and likely benign.
+    # 3. Ledger preservation — soft warning so the PDF still uploads;
+    # missing entries surface as a notice in job metadata.
     if ledger:
         missing = [
             e.text for e in ledger

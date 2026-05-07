@@ -1,14 +1,4 @@
-"""Extract structured form-field suggestions from an uploaded source document.
-
-Powers the drafting page's auto-fill: when an advocate attaches a PDF on the
-draft form, this module pulls out party names, court details, FIR numbers,
-facts and relief sought so the form can pre-populate. The advocate just
-reviews + corrects rather than re-typing.
-
-Lightweight by design — single sync LLM call, fast model, capped input. The
-client merges the response into form state non-destructively (only fills
-empty fields), so anything we miss or get wrong is harmless.
-"""
+"""Extract structured form-field suggestions from an uploaded source document."""
 
 import asyncio
 import logging
@@ -26,13 +16,11 @@ from legal_agent.clients.s3_client import S3Client
 logger = logging.getLogger(__name__)
 
 
-_TEXT_CHAR_CAP = 30_000  # metadata sits up-front; first 30K is plenty
+# Metadata in legal docs sits up-front; the first 30K chars covers it.
+_TEXT_CHAR_CAP = 30_000
 
 
 class _SuggestedFields(BaseModel):
-    """Pydantic schema the LLM populates. Every field is optional —
-    we only auto-fill what the document actually evidences."""
-
     applicant: str | None = Field(
         None, description="Applicant / Petitioner / Plaintiff full name with title (Shri/Smt) if mentioned"
     )
@@ -97,8 +85,6 @@ _EXTRACT_USER_PROMPT_TEMPLATE = """Extract drafting-form metadata from the docum
 
 
 def _resolve_model() -> tuple[str, str]:
-    """Pick a fast extraction model. Mirrors enhance_content's choice in
-    content_preprocessor.py."""
     from legal_agent.config import get_settings
 
     provider = get_settings().llm_provider
@@ -117,11 +103,7 @@ async def extract_draft_fields(
     s3_client: S3Client,
     decryption: DecryptionService | None,
 ) -> dict[str, str]:
-    """Download → decrypt → parse → LLM-extract. Returns only non-null fields.
-
-    Errors propagate as RuntimeError so the route can map them to HTTP 4xx/5xx.
-    Empty / unparseable docs return an empty dict (the FE just leaves the
-    form alone)."""
+    """Download → decrypt → parse → LLM-extract. Returns only non-null fields."""
     if not decryption:
         raise RuntimeError(
             "Document decryption is not configured (DOCUMENT_ENCRYPTION_MASTER_KEY missing)."
