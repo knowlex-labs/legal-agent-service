@@ -15,6 +15,7 @@ from psycopg_pool import AsyncConnectionPool
 
 from legal_agent.chat.citation_utils import parse_legal_web_search_citations
 from legal_agent.chat.firecrawl_verify import ClaimList, ClaimVerification, verify_claims
+from legal_agent.chat.query_classifier import classify_query, is_trivial_message
 from legal_agent.chat.session_title import generate_session_title
 from legal_agent.chat.legal_web_search_firecrawl import create_legal_web_search_tool
 from legal_agent.clients.rag_client import RAGClient
@@ -23,6 +24,7 @@ from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
 from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
 from legal_agent.prompts.fact_dense_draft import FACT_DENSE_DRAFT_SYSTEM_PROMPT
 from legal_agent.prompts.legal_assistant_chat import LEGAL_ASSISTANT_CHAT_SYSTEM_PROMPT
+from legal_agent.prompts.query_classifier import TRIVIAL_REPLY_SYSTEM_PROMPT
 from legal_agent.prompts.verify_rewrite import (
     CLAIM_EXTRACTION_SYSTEM_PROMPT,
     VERIFY_REWRITE_SYSTEM_PROMPT,
@@ -416,6 +418,77 @@ class WorkspaceChatAgent:
             title_task = asyncio.create_task(
                 generate_session_title(message, model=model_id)
             )
+
+        # ── Fast path for trivial / greeting messages ───────────────────────
+        # The verify pipeline (draft → extract → Firecrawl verify → rewrite)
+        # is wasted work for "Hi"/"Thanks"/etc — observed ~54s and 4 unwanted
+        # Firecrawl credits. Layer 1 is a regex/length heuristic (zero added
+        # latency); layer 2 is a tiny structured-output classifier for short
+        # ambiguous messages. On match we stream a brief reply without tools
+        # or citations and skip the rest of the pipeline.
+        trivial = is_trivial_message(message)
+        classifier_used = False
+        if not trivial and message and len(message.split()) <= 8:
+            try:
+                classification = await classify_query(message, llm)
+                trivial = classification.intent == "trivial"
+                classifier_used = True
+            except Exception:
+                logger.exception("[verify-pipeline] classifier failed; falling through")
+
+        if trivial:
+            logger.info(
+                "[verify-pipeline] trivial fast-path (%s) | session=%s | msg=%r",
+                "classifier" if classifier_used else "regex",
+                session_id,
+                message[:80],
+            )
+            yield {"event": "status", "data": "responding"}
+            chunks: list[str] = []
+            try:
+                async for chunk in llm.astream([
+                    SystemMessage(
+                        content=TRIVIAL_REPLY_SYSTEM_PROMPT + tone_suffix + style_suffix
+                    ),
+                    HumanMessage(content=message or "Hi"),
+                ]):
+                    token = self._normalize_content(chunk.content)
+                    if token:
+                        chunks.append(token)
+                        yield {"event": "answer", "data": token.replace("\n", "\\n")}
+            except Exception:
+                logger.exception("[verify-pipeline] trivial reply stream failed")
+
+            final_answer = "".join(chunks)
+            if not final_answer.strip():
+                final_answer = "Hi — how can I help with your legal research today?"
+                yield {"event": "answer", "data": final_answer.replace("\n", "\\n")}
+
+            try:
+                await base_graph.aupdate_state(
+                    config,
+                    {
+                        "messages": [
+                            HumanMessage(content=message),
+                            AIMessage(content=final_answer),
+                        ]
+                    },
+                )
+            except Exception:
+                logger.exception("[verify-pipeline] failed to persist trivial-reply history")
+
+            if title_task is not None:
+                try:
+                    title = await title_task
+                except Exception:
+                    logger.exception("[verify-pipeline] awaiting session_title failed")
+                    title = None
+                if title:
+                    yield {"event": "session_title", "data": title}
+
+            yield {"event": "end", "data": ""}
+            return
+        # ── End fast path ───────────────────────────────────────────────────
 
         document_context = ""
         if file_ids and self._rag_client:
