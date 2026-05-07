@@ -12,6 +12,7 @@ from legal_agent.agents.translation.structure_aware_extractor import (
 )
 from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
+from legal_agent.services.content_preprocessor import pick_fast_chat_model
 
 logger = logging.getLogger(__name__)
 
@@ -87,14 +88,7 @@ _EXTRACT_USER_PROMPT_TEMPLATE = """Extract drafting-form metadata from the docum
 def _resolve_model() -> tuple[str, str]:
     from legal_agent.config import get_settings
 
-    provider = get_settings().llm_provider
-    fast_models = {
-        "openai": "gpt-4o-mini",
-        "anthropic": "claude-3-5-haiku-latest",
-        "gemini": "gemini-2.0-flash",
-    }
-    provider_map = {"openai": "openai", "anthropic": "anthropic", "gemini": "google-genai"}
-    return fast_models.get(provider, "gpt-4o-mini"), provider_map.get(provider, provider)
+    return pick_fast_chat_model(get_settings().llm_provider)
 
 
 async def extract_draft_fields(
@@ -140,12 +134,6 @@ async def extract_draft_fields(
             f"[extract_draft_fields] LLM failed for {file_id}: {exc}", exc_info=True
         )
         raise RuntimeError(f"Field extraction failed: {exc}") from exc
-
-    if not isinstance(result, _SuggestedFields):
-        logger.warning(
-            f"[extract_draft_fields] Unexpected LLM result type {type(result)} for {file_id}"
-        )
-        return {}
 
     suggested: dict[str, str] = {}
     for field_name, value in result.model_dump().items():

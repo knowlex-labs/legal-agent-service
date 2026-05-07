@@ -501,8 +501,8 @@ async def extract_draft_fields_route(
     except RuntimeError as exc:
         logger.warning("extract_draft_fields failed: %s", exc)
         raise HTTPException(status_code=502, detail=str(exc))
-    except Exception as exc:
+    except Exception:
         logger.exception("extract_draft_fields unexpected error")
-        raise HTTPException(status_code=500, detail=f"extraction failed: {exc}")
+        raise HTTPException(status_code=500, detail="extraction failed")
 
     return ExtractDraftFieldsResponse(suggested_fields=suggested)

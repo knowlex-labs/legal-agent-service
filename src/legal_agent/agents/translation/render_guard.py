@@ -16,6 +16,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast
 
+from legal_agent.config import get_settings
+
 if TYPE_CHECKING:
     from legal_agent.agents.translation.structure_aware_extractor import LedgerEntry
 
@@ -139,11 +141,7 @@ def validate_rendered_pdf(
             if e.text and not _ledger_text_present(e.text, rendered_text)
         ]
         if missing:
-            try:
-                from legal_agent.config import get_settings
-                tolerance = get_settings().translation_ledger_drop_tolerance
-            except Exception:
-                tolerance = 2
+            tolerance = get_settings().translation_ledger_drop_tolerance
             if len(missing) > tolerance:
                 preview = ", ".join(repr(m) for m in missing[:3])
                 warnings.append(GuardWarning(

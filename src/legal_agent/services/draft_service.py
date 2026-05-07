@@ -38,6 +38,7 @@ from legal_agent.models.documents import DocumentType, GeneratedDocument
 from legal_agent.models.requests import CreateDraftJobRequest
 from legal_agent.models.responses import JobStatus, JobType
 from legal_agent.services.content_preprocessor import (
+    FAST_CHAT_MODELS,
     assemble_config_text,
     preprocess_and_enhance,
     preprocess_title,
@@ -149,13 +150,7 @@ class DraftService:
 
     def _get_enhance_model_string(self) -> str:
         provider = self.settings.llm_provider
-        fast_models = {
-            "openai": "gpt-4o-mini",
-            "anthropic": "claude-3-5-haiku-latest",
-            "gemini": "gemini-2.0-flash",
-        }
-        model = fast_models.get(provider, "gpt-4o-mini")
-        return f"{provider}:{model}"
+        return f"{provider}:{FAST_CHAT_MODELS.get(provider, 'gpt-4o-mini')}"
 
     def _get_agent(self, document_type: DocumentType) -> BaseDraftingAgent:
         if document_type not in self._agents:
@@ -187,22 +182,24 @@ class DraftService:
 
     async def _fetch_and_parse_uploads(
         self, file_ids: list[str], user_id: str, job_id: str
-    ) -> str | None:
-        """Download + decrypt + parse user-uploaded source PDFs for prompt context."""
+    ) -> tuple[str | None, list[str]]:
+        """Download + decrypt + parse user-uploaded source PDFs for prompt context.
+
+        Returns (merged_text, dropped_file_ids). dropped_file_ids surfaces
+        in job metadata so the FE can warn the user that an attached PDF
+        didn't reach the agent.
+        """
         if not file_ids:
-            return None
+            return None, []
         if not self.decryption:
             logger.warning(
                 f"[{job_id}] Cannot fetch uploaded docs — DecryptionService not configured "
                 f"(DOCUMENT_ENCRYPTION_MASTER_KEY missing). Falling back to RAG."
             )
-            return None
+            return None, list(file_ids)
 
-        parts: list[str] = []
-        total = 0
-        cap = self._UPLOAD_TEXT_CHAR_CAP
-        truncated = False
-        for file_id in file_ids:
+        async def fetch_one(file_id: str) -> tuple[str, str | None, str | None]:
+            """Returns (file_id, filename, text). text=None signals a drop."""
             try:
                 encrypted = await self.s3_client.download_bytes(file_id)
                 plaintext = await asyncio.to_thread(
@@ -212,13 +209,23 @@ class DraftService:
                 text, _ledger = await asyncio.to_thread(
                     extract_for_translation, plaintext, filename, None
                 )
+                return file_id, filename, text
             except Exception as exc:
                 logger.warning(
                     f"[{job_id}] Failed to fetch/parse upload {file_id}: {exc}"
                 )
-                continue
+                return file_id, None, None
 
-            if not text or not text.strip():
+        results = await asyncio.gather(*(fetch_one(fid) for fid in file_ids))
+
+        parts: list[str] = []
+        dropped: list[str] = []
+        total = 0
+        cap = self._UPLOAD_TEXT_CHAR_CAP
+        truncated = False
+        for file_id, filename, text in results:
+            if not text or not text.strip() or filename is None:
+                dropped.append(file_id)
                 continue
 
             header = f"\n\n--- {filename} ---\n"
@@ -241,8 +248,8 @@ class DraftService:
                 f"(across {len(file_ids)} file(s))"
             )
 
-        merged = "".join(parts).strip()
-        return merged or None
+        merged = "".join(parts).strip() or None
+        return merged, dropped
 
     async def create_draft_job(self, request: CreateDraftJobRequest, user_id: str) -> str:
         """Create a new draft job and start processing. Returns job_id."""
@@ -282,13 +289,17 @@ class DraftService:
 
         uploaded_doc_text: str | None = None
         if request.file_ids:
-            uploaded_doc_text = await self._fetch_and_parse_uploads(
+            uploaded_doc_text, dropped_uploads = await self._fetch_and_parse_uploads(
                 request.file_ids, user_id, job_id
             )
             if uploaded_doc_text:
                 logger.info(
                     f"[{job_id}] Injected uploaded doc text: "
                     f"{len(uploaded_doc_text)} chars from {len(request.file_ids)} file(s)"
+                )
+            if dropped_uploads:
+                await self.job_manager.update_job_metadata(
+                    job_id, dropped_uploads=dropped_uploads
                 )
 
         # Step 1: Preprocess + enhance content

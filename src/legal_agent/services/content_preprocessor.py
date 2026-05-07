@@ -15,6 +15,29 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# Fast / cheap chat model per provider — used for content enhancement and
+# draft-field extraction.
+FAST_CHAT_MODELS: dict[str, str] = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-3-5-haiku-latest",
+    "gemini": "gemini-2.0-flash",
+}
+
+LANGCHAIN_PROVIDER_MAP: dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "google-genai",
+}
+
+
+def pick_fast_chat_model(provider: str) -> tuple[str, str]:
+    """Return (model_name, langchain_provider) for the given top-level provider."""
+    return (
+        FAST_CHAT_MODELS.get(provider, "gpt-4o-mini"),
+        LANGCHAIN_PROVIDER_MAP.get(provider, provider),
+    )
+
 # Common legal misspellings and corrections
 SPELLING_CORRECTIONS: dict[str, str] = {
     # Legal terms
