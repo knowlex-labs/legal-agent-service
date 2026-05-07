@@ -176,10 +176,20 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
     field_labels: list[tuple[str, str]] = [
         ("party_one_details", party_one_label),
         ("party_two_details", party_two_label),
+        # Bug 12 — explicit party / role fields supplied by the drafting form.
+        # Listed alongside the legacy party_one/two_details so both paths can
+        # coexist (the FE sends one set or the other depending on template).
+        ("applicant", "APPLICANT DETAILS"),
+        ("opposite_party", "OPPOSITE PARTY / COMPLAINANT DETAILS"),
+        ("appellant", "APPELLANT DETAILS"),
+        ("respondent", "RESPONDENT DETAILS"),
+        ("petitioner", "PETITIONER DETAILS"),
         ("court_details", "COURT DETAILS"),
         ("property_details", "PROPERTY / SUBJECT MATTER"),
         ("advocate_details", "ADVOCATE DETAILS"),
         ("facts", "CHRONOLOGICAL FACTS"),
+        ("grounds", "GROUNDS"),
+        ("writ_type", "WRIT TYPE"),
         ("relief_sought", "RELIEF SOUGHT"),
         ("terms", "KEY TERMS"),
         ("special_clauses", "SPECIAL CLAUSES"),
@@ -188,6 +198,7 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
         ("criminal_history", "CRIMINAL HISTORY"),
         ("bail_history", "PRIOR BAIL APPLICATIONS"),
         ("impugned_order", "IMPUGNED ORDER DETAILS"),
+        ("impugned_judgment", "IMPUGNED JUDGMENT DETAILS"),
         ("co_accused_details", "CO-ACCUSED DETAILS"),
     ]
 

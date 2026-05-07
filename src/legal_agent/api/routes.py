@@ -20,11 +20,14 @@ from legal_agent.models.requests import (
 )
 from legal_agent.models.responses import (
     CreateJobResponse,
+    ExtractDraftFieldsRequest,
+    ExtractDraftFieldsResponse,
     JobListResponse,
     JobResponse,
     JobStatus,
     JobType,
 )
+from legal_agent.services.draft_field_extractor import extract_draft_fields
 from legal_agent.precedents.service import PrecedentService
 from legal_agent.services.draft_service import DraftService
 from legal_agent.services.job_manager import JobManager
@@ -475,3 +478,33 @@ async def translate_text(payload: TranslateRequest) -> TranslateResponse:
         source_language=payload.source_language,
         target_language=payload.target_language,
     )
+
+
+@router.post("/drafts/extract-fields", response_model=ExtractDraftFieldsResponse)
+async def extract_draft_fields_route(
+    payload: ExtractDraftFieldsRequest,
+    x_user_id: str = Header(..., alias="X-User-Id"),
+    draft_service: DraftService = Depends(get_draft_service),
+) -> ExtractDraftFieldsResponse:
+    """Synchronously extract suggested form-field values from an uploaded doc.
+
+    Used by the drafting page to auto-fill the form when the advocate
+    attaches a source PDF (Bug 5). One short LLM call per request — runs
+    inline rather than via JobManager so the FE can render suggestions
+    immediately.
+    """
+    try:
+        suggested = await extract_draft_fields(
+            file_id=payload.file_id,
+            user_id=x_user_id,
+            s3_client=draft_service.s3_client,
+            decryption=draft_service.decryption,
+        )
+    except RuntimeError as exc:
+        logger.warning("extract_draft_fields failed: %s", exc)
+        raise HTTPException(status_code=502, detail=str(exc))
+    except Exception as exc:
+        logger.exception("extract_draft_fields unexpected error")
+        raise HTTPException(status_code=500, detail=f"extraction failed: {exc}")
+
+    return ExtractDraftFieldsResponse(suggested_fields=suggested)

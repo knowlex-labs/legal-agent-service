@@ -38,6 +38,11 @@ class DraftingDependencies:
     retriever: LegalCaseRetriever | None = None
     sub_type: str | None = None
     template_reference: str | None = None
+    # Full text of user-uploaded source documents, parsed up-front in the
+    # draft service (S3 download + decrypt + PyMuPDF extract). When set, the
+    # agent injects this directly into the prompt and skips the semantic RAG
+    # path — short uploaded drafts are not well-served by top_k retrieval.
+    uploaded_doc_text: str | None = None
 
 
 # Base system prompt for all legal drafting agents.
@@ -383,11 +388,20 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
 === END LANGUAGE INSTRUCTIONS ===
 """
 
-        # Pre-fetch RAG context deterministically — no tool call needed.
-        # Query is sub-type / document-type aware so retrieval is keyed to the
-        # specific draft, not just the free-text title.
+        # Reference-document context: prefer the full text parsed up-front
+        # by the draft service (S3 download + decrypt + PyMuPDF). Semantic
+        # RAG retrieval is the wrong tool for short uploaded drafts — it
+        # returns 8 chunks for a generic query and silently loses content.
+        # Fall back to RAG only if the service didn't supply parsed text
+        # (e.g. decryption not configured).
         rag_section = ""
-        if deps.file_ids:
+        if deps.uploaded_doc_text:
+            rag_section = f"""
+=== REFERENCE DOCUMENTS CONTEXT ===
+{deps.uploaded_doc_text}
+=== END REFERENCE DOCUMENTS CONTEXT ===
+"""
+        elif deps.file_ids:
             rag_query = f"{deps.sub_type or deps.document_type.value} {deps.title}: facts parties amounts"
             rag_context = await deps.rag_client.query(
                 file_ids=deps.file_ids,

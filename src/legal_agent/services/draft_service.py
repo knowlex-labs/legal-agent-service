@@ -1,5 +1,6 @@
 """Draft service that orchestrates the document drafting workflow."""
 
+import asyncio
 import logging
 import re
 
@@ -21,6 +22,10 @@ from legal_agent.agents.drafts.revision_petition_agent import RevisionPetitionAg
 from legal_agent.agents.drafts.slp_agent import SLPAgent
 from legal_agent.agents.drafts.written_arguments_agent import WrittenArgumentsAgent
 from legal_agent.agents.drafts.written_statement_agent import WrittenStatementAgent
+from legal_agent.agents.translation.structure_aware_extractor import (
+    extract_for_translation,
+)
+from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import Settings
@@ -86,6 +91,11 @@ def _markdown_for_upload(document: GeneratedDocument) -> str:
 class DraftService:
     """Service that orchestrates the document drafting workflow."""
 
+    # Per-job total cap on parsed-upload text injected into the prompt.
+    # Sized so a typical Tier 1 LLM context window has plenty of room for
+    # the system prompt, examples, and the generated draft itself.
+    _UPLOAD_TEXT_CHAR_CAP = 80_000
+
     def __init__(
         self,
         settings: Settings,
@@ -94,6 +104,7 @@ class DraftService:
         s3_client: S3Client,
         retriever: LegalCaseRetriever | None = None,
         template_service: TemplateService | None = None,
+        decryption: DecryptionService | None = None,
     ):
         self.settings = settings
         self.job_manager = job_manager
@@ -101,6 +112,7 @@ class DraftService:
         self.s3_client = s3_client
         self.retriever = retriever
         self.template_service = template_service
+        self.decryption = decryption
 
         # Mapping of document type -> agent class. Used to instantiate one-off
         # agents when the request overrides the default model.
@@ -174,6 +186,71 @@ class DraftService:
         provider = self._resolve_provider(model)
         return agent_cls(model, provider)
 
+    async def _fetch_and_parse_uploads(
+        self, file_ids: list[str], user_id: str, job_id: str
+    ) -> str | None:
+        """Download + decrypt + parse user-uploaded source PDFs for prompt context.
+
+        Replaces the semantic-RAG path for drafting: top_k retrieval on a
+        generic query loses content from short uploaded drafts, and frequently
+        the upload hasn't finished indexing when the job fires. Direct
+        text extraction sidesteps both problems.
+        """
+        if not file_ids:
+            return None
+        if not self.decryption:
+            logger.warning(
+                f"[{job_id}] Cannot fetch uploaded docs — DecryptionService not configured "
+                f"(DOCUMENT_ENCRYPTION_MASTER_KEY missing). Falling back to RAG."
+            )
+            return None
+
+        parts: list[str] = []
+        total = 0
+        cap = self._UPLOAD_TEXT_CHAR_CAP
+        truncated = False
+        for file_id in file_ids:
+            try:
+                encrypted = await self.s3_client.download_bytes(file_id)
+                plaintext = await asyncio.to_thread(
+                    self.decryption.decrypt_file, encrypted, user_id
+                )
+                filename = file_id.rsplit("/", 1)[-1]
+                text, _ledger = await asyncio.to_thread(
+                    extract_for_translation, plaintext, filename, None
+                )
+            except Exception as exc:
+                logger.warning(
+                    f"[{job_id}] Failed to fetch/parse upload {file_id}: {exc}"
+                )
+                continue
+
+            if not text or not text.strip():
+                continue
+
+            header = f"\n\n--- {filename} ---\n"
+            if total + len(header) + len(text) > cap:
+                remaining = cap - total - len(header)
+                if remaining > 200:  # only worth including if a usable slice fits
+                    parts.append(header)
+                    parts.append(text[:remaining])
+                    total = cap
+                truncated = True
+                break
+
+            parts.append(header)
+            parts.append(text)
+            total += len(header) + len(text)
+
+        if truncated:
+            logger.warning(
+                f"[{job_id}] Truncated upload context to {cap} chars "
+                f"(across {len(file_ids)} file(s))"
+            )
+
+        merged = "".join(parts).strip()
+        return merged or None
+
     async def create_draft_job(self, request: CreateDraftJobRequest, user_id: str) -> str:
         """Create a new draft job and start processing. Returns job_id."""
         job = await self.job_manager.create_job(
@@ -209,6 +286,19 @@ class DraftService:
     ) -> str:
         """Execute the drafting task. Returns s3_path."""
         logger.debug(f"[{job_id}] Starting draft execution")
+
+        # Step 0: Pre-fetch uploaded docs as full text so the agent can inject
+        # them deterministically (Bug 1 — semantic RAG was losing content).
+        uploaded_doc_text: str | None = None
+        if request.file_ids:
+            uploaded_doc_text = await self._fetch_and_parse_uploads(
+                request.file_ids, user_id, job_id
+            )
+            if uploaded_doc_text:
+                logger.info(
+                    f"[{job_id}] Injected uploaded doc text: "
+                    f"{len(uploaded_doc_text)} chars from {len(request.file_ids)} file(s)"
+                )
 
         # Step 1: Preprocess + enhance content
         cleaned_title = preprocess_title(request.title)
@@ -270,6 +360,7 @@ class DraftService:
             language=language,
             retriever=self.retriever,
             sub_type=sub_type,
+            uploaded_doc_text=uploaded_doc_text,
         )
 
         logger.debug(f"[{job_id}] Calling agent.draft()")
