@@ -26,6 +26,13 @@ class Settings(BaseSettings):
     sarvam_api_key: str | None = None
     mistral_api_key: str | None = None
 
+    # Model used for the structured-metadata extraction call inside output_node.
+    # Defaulted to Haiku so the small, fixed-shape extraction does not consume
+    # the main draft model's TPM budget (gpt-5.4 has hit OpenAI's 10k-TPM cap on
+    # interim-application drafts where the message history alone is ~10k tokens).
+    metadata_extraction_model: str = "claude-haiku-4-5-20251001"
+    metadata_extraction_provider: str = "anthropic"
+
     # OCR backend selection. "gemini" = Gemini Vision (default, primary path).
     # "mistral" = Mistral Pixtral (free tier; secondary path / Gemini fallback).
     # "sarvam" = Sarvam Document Intelligence (markdown only; ≤10 pages per job).

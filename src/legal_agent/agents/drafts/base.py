@@ -1,5 +1,6 @@
 """Base drafting agent with common functionality."""
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date
@@ -10,9 +11,13 @@ from langchain_core.messages import AnyMessage, HumanMessage, SystemMessage, Too
 from langgraph.graph import END, StateGraph
 from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
-from pydantic import ValidationError
 from typing_extensions import TypedDict
 
+from legal_agent.agents.drafts.cause_title import (
+    CauseTitleData,
+    extract_cause_title,
+    prepend_cause_title_to_draft,
+)
 from legal_agent.agents.drafts.templates.loader import load_template_reference
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.legal_retrieval.langchain_tools import create_legal_search_tool
@@ -186,18 +191,29 @@ class BaseDraftingAgent:
         """
         return self.system_prompt
 
+    def _renders_cause_title(self, deps: DraftingDependencies) -> bool:
+        """True iff this draft's cause title is rendered deterministically (not by the LLM)."""
+        return False
+
     def _build_graph(
         self,
         tools: list,
         document_type: DocumentType,
         system_prompt: str | None = None,
+        deps: DraftingDependencies | None = None,
     ):
         """Build a LangGraph workflow for drafting."""
         max_tokens = _PROVIDER_MAX_TOKENS.get(self.provider, 8192)
         llm = init_chat_model(self.model_name, model_provider=self.provider, max_tokens=max_tokens)
         llm_with_tools = llm.bind_tools(tools) if tools else llm
+        from legal_agent.config import get_settings
+        _settings = get_settings()
+        _meta_provider = _settings.metadata_extraction_provider
+        _meta_max_tokens = _PROVIDER_MAX_TOKENS.get(_meta_provider, 8192)
         llm_structured = init_chat_model(
-            self.model_name, model_provider=self.provider, max_tokens=max_tokens
+            _settings.metadata_extraction_model,
+            model_provider=_meta_provider,
+            max_tokens=_meta_max_tokens,
         ).with_structured_output(GeneratedDocument)
         effective_system_prompt = system_prompt if system_prompt is not None else self.system_prompt
         system_msg = SystemMessage(content=effective_system_prompt)
@@ -228,16 +244,39 @@ class BaseDraftingAgent:
             )
             msgs = [system_msg] + state["messages"] + [HumanMessage(content=extraction_prompt)]
 
-            # Structured metadata extraction — if it fails (LLM returns
-            # unparseable JSON, transient error), fall back to raw_draft +
-            # minimal metadata instead of failing the whole job. The raw
-            # markdown is what we actually ship to the lawyer; metadata is
-            # a display-layer concern.
-            try:
-                raw_doc = cast(GeneratedDocument, await llm_structured.ainvoke(msgs))
-            except (ValidationError, Exception) as exc:
+            should_render_cause_title = bool(
+                deps is not None and self._renders_cause_title(deps)
+            )
+
+            async def _extract_cause_title_safe() -> CauseTitleData | None:
+                if not should_render_cause_title or deps is None:
+                    return None
+                try:
+                    return await extract_cause_title(
+                        reference_text=deps.uploaded_doc_text,
+                        instructions=deps.instructions,
+                        document_title=deps.title,
+                        today=date.today().isoformat(),
+                        provider=self.provider,
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[draft] Cause-title extraction failed "
+                        f"({type(exc).__name__}: {exc}); "
+                        "shipping body without rendered cause title"
+                    )
+                    return None
+
+            metadata_result, cause_title_data = await asyncio.gather(
+                llm_structured.ainvoke(msgs),
+                _extract_cause_title_safe(),
+                return_exceptions=True,
+            )
+
+            if isinstance(metadata_result, BaseException):
                 logger.warning(
-                    f"[draft] Structured metadata extraction failed ({type(exc).__name__}: {exc}); "
+                    f"[draft] Structured metadata extraction failed "
+                    f"({type(metadata_result).__name__}: {metadata_result}); "
                     "falling back to raw draft with minimal metadata"
                 )
                 raw_doc = GeneratedDocument(
@@ -247,10 +286,23 @@ class BaseDraftingAgent:
                     sections=[],
                     draft=raw_draft or "",
                 )
+            else:
+                raw_doc = cast(GeneratedDocument, metadata_result)
+
+            if isinstance(cause_title_data, BaseException):
+                cause_title_data = None
 
             # Override the draft field with the raw, unmodified markdown.
             # Fallback to structured output's draft if the raw message is unusable.
             final_draft = raw_draft if raw_draft and len(raw_draft.strip()) >= 200 else raw_doc.draft
+
+            if (
+                should_render_cause_title
+                and isinstance(cause_title_data, CauseTitleData)
+                and final_draft
+                and len(final_draft.strip()) >= 200
+            ):
+                final_draft = prepend_cause_title_to_draft(final_draft, cause_title_data)
 
             # Citation-grounding check (warn-only). Tells us when the LLM
             # cited case law without ever calling legal_case_search, or when
@@ -524,7 +576,12 @@ Generate a COMPLETE, FINISHED Indian contract following the exact markdown templ
         if deps.retriever and deps.file_ids:
             tools.append(create_legal_search_tool(deps.retriever))
 
-        graph = self._build_graph(tools, deps.document_type, system_prompt=selected_system_prompt)
+        graph = self._build_graph(
+            tools,
+            deps.document_type,
+            system_prompt=selected_system_prompt,
+            deps=deps,
+        )
         try:
             # recursion_limit caps the agent tool-loop — prevents the LLM
             # from infinitely emitting tool calls until the job-manager

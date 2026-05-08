@@ -46,81 +46,16 @@ Do not invent values. Do not silently drop a line because the data is missing �
 keep the line and bracket the missing field.
 ===== END SUBSTITUTION CONTRACT =====
 
-===== CAUSE TITLE (cohesive single block — no `---` rules between elements) =====
+===== CAUSE TITLE — RENDERED SEPARATELY, DO NOT EMIT =====
+The cause title (court banner `IN THE HON'BLE …`, `AT …`, the case caption
+`[Case Type] No. … / [Year]`, the applicant + respondent party blocks,
+the centered `Vs.` separator, and the centered + underlined document title)
+is rendered deterministically by the system and PREPENDED to your output.
 
-The cause title uses raw HTML (passed through by the markdown renderer) so we
-get centered + underlined court banner, right-aligned case number, italic "Vs.",
-and right-aligned role tags — matching how Indian advocates draft in Word. Emit
-the HTML EXACTLY as shown — do not convert to plain markdown, do not strip the
-inline `style` attributes.
-
-Every line of the cause title is wrapped in its own `<p style="margin:0;">…</p>`
-so the renderer keeps each on its own line (the markdown library would otherwise
-collapse adjacent un-broken lines into one paragraph).
-
-<p style="text-align:center; margin:0;"><b><u>IN THE HON'BLE [Court Name]</u></b></p>
-
-<p style="text-align:center; margin:0;"><b><u>AT [Location]</u></b></p>
-
-<p style="text-align:right; margin:0;"><b>[Case Type] No. ______ / [Year]</b></p>
-
-<p style="margin:0;"><b>[Applicant Full Name]</b></p>
-<p style="margin:0;">[Applicant Father's/Husband's Name OR company description]</p>
-<p style="margin:0;">Age: [Applicant Age] yrs, Occ: [Applicant Occupation]</p>
-<p style="margin:0;">R/o: [Applicant Address Line 1]</p>
-<p style="margin:0;">[Applicant Address Line 2]</p>
-<p style="margin:0;">[Applicant City, District, State — Pincode]</p>
-<p style="margin:0;">Mob.no. [Applicant Mobile]<span style="float:right;">………<b>[First Party Role]</b></span></p>
-
-<p style="text-align:center; margin:0;"><i><b>Vs.</b></i></p>
-
-<p style="margin:0;"><b>[Respondent Full Name]</b></p>
-<p style="margin:0;">[Respondent Father's/Husband's Name OR company description]</p>
-<p style="margin:0;">Age: [Respondent Age] yrs, Occ: [Respondent Occupation / Nature of business]</p>
-<p style="margin:0;">R/o / Having its office at: [Respondent Address Line 1]</p>
-<p style="margin:0;">[Respondent Address Line 2]</p>
-<p style="margin:0;">[Respondent City, District, State — Pincode]</p>
-<p style="margin:0;">Mob.no. [Respondent Mobile]<span style="float:right;">………<b>[Second Party Role]</b></span></p>
-
-If multiple respondents: number them `**Respondent No. 1**`, `**Respondent No. 2**`, …
-each as its own party block in the same shape.
-
-===== FIELD NOTES (cause title) =====
-- **Court Name** and **Location**: extract from REFERENCE DOCUMENTS if uploaded.
-  Example: source PDF reads "IN THE HON'BLE SMALL CAUSES COURT PUNE AT PUNE"
-  → court name "SMALL CAUSES COURT, PUNE", location "PUNE".
-- **Honorific**: write the actual honorific from the source ("Shri", "Smt.",
-  "Mr.", "Ms.", "M/s") inline before the name. Do NOT emit literal guidance
-  text like `[Title — Shri/Smt/...]`.
-- **Case caption**: if the source shows the parent suit's case type and number
-  (e.g., "Civil Suit No. ___ / 2022"), use it verbatim. Otherwise use the
-  document title's case type and the current year from "Today's date:".
-- **Role tags inherit from the parent suit / source document**:
-   - If the source PDF labels the parties **Plaintiff / Defendant**
-     (a civil suit), keep `Plaintiff` / `Defendant`.
-   - If the source labels them **Petitioner / Respondent** (a writ or
-     statutory petition), keep `Petitioner` / `Respondent`.
-   - Only when the source is silent on roles, default to
-     `Applicant` / `Respondent` (the canonical interim-application labels).
-   The rule of thumb: an interim application filed inside a pending matter
-   carries the same party labels as that matter — advocates expect to see
-   `…Plaintiff` for an application in a civil suit.
-===== END FIELD NOTES =====
-
----
-
-<p style="text-align:center; margin:0;"><b><u>[Document Title]</u></b></p>
-
-The document title is its own centered+bold+underlined heading, NOT an `##`
-markdown heading. Examples of titles:
-- "Stay Application On Behalf of the Plaintiff"
-- "Application For Ad-Interim Injunction Under Order 39 Rules 1 And 2 CPC"
-- "Application Under Section 9 of the Arbitration and Conciliation Act, 1996"
-
-Use the actual title supplied in the user prompt's "Document Title:" field —
-do NOT emit the literal placeholder `[Document Title]`.
-
----
+DO NOT emit any of those elements. DO NOT emit a `## CAUSE TITLE` heading,
+a `# IN THE HON'BLE …` banner, or any party block at the top of your draft.
+Start your output directly at the first body section: `## 1. BRIEF FACTS`.
+===== END CAUSE TITLE =====
 
 ## 1. BRIEF FACTS
 
@@ -645,12 +580,16 @@ class CourtFilingAgent(BaseDraftingAgent):
         super().__init__(model, provider)
 
     def _select_system_prompt(self, deps: DraftingDependencies) -> str:
-        # Interim / stay / interlocutory applications get the focused, lean
-        # prompt — saves ~10K characters of dead-weight Civil Suit + Writ
-        # Petition templates the model would otherwise have to read past.
-        if deps.document_type in _INTERIM_DOC_TYPES:
-            return INTERIM_APPLICATION_SYSTEM_PROMPT
-        sub_type = (deps.sub_type or "").lower()
-        if "interim" in sub_type or "stay" in sub_type or "injunction" in sub_type:
+        if self._is_interim_application(deps):
             return INTERIM_APPLICATION_SYSTEM_PROMPT
         return COURT_FILING_SYSTEM_PROMPT
+
+    def _renders_cause_title(self, deps: DraftingDependencies) -> bool:
+        return self._is_interim_application(deps)
+
+    @staticmethod
+    def _is_interim_application(deps: DraftingDependencies) -> bool:
+        if deps.document_type in _INTERIM_DOC_TYPES:
+            return True
+        sub_type = (deps.sub_type or "").lower()
+        return any(k in sub_type for k in ("interim", "stay", "injunction"))
