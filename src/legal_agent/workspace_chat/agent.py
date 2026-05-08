@@ -268,6 +268,68 @@ class WorkspaceChatAgent:
             f"files={len(file_ids or [])} | web_search={web_search} | msg='{message[:100]}'"
         )
 
+        # No documents selected and web search disabled — there's no source the
+        # agent can legitimately answer a legal question from. For greetings /
+        # pleasantries we still reply naturally; for real questions we tell the
+        # user no documents are selected instead of letting the LLM hallucinate.
+        # Web-search-only queries (file_ids=[], web_search=True) fall through
+        # to the verify pipeline below.
+        if not file_ids and not web_search:
+            model_id = model or get_settings().chat_llm_default_model
+            base_graph = self._get_base_graph(model_id, web_search=False)
+            config = {"configurable": {"thread_id": session_id}}
+
+            if is_trivial_message(message):
+                # Friendly greeting/pleasantry reply — using TRIVIAL_REPLY_SYSTEM_PROMPT
+                # so "Hi" doesn't trigger the no-docs error.
+                llm = self._get_llm(model_id)
+                tone_suffix = TONE_INSTRUCTIONS.get(tone, TONE_INSTRUCTIONS["formal"])
+                style_suffix = STYLE_INSTRUCTIONS.get(style, STYLE_INSTRUCTIONS["balanced"])
+                chunks: list[str] = []
+                try:
+                    async for chunk in llm.astream([
+                        SystemMessage(
+                            content=TRIVIAL_REPLY_SYSTEM_PROMPT + tone_suffix + style_suffix
+                        ),
+                        HumanMessage(content=message or "Hi"),
+                    ]):
+                        token = self._normalize_content(chunk.content)
+                        if token:
+                            chunks.append(token)
+                            yield {"event": "answer", "data": token.replace("\n", "\\n")}
+                except Exception:
+                    logger.exception("[workspace_chat] trivial no-docs reply failed")
+                final_answer = "".join(chunks).strip()
+                if not final_answer:
+                    final_answer = "Hi — how can I help with your legal research today?"
+                    yield {"event": "answer", "data": final_answer.replace("\n", "\\n")}
+                try:
+                    await base_graph.aupdate_state(
+                        config,
+                        {"messages": [HumanMessage(content=message), AIMessage(content=final_answer)]},
+                    )
+                except Exception:
+                    logger.exception("[workspace_chat] failed to persist trivial no-docs reply")
+                yield {"event": "end", "data": ""}
+                return
+
+            # Real question, no docs, no web search → tell the user.
+            reply = (
+                "No documents are selected. Please select at least one document "
+                "from the case workspace to chat about, or enable web search to "
+                "ask general legal questions."
+            )
+            yield {"event": "answer", "data": reply.replace("\n", "\\n")}
+            try:
+                await base_graph.aupdate_state(
+                    config,
+                    {"messages": [HumanMessage(content=message), AIMessage(content=reply)]},
+                )
+            except Exception:
+                logger.exception("[workspace_chat] failed to persist no-docs reply")
+            yield {"event": "end", "data": ""}
+            return
+
         # web_search=True routes through the draft → extract → verify → rewrite
         # pipeline so answers are factually dense but each claim is verified via
         # Firecrawl search-only (1 credit per claim, no scrape).
@@ -310,6 +372,8 @@ class WorkspaceChatAgent:
 
         web_search_output: str | None = None
         rag_output: str | None = None
+        answer_chunks: list[str] = []
+        streamed_cleanly = False
 
         async def _maybe_flush_title():
             nonlocal title_task
@@ -323,34 +387,71 @@ class WorkspaceChatAgent:
             title_task = None
             return t
 
-        async for event in graph.astream_events(
-            {"messages": [instruction_message, HumanMessage(content=message)]}, config=config, version="v2"
-        ):
-            kind = event["event"]
-            if kind == "on_chat_model_stream":
-                token = event["data"]["chunk"].content
-                if isinstance(token, list):
-                    token = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in token)
-                if token:
-                    yield {"event": "answer", "data": token.replace("\n", "\\n")}
-            elif kind == "on_tool_start":
-                tool_name = event["name"]
-                yield {
-                    "event": "tool_call",
-                    "data": json.dumps({"name": tool_name, "args": event["data"].get("input", {})}),
-                }
-            elif kind == "on_tool_end":
-                output = event["data"].get("output", "")
-                tool_name = event.get("name")
-                if tool_name == "legal_web_search":
-                    web_search_output = str(output)
-                elif tool_name == "query_case_documents":
-                    rag_output = str(output)
-                yield {"event": "tool_result", "data": output}
+        try:
+            async for event in graph.astream_events(
+                {"messages": [instruction_message, HumanMessage(content=message)]}, config=config, version="v2"
+            ):
+                kind = event["event"]
+                if kind == "on_chat_model_stream":
+                    token = event["data"]["chunk"].content
+                    if isinstance(token, list):
+                        token = "".join(p.get("text", "") if isinstance(p, dict) else str(p) for p in token)
+                    if token:
+                        answer_chunks.append(token)
+                        yield {"event": "answer", "data": token.replace("\n", "\\n")}
+                elif kind == "on_tool_start":
+                    tool_name = event["name"]
+                    yield {
+                        "event": "tool_call",
+                        "data": json.dumps({"name": tool_name, "args": event["data"].get("input", {})}),
+                    }
+                elif kind == "on_tool_end":
+                    output = event["data"].get("output", "")
+                    tool_name = event.get("name")
+                    if tool_name == "legal_web_search":
+                        web_search_output = str(output)
+                    elif tool_name == "query_case_documents":
+                        rag_output = str(output)
+                    yield {"event": "tool_result", "data": output}
 
-            early_title = await _maybe_flush_title()
-            if early_title:
-                yield {"event": "session_title", "data": early_title}
+                early_title = await _maybe_flush_title()
+                if early_title:
+                    yield {"event": "session_title", "data": early_title}
+            streamed_cleanly = True
+        finally:
+            # Bug-9 safeguard: when the SSE consumer disconnects mid-stream
+            # (page reload, navigation, network drop), astream_events is
+            # cancelled and LangGraph's auto-checkpoint may not have committed
+            # the final AIMessage. Idempotently flush whatever was generated so
+            # session history isn't lost.
+            if not streamed_cleanly and answer_chunks:
+                final_answer = "".join(answer_chunks).strip()
+                if final_answer:
+                    try:
+                        state = await graph.aget_state(config)
+                        messages = (
+                            state.values.get("messages", [])
+                            if state and state.values else []
+                        )
+                        last_msg = messages[-1] if messages else None
+                        already_persisted = (
+                            isinstance(last_msg, AIMessage)
+                            and last_msg.content == final_answer
+                        )
+                        if not already_persisted:
+                            msgs_to_add: list = []
+                            human_already_in_state = any(
+                                isinstance(m, HumanMessage) and m.content == message
+                                for m in messages
+                            )
+                            if not human_already_in_state:
+                                msgs_to_add.append(HumanMessage(content=message))
+                            msgs_to_add.append(AIMessage(content=final_answer))
+                            await graph.aupdate_state(config, {"messages": msgs_to_add})
+                    except Exception:
+                        logger.exception(
+                            "[workspace_chat] cancellation-path persist failed"
+                        )
 
         # Emit structured citations from web search results if the LLM
         # invoked the tool on its own. No forced fallback call — tool use
