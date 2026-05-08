@@ -386,7 +386,8 @@ class DraftService:
         )
 
         # Step 4: Upload to S3
-        # Use request title for proper naming (user-provided title)
+        # Slug is used only for the S3 key; the displayed file_name preserves
+        # the user-provided title verbatim (sans filesystem-illegal chars).
         slug = _slugify(request.title)
         s3_path = f"{request.case_folder_id}/drafts/{slug}.md"
         try:
@@ -394,9 +395,9 @@ class DraftService:
         except Exception as exc:
             raise StagedError(ErrorStage.UPLOAD, exc) from exc
 
-        # Get signed URL and update job with file details
         signed_url = await self.s3_client.signed_url(s3_path)
-        file_name = f"{slug}.md"
+        display_title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", request.title or "").strip() or "Draft"
+        file_name = f"{display_title}.md"
         await self.job_manager.update_job_status(
             job_id,
             JobStatus.COMPLETED,

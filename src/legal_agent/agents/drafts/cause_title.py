@@ -181,7 +181,7 @@ def _render_name_line(party: Party) -> str:
         full = f"{party.honorific} {name}"
     else:
         full = name
-    return f'<p style="margin:0;"><strong>{full}</strong></p>'
+    return f"<p><strong>{full}</strong></p>"
 
 
 def _render_age_occ_line(party: Party) -> str | None:
@@ -189,7 +189,7 @@ def _render_age_occ_line(party: Party) -> str | None:
         return None
     age = party.age or _placeholder(f"{party.role} Age")
     occ = party.occupation or _placeholder(f"{party.role} Occupation")
-    return f'<p style="margin:0;">Age: {age}, Occ: {occ}</p>'
+    return f"<p>Age: {age}, Occ: {occ}</p>"
 
 
 def _render_address_lines(party: Party) -> list[str]:
@@ -197,34 +197,45 @@ def _render_address_lines(party: Party) -> list[str]:
     lines = [ln.strip() for ln in party.address_lines if ln and ln.strip()]
     if not lines:
         lines = [_placeholder(f"{party.role} Address")]
-    out = [f'<p style="margin:0;">{intro}: {lines[0]}</p>']
+    out = [f"<p>{intro}: {lines[0]}</p>"]
     for ln in lines[1:]:
-        out.append(f'<p style="margin:0;">{ln}</p>')
+        out.append(f"<p>{ln}</p>")
     return out
 
 
-def _render_mobile_with_role(party: Party) -> str:
+def _render_mobile_and_role(party: Party) -> list[str]:
+    """Render the `Mob.no. NNNN ………Role` line.
+
+    Uses a 1-row 2-cell borderless table so the role tag sits on the SAME
+    line as the mobile, right-aligned — matching the canonical court draft
+    layout. TipTap preserves table structure; inline `border:0;padding:0`
+    overrides the editor's default table CSS.
+    """
     role_phrase = _party_role_phrase(party)
-    if party.mobile:
-        return (
-            f'<p style="margin:0;">Mob.no. {party.mobile}'
-            f'<span style="float:right;">………<strong>{role_phrase}</strong></span></p>'
-        )
-    return f'<p style="text-align:right;margin:0;">………<strong>{role_phrase}</strong></p>'
+    left = f"Mob.no. {party.mobile}" if party.mobile else ""
+    right = f"………<strong>{role_phrase}</strong>"
+    return [
+        '<table class="cause-title-row" style="width:100%;border-collapse:collapse;border:0;margin:0;">',
+        "<tbody><tr>",
+        f'<td style="border:0;padding:0;text-align:left;">{left}</td>',
+        f'<td style="border:0;padding:0;text-align:right;">{right}</td>',
+        "</tr></tbody>",
+        "</table>",
+    ]
 
 
 def _render_party_block(party: Party, *, ordinal_label: bool) -> list[str]:
     out: list[str] = []
     if ordinal_label and party.ordinal:
-        out.append(f'<p style="margin:0;"><strong>{_party_role_phrase(party)}</strong></p>')
+        out.append(f"<p><strong>{_party_role_phrase(party)}</strong></p>")
     out.append(_render_name_line(party))
     if party.description:
-        out.append(f'<p style="margin:0;">{party.description}</p>')
+        out.append(f"<p>{party.description}</p>")
     age_line = _render_age_occ_line(party)
     if age_line:
         out.append(age_line)
     out.extend(_render_address_lines(party))
-    out.append(_render_mobile_with_role(party))
+    out.extend(_render_mobile_and_role(party))
     return out
 
 
@@ -241,13 +252,13 @@ def render_cause_title_html(data: CauseTitleData) -> str:
 
     lines: list[str] = [SENTINEL_START]
     lines.append(
-        f'<p style="text-align:center;margin:0;"><strong><u>IN THE HON\'BLE {court_name}</u></strong></p>'
+        f'<p style="text-align:center;"><strong><u>IN THE HON\'BLE {court_name}</u></strong></p>'
     )
     lines.append(
-        f'<p style="text-align:center;margin:0;"><strong><u>AT {court_seat}</u></strong></p>'
+        f'<p style="text-align:center;"><strong><u>AT {court_seat}</u></strong></p>'
     )
     lines.append(
-        f'<p style="text-align:right;margin:0;"><strong>{case_type} No. {case_number} / {case_year}</strong></p>'
+        f'<p style="text-align:right;"><strong>{case_type} No. {case_number} / {case_year}</strong></p>'
     )
 
     first_side = [p for p in data.parties if p.role in _FIRST_SIDE_ROLES]
@@ -263,13 +274,13 @@ def render_cause_title_html(data: CauseTitleData) -> str:
     for party in first_side:
         lines.extend(_render_party_block(party, ordinal_label=first_multi))
 
-    lines.append('<p style="text-align:center;margin:0;"><em><strong>Vs.</strong></em></p>')
+    lines.append('<p style="text-align:center;"><em><strong>Vs.</strong></em></p>')
 
     for party in second_side:
         lines.extend(_render_party_block(party, ordinal_label=second_multi))
 
     lines.append(
-        f'<p style="text-align:center;margin:0;"><strong><u>{document_title}</u></strong></p>'
+        f'<p style="text-align:center;"><strong><u>{document_title}</u></strong></p>'
     )
     lines.append(SENTINEL_END)
     return "\n".join(lines)
