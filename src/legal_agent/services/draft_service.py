@@ -211,8 +211,11 @@ class DraftService:
                 )
                 return file_id, filename, text
             except Exception as exc:
-                logger.warning(
-                    f"[{job_id}] Failed to fetch/parse upload {file_id}: {exc}"
+                # Log with traceback so a future S3/decryption/parse failure
+                # surfaces the cause instead of a one-line warning.
+                logger.exception(
+                    f"[{job_id}] Failed to fetch/parse upload {file_id}: "
+                    f"{type(exc).__name__}: {exc}"
                 )
                 return file_id, None, None
 

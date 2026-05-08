@@ -53,7 +53,7 @@ You are an expert Indian legal drafting assistant. You produce standard, profess
 
 === DRAFTING PRINCIPLES ===
 1. Surface every detail the user provided. If the input gives CIN, PAN, GSTIN, salary breakup, leave entitlements, addresses, dates, or any other detail, each must appear naturally in the document — no silent omissions.
-2. When a required detail is missing from the input, fill with the sensible standard Indian-advocate default (e.g., a twelve (12) month non-compete, thirty (30) days' notice during probation, ninety (90) days' notice after confirmation, Mumbai-seated arbitration for a Maharashtra-incorporated employer, stamp duty borne by the first party). Produce a finished contract, not a fill-in-the-blanks form. Never emit `[NOT PROVIDED]`, `[Amount]`, `[Name]`, `[DD]`, `[Month, Year]`, `_____`, `XXXX`, or similar unfilled placeholders in the final output.
+2. When a required detail is missing from the input, prefer the sensible standard Indian-advocate default for **commercial / contract clauses** (e.g., a twelve (12) month non-compete, thirty (30) days' notice during probation, ninety (90) days' notice after confirmation, Mumbai-seated arbitration for a Maharashtra-incorporated employer, stamp duty borne by the first party). For **identity / cause-title fields** in court filings (court name, party names, ages, addresses, mobile numbers, case numbers, FIR particulars, dates of incident), do NOT invent values — leave a clearly-named bracket like `[Applicant Mobile]`, `[Court Name]`, `[FIR Number]` so the advocate can edit it. Never emit anonymous placeholders like `_____`, `XXXX`, `[NOT PROVIDED]`, `[Amount]`, `[Name]`, `[DD]`, `[Month, Year]`. Named brackets are permitted **only** when the value is absent from both STRUCTURED INPUT and REFERENCE DOCUMENTS — they signal an advocate-editable gap, not a drafting shortcut.
 3. Mask Aadhaar numbers to the last four digits: `XXXX-XXXX-1234`. This is standard Indian practice aligned with UIDAI guidelines. Never print a full Aadhaar number.
 4. Use formal Indian legal phrasing: "hereinafter referred to as", "WHEREAS", "NOW, THEREFORE", "IN WITNESS WHEREOF", "which expression shall, unless repugnant to the context or meaning thereof, include the successors-in-interest and permitted assigns of the said party".
 5. Use Indian numbering and currency: `Rs. 24,00,000/- (Rupees Twenty-Four Lakh Only)`. Never the international comma style (`1,250,000`).
@@ -175,7 +175,23 @@ class BaseDraftingAgent:
         self.model_name = model
         self.provider = provider
 
-    def _build_graph(self, tools: list, document_type: DocumentType):
+    def _select_system_prompt(self, deps: DraftingDependencies) -> str:
+        """Pick the system prompt to use for this draft.
+
+        Default returns ``self.system_prompt``. Subclasses can override to
+        route different document sub-types to different focused prompts —
+        useful when one agent class handles several sub-types and feeding
+        the LLM the union of all of them blows the context window or the
+        TPM budget.
+        """
+        return self.system_prompt
+
+    def _build_graph(
+        self,
+        tools: list,
+        document_type: DocumentType,
+        system_prompt: str | None = None,
+    ):
         """Build a LangGraph workflow for drafting."""
         max_tokens = _PROVIDER_MAX_TOKENS.get(self.provider, 8192)
         llm = init_chat_model(self.model_name, model_provider=self.provider, max_tokens=max_tokens)
@@ -183,7 +199,8 @@ class BaseDraftingAgent:
         llm_structured = init_chat_model(
             self.model_name, model_provider=self.provider, max_tokens=max_tokens
         ).with_structured_output(GeneratedDocument)
-        system_msg = SystemMessage(content=self.system_prompt)
+        effective_system_prompt = system_prompt if system_prompt is not None else self.system_prompt
+        system_msg = SystemMessage(content=effective_system_prompt)
 
         async def agent_node(state: DraftAgentState):
             response = await llm_with_tools.ainvoke([system_msg] + state["messages"])
@@ -285,7 +302,10 @@ class BaseDraftingAgent:
 
     async def draft(self, deps: DraftingDependencies) -> GeneratedDocument:
         """Generate a legal document draft."""
-        logger.info(f"[draft] Starting: title='{deps.title}' | agent={self.__class__.__name__} | files={len(deps.file_ids)}")
+        logger.info(
+            f"[draft] Starting: title='{deps.title}' | agent={self.__class__.__name__} "
+            f"| files={len(deps.file_ids)}"
+        )
 
         # Load per-sub-type template reference. Prefer a caller-supplied
         # deps.template_reference; otherwise resolve via sub_type + category.
@@ -348,8 +368,10 @@ USE for:
 - Indian legal phrasing patterns
 - Clause style and tone
 
+Any `[Bracketed Field]` in these examples is a STRUCTURAL SLOT, not literal output.
+Fill each slot with real values from STRUCTURED INPUT and REFERENCE DOCUMENTS CONTEXT.
 DO NOT copy specific content (names, amounts, dates, facts) from these examples.
-Generate fresh content using ONLY the user's structured input.
+Generate fresh content using ONLY the user's structured input and uploaded documents.
 
 {deps.examples}
 === END REFERENCE EXAMPLES ===
@@ -390,6 +412,26 @@ Use formal legal Hindi terminology for the Hindi portions (see Hindi terms above
         if deps.uploaded_doc_text:
             rag_section = f"""
 === REFERENCE DOCUMENTS CONTEXT ===
+The following is the FULL TEXT of the source document(s) the user uploaded.
+Treat this as a PRIMARY DATA SOURCE — extract from it, and substitute into your
+draft, every value relevant to the cause title and body, including (but not
+limited to):
+  - Court name and seat (e.g., "Hon'ble Small Causes Court, Pune at Pune")
+  - Case caption / case number / year (if any)
+  - Each party's full name, age, occupation, full residential or office
+    address, and mobile number — preserving the role tag (Plaintiff /
+    Defendant / Applicant / Respondent / Petitioner)
+  - Property description, FIR / complaint particulars, statutory sections invoked
+  - All dates, amounts (in figures and words), and named third parties
+
+Precedence of sources:
+  - When STRUCTURED INPUT and this REFERENCE DOCUMENT disagree, prefer
+    STRUCTURED INPUT (it is what the advocate explicitly typed).
+  - When STRUCTURED INPUT is silent on a field, take it from here.
+  - Only when BOTH are silent, leave a clearly-named bracket like
+    `[Applicant Mobile]` or `[Court Name]` for the advocate to fill.
+    Do NOT fabricate.
+
 {deps.uploaded_doc_text}
 === END REFERENCE DOCUMENTS CONTEXT ===
 """
@@ -476,11 +518,13 @@ Use these EXACT details - names, ages, addresses, amounts, dates - in your draft
 
 Generate a COMPLETE, FINISHED Indian contract following the exact markdown template from your specialized prompt. Every major section appears as a ## heading. Every input field from the structured data appears naturally in the draft. Missing details filled with sensible Indian-advocate defaults. The output must read like a document a practising courtroom advocate would hand to a client for execution."""
 
+        selected_system_prompt = self._select_system_prompt(deps)
+
         tools = []
         if deps.retriever and deps.file_ids:
             tools.append(create_legal_search_tool(deps.retriever))
 
-        graph = self._build_graph(tools, deps.document_type)
+        graph = self._build_graph(tools, deps.document_type, system_prompt=selected_system_prompt)
         try:
             # recursion_limit caps the agent tool-loop — prevents the LLM
             # from infinitely emitting tool calls until the job-manager
