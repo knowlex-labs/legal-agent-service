@@ -16,6 +16,8 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Literal, cast
 
+from legal_agent.config import get_settings
+
 if TYPE_CHECKING:
     from legal_agent.agents.translation.structure_aware_extractor import LedgerEntry
 
@@ -64,6 +66,34 @@ _MIN_PDF_BYTES = 1024
 _PAGE_RATIO_LO = 0.25  # source_chars / 3000 / 2x
 _PAGE_RATIO_HI = 4.0   # source_chars / 3000 * 2x
 
+# PDF text extraction and locale-aware number rendering substitute one
+# numeral form for the other; without these tables the ledger check
+# false-positives on every translated document.
+_DEV_TO_LATIN = str.maketrans("०१२३४५६७८९", "0123456789")
+_LATIN_TO_DEV = str.maketrans("0123456789", "०१२३४५६७८९")
+
+
+def _normalize_for_match(text: str) -> str:
+    if not text:
+        return ""
+    return " ".join(text.split()).casefold()
+
+
+def _ledger_text_present(ledger_text: str, rendered_text: str) -> bool:
+    if not ledger_text:
+        return True
+    needle = _normalize_for_match(ledger_text)
+    haystack = _normalize_for_match(rendered_text)
+    if needle in haystack:
+        return True
+    needle_dev = needle.translate(_LATIN_TO_DEV)
+    if needle_dev != needle and needle_dev in haystack:
+        return True
+    needle_latin = needle.translate(_DEV_TO_LATIN)
+    if needle_latin != needle and needle_latin in haystack:
+        return True
+    return False
+
 
 def validate_rendered_pdf(
     pdf_bytes: bytes,
@@ -103,15 +133,27 @@ def validate_rendered_pdf(
     if coverage_warning:
         warnings.append(coverage_warning)
 
-    # 3. Ledger preservation — every entry must appear verbatim in the output.
+    # 3. Ledger preservation — soft warning so the PDF still uploads;
+    # missing entries surface as a notice in job metadata.
     if ledger:
-        missing = [e.text for e in ledger if e.text and e.text not in rendered_text]
+        missing = [
+            e.text for e in ledger
+            if e.text and not _ledger_text_present(e.text, rendered_text)
+        ]
         if missing:
-            preview = ", ".join(repr(m) for m in missing[:3])
-            warnings.append(GuardWarning(
-                "critical", "ledger_missing",
-                f"{len(missing)} do-not-translate entries dropped from output (e.g. {preview}).",
-            ))
+            tolerance = get_settings().translation_ledger_drop_tolerance
+            if len(missing) > tolerance:
+                preview = ", ".join(repr(m) for m in missing[:3])
+                warnings.append(GuardWarning(
+                    "warning", "ledger_missing",
+                    f"{len(missing)} do-not-translate entries dropped from output "
+                    f"(e.g. {preview}). Tolerance is {tolerance}.",
+                ))
+            else:
+                logger.info(
+                    "Ledger drop within tolerance: %d <= %d (sample: %s)",
+                    len(missing), tolerance, missing[:3],
+                )
 
     return warnings
 

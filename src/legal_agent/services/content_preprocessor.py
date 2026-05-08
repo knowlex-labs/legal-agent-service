@@ -15,6 +15,29 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+
+# Fast / cheap chat model per provider — used for content enhancement and
+# draft-field extraction.
+FAST_CHAT_MODELS: dict[str, str] = {
+    "openai": "gpt-4o-mini",
+    "anthropic": "claude-3-5-haiku-latest",
+    "gemini": "gemini-2.0-flash",
+}
+
+LANGCHAIN_PROVIDER_MAP: dict[str, str] = {
+    "openai": "openai",
+    "anthropic": "anthropic",
+    "gemini": "google-genai",
+}
+
+
+def pick_fast_chat_model(provider: str) -> tuple[str, str]:
+    """Return (model_name, langchain_provider) for the given top-level provider."""
+    return (
+        FAST_CHAT_MODELS.get(provider, "gpt-4o-mini"),
+        LANGCHAIN_PROVIDER_MAP.get(provider, provider),
+    )
+
 # Common legal misspellings and corrections
 SPELLING_CORRECTIONS: dict[str, str] = {
     # Legal terms
@@ -176,10 +199,17 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
     field_labels: list[tuple[str, str]] = [
         ("party_one_details", party_one_label),
         ("party_two_details", party_two_label),
+        ("applicant", "APPLICANT DETAILS"),
+        ("opposite_party", "OPPOSITE PARTY / COMPLAINANT DETAILS"),
+        ("appellant", "APPELLANT DETAILS"),
+        ("respondent", "RESPONDENT DETAILS"),
+        ("petitioner", "PETITIONER DETAILS"),
         ("court_details", "COURT DETAILS"),
         ("property_details", "PROPERTY / SUBJECT MATTER"),
         ("advocate_details", "ADVOCATE DETAILS"),
         ("facts", "CHRONOLOGICAL FACTS"),
+        ("grounds", "GROUNDS"),
+        ("writ_type", "WRIT TYPE"),
         ("relief_sought", "RELIEF SOUGHT"),
         ("terms", "KEY TERMS"),
         ("special_clauses", "SPECIAL CLAUSES"),
@@ -188,6 +218,7 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
         ("criminal_history", "CRIMINAL HISTORY"),
         ("bail_history", "PRIOR BAIL APPLICATIONS"),
         ("impugned_order", "IMPUGNED ORDER DETAILS"),
+        ("impugned_judgment", "IMPUGNED JUDGMENT DETAILS"),
         ("co_accused_details", "CO-ACCUSED DETAILS"),
     ]
 

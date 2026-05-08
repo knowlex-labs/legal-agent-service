@@ -58,6 +58,30 @@ class DraftConfig(BaseModel):
     co_accused_details: str | None = Field(
         None, description="Details of co-accused persons and their bail status"
     )
+    applicant: str | None = Field(
+        None, description="Applicant name (bail / anticipatory bail / generic application)"
+    )
+    opposite_party: str | None = Field(
+        None, description="Opposite party / complainant / state in criminal templates"
+    )
+    appellant: str | None = Field(
+        None, description="Appellant name (criminal / civil appeal)"
+    )
+    respondent: str | None = Field(
+        None, description="Respondent name (writ / appeal / SLP)"
+    )
+    petitioner: str | None = Field(
+        None, description="Petitioner name (writ / SLP / quashing)"
+    )
+    grounds: str | None = Field(
+        None, description="Legal grounds being argued (writ / appeal / revision)"
+    )
+    writ_type: str | None = Field(
+        None, description="Specific writ being invoked (writ petition only)"
+    )
+    impugned_judgment: str | None = Field(
+        None, description="Details of the judgment being challenged (criminal appeal / SLP)"
+    )
 
 
 class CreateDraftJobRequest(BaseModel):

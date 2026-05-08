@@ -98,6 +98,7 @@ async def lifespan(app: FastAPI):
     # operation). Avoids blocking startup on a cold/suspended Neon DB.
     template_service = TemplateService(s3_client=s3_client, settings=settings)
     set_template_service(template_service)
+    decryption_service = DecryptionService(settings) if settings.document_encryption_master_key else None
     draft_service = DraftService(
         settings=settings,
         job_manager=job_manager,
@@ -105,6 +106,7 @@ async def lifespan(app: FastAPI):
         s3_client=s3_client,
         retriever=legal_retriever,
         template_service=template_service,
+        decryption=decryption_service,
     )
     summary_service = SummaryService(
         generator=SummaryGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
@@ -117,7 +119,6 @@ async def lifespan(app: FastAPI):
         job_manager=job_manager,
         s3_client=s3_client,
     )
-    decryption_service = DecryptionService(settings) if settings.document_encryption_master_key else None
     translation_service = TranslationService(
         generator=TranslationGenerator(),
         job_manager=job_manager,

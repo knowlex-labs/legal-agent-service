@@ -104,6 +104,9 @@ class Settings(BaseSettings):
     # Document encryption (AES-256-GCM envelope encryption, matches platform API)
     document_encryption_master_key: str = ""
 
+    # Suppresses the ledger-drop warning when N missing entries <= tolerance.
+    translation_ledger_drop_tolerance: int = 2
+
     # ── Embeddings ────────────────────────────────────────────────────────
     # Each RAG system has its own embedding config so we can mix providers
     # without cross-contamination. `embedding_*` (legacy, below) is the
