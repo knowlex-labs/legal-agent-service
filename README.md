@@ -14,11 +14,11 @@ This service provides asynchronous legal document drafting capabilities with sup
 ## Architecture
 
 ```
-┌─────────────────┐       ┌──────────────────┐       ┌─────────────┐
-│  Legal Agent    │  <──> │   RAG Engine     │  <──> │  Vector DB  │
-│  Service        │       │  (localhost:8000)│       │             │
-│  (port 8001)    │       └──────────────────┘       └─────────────┘
-└─────────────────┘
+┌──────────────────────────────────────────┐       ┌─────────────┐
+│  Legal Agent Service (drafting, jobs,    │  <──> │  Qdrant     │
+│   workspace RAG API `/api/v1/collections`)│       │  (vectors)  │
+│  (default port 8001)                      │       └─────────────┘
+└──────────────────────────────────────────┘
         │
         v
 ┌─────────────────┐
@@ -33,7 +33,7 @@ This service provides asynchronous legal document drafting capabilities with sup
 
 - Python 3.12+
 - [uv](https://docs.astral.sh/uv/) (Python package manager)
-- RAG engine running on `localhost:8000`
+- Qdrant reachable from this service (`QDRANT_HOST` / `QDRANT_PORT`) for workspace document RAG
 - API key for your chosen LLM provider
 
 ## Installation
@@ -59,10 +59,6 @@ cp .env.example .env
 LLM_PROVIDER=openai
 LLM_MODEL=gpt-4o
 OPENAI_API_KEY=your-openai-api-key-here
-
-# RAG Engine Configuration
-RAG_ENGINE_BASE_URL=http://localhost:8000
-RAG_ENGINE_USER_ID=legal-agent-service
 
 # Service Configuration
 SERVICE_HOST=0.0.0.0
@@ -202,8 +198,6 @@ curl "http://localhost:8001/api/v1/drafts?limit=10&offset=0"
 | `OPENAI_API_KEY` | - | OpenAI API key |
 | `ANTHROPIC_API_KEY` | - | Anthropic API key |
 | `GEMINI_API_KEY` | - | Google Gemini API key |
-| `RAG_ENGINE_BASE_URL` | `http://localhost:8000` | RAG engine URL |
-| `RAG_ENGINE_USER_ID` | `legal-agent-service` | User ID for RAG requests |
 | `SERVICE_HOST` | `0.0.0.0` | Service host |
 | `SERVICE_PORT` | `8001` | Service port |
 | `DEBUG` | `false` | Debug mode (uses MockRAGClient) |
@@ -260,9 +254,8 @@ Import the included `postman_collection.json` to test the API:
 1. Open Postman
 2. Import `postman_collection.json`
 3. Set variables:
-   - `base_url`: `http://localhost:8001`
-   - `rag_base_url`: `http://localhost:8000`
-   - `file_id`: Your test file ID from RAG engine
+   - `base_url`: `http://localhost:8001` (RAG collections API is on the same port: `/api/v1/collections/...`)
+   - `file_id`: Your test file ID after indexing
 
 The collection includes:
 - Health check
@@ -353,10 +346,9 @@ ruff format src/
 - Ensure LLM API key is valid
 
 ### RAG integration failing
-- Verify RAG engine is running on port 8000
-- Check `RAG_ENGINE_BASE_URL` in `.env`
-- Enable `DEBUG=true` to see detailed logs
-- Test RAG endpoint directly: `curl -H "X-User-Id: test" http://localhost:8000/api/v1/health`
+- Confirm this service is up and Qdrant is reachable (`QDRANT_*` in `.env`)
+- With `DEBUG=true`, drafting/chat use `MockRAGClient` (no real retrieval); use `DEBUG=false` to hit Qdrant via `LocalRAGClient`
+- Smoke-test the in-process RAG API: `curl http://localhost:8001/api/v1/collections/list` (see `/docs` for all routes)
 
 ### No context from RAG
 - Verify file IDs are correct and indexed

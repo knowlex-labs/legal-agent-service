@@ -1,5 +1,5 @@
 """Client interfaces for external services."""
 
-from legal_agent.clients.rag_client import HTTPRAGClient, RAGClient
+from legal_agent.clients.rag_client import LocalRAGClient, RAGClient
 
-__all__ = ["RAGClient", "HTTPRAGClient"]
+__all__ = ["RAGClient", "LocalRAGClient"]

@@ -67,3 +67,14 @@ class JobListResponse(BaseModel):
 
     jobs: list[JobResponse] = Field(..., description="List of jobs")
     total: int = Field(..., description="Total number of jobs")
+
+
+class ExtractDraftFieldsRequest(BaseModel):
+    file_id: str = Field(..., description="S3 file_id of the uploaded source document")
+
+
+class ExtractDraftFieldsResponse(BaseModel):
+    suggested_fields: dict[str, str] = Field(
+        default_factory=dict,
+        description="Form-field id → suggested value. Empty when no metadata could be extracted.",
+    )

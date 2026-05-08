@@ -24,17 +24,33 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
     sarvam_api_key: str | None = None
+    mistral_api_key: str | None = None
 
-    # OCR backend selection. "gemini" = Gemini Vision (current default).
-    # "sarvam" = Sarvam Document Intelligence (22 Indian languages + English; ≤10 pages per job).
-    ocr_provider: Literal["gemini", "sarvam"] = "gemini"
+    # Model used for the structured-metadata extraction call inside output_node.
+    # Defaulted to Haiku so the small, fixed-shape extraction does not consume
+    # the main draft model's TPM budget (gpt-5.4 has hit OpenAI's 10k-TPM cap on
+    # interim-application drafts where the message history alone is ~10k tokens).
+    metadata_extraction_model: str = "claude-haiku-4-5-20251001"
+    metadata_extraction_provider: str = "anthropic"
+
+    # OCR backend selection. "gemini" = Gemini Vision (default, primary path).
+    # "mistral" = Mistral Pixtral (free tier; secondary path / Gemini fallback).
+    # "sarvam" = Sarvam Document Intelligence (markdown only; ≤10 pages per job).
+    ocr_provider: Literal["gemini", "mistral", "sarvam"] = "gemini"
     # Concurrent Sarvam jobs when chunking long PDFs. Each chunk is ≤10 pages.
     sarvam_ocr_concurrency: int = 4
     # Concurrent Gemini Vision calls per PDF (one call per page). Gemini API
     # rate-limits: free tier ~15 rpm, paid tier much higher. Lower if rate-limited.
     gemini_ocr_concurrency: int = 4
-    # Language hint passed to Sarvam. Examples: "en-IN", "hi-IN", "ta-IN", "unknown".
-    sarvam_ocr_language: str = "unknown"
+    # Concurrent Mistral Pixtral calls per PDF (one call per page).
+    mistral_ocr_concurrency: int = 4
+    # Mistral vision-capable model. Pixtral 12B is general-purpose; Pixtral Large
+    # is higher accuracy. Both work as drop-in.
+    mistral_vision_model: str = "pixtral-12b-2409"
+    # Language hint passed to Sarvam (BCP-47, must match Sarvam's accepted list).
+    # Sarvam's API rejects "unknown" — pick the document's primary script.
+    # Common: en-IN, hi-IN, mr-IN, ta-IN, te-IN, bn-IN, gu-IN.
+    sarvam_ocr_language: str = "en-IN"
     # Sarvam chat/translation model. Options: sarvam-m (24B, default), sarvam-30b, sarvam-105b.
     # Used when a request selects provider "sarvam" for translation or draft chat.
     sarvam_chat_model: str = "sarvam-m"
@@ -44,11 +60,6 @@ class Settings(BaseSettings):
     # retries, different translations, and RAG/draft flows. Disable for debugging.
     ocr_cache_enabled: bool = True
     ocr_cache_prefix: str = "ocr-cache"
-
-    # RAG Engine — when False, use HTTPRAGClient and do not import the in-process rag_engine
-    # (required for low-memory hosts e.g. Render 512MB; point rag_engine_base_url at a RAG-capable service)
-    rag_in_process: bool = True
-    rag_engine_base_url: str = "http://localhost:8000"
 
     # Service
     service_host: str = "0.0.0.0"
@@ -100,6 +111,9 @@ class Settings(BaseSettings):
     # Document encryption (AES-256-GCM envelope encryption, matches platform API)
     document_encryption_master_key: str = ""
 
+    # Suppresses the ledger-drop warning when N missing entries <= tolerance.
+    translation_ledger_drop_tolerance: int = 2
+
     # ── Embeddings ────────────────────────────────────────────────────────
     # Each RAG system has its own embedding config so we can mix providers
     # without cross-contamination. `embedding_*` (legacy, below) is the
@@ -139,7 +153,7 @@ class Settings(BaseSettings):
     openai_model: str = "gpt-4o"
     openai_max_tokens: int = 1000
     openai_temperature: float = 0.1
-    gemini_model: str = "gemini-2.0-flash"
+    gemini_model: str = "gemini-3.1-flash"
     gemini_max_tokens: int = 4000
     gemini_temperature: float = 0.1
     enable_json_response: bool = False

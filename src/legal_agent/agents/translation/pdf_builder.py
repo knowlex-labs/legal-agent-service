@@ -4,14 +4,24 @@ Primary: WeasyPrint (HTML/CSS → PDF) — correct Indic script rendering via Pa
 Fallback: fpdf2 — used if WeasyPrint is unavailable.
 """
 
+from __future__ import annotations
+
 import logging
 import os
 import re
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from legal_agent.agents.translation.doc_profiles import DocProfile
 
 logger = logging.getLogger(__name__)
 
 
-def markdown_to_pdf(md_text: str, target_language: str | None = None) -> bytes:
+def markdown_to_pdf(
+    md_text: str,
+    target_language: str | None = None,
+    profile: "DocProfile | None" = None,
+) -> bytes:
     """Convert markdown text to PDF bytes.
 
     Renderer priority:
@@ -22,13 +32,14 @@ def markdown_to_pdf(md_text: str, target_language: str | None = None) -> bytes:
     Args:
         md_text: Markdown-formatted translated document.
         target_language: Target language name (e.g. "hindi") for font optimization.
+        profile: Doc-type profile that selects layout CSS. None → default.
 
     Returns:
         PDF file as bytes.
     """
     weasy_exc: Exception | None = None
     try:
-        return _markdown_to_pdf_weasyprint(md_text, target_language)
+        return _markdown_to_pdf_weasyprint(md_text, target_language, profile)
     except Exception as exc:
         weasy_exc = exc
         logger.warning(f"WeasyPrint failed ({exc}), trying Playwright fallback")
@@ -71,13 +82,17 @@ def _is_non_latin_target(target_language: str | None) -> bool:
     return target_language.lower().strip() in _NON_LATIN_LANGUAGES
 
 
-def _markdown_to_pdf_weasyprint(md_text: str, target_language: str | None = None) -> bytes:
+def _markdown_to_pdf_weasyprint(
+    md_text: str,
+    target_language: str | None = None,
+    profile: "DocProfile | None" = None,
+) -> bytes:
     """Render markdown to PDF via WeasyPrint with legal document styling."""
     import weasyprint
 
     from legal_agent.agents.translation.html_builder import markdown_to_html
 
-    html_str = markdown_to_html(md_text, target_language)
+    html_str = markdown_to_html(md_text, target_language, profile)
     pdf_bytes = weasyprint.HTML(string=html_str).write_pdf()
     logger.info(f"Generated PDF via WeasyPrint ({len(pdf_bytes)} bytes)")
     return pdf_bytes

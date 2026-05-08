@@ -30,33 +30,35 @@ Platform API (Java) → POST /api/v1/jobs (this service)
 
 ### Key modules
 
-- **`agents/drafts/`** — 19 LangGraph agents, one per document type. All extend `base.py::BaseDraftingAgent` which builds a state graph: `agent_node` (LLM with tool calls) → `tools` (RAG/legal search) → `output_node` (extracts `GeneratedDocument`). **Important**: `output_node` captures the raw markdown from the agent's last message (preserving all formatting) and only uses structured output for metadata — see `base.py:155` for the rationale.
-- **`agents/translation/`** — Document translation pipeline. `service.py` orchestrates: extraction → LLM translation → PDF rendering. Uses Gemini Vision OCR for scanned PDFs (via `utils/ocr.py`), WeasyPrint for PDF output (falls back to fpdf2), with `html_builder.py` providing script-aware CSS for 22 Indian languages.
+- **`agents/drafts/`** — 16 LangGraph agents, one per document type (bail, anticipatory bail, quashing petition, revision petition, SLP, criminal appeal, written statement, written arguments, execution petition, consumer complaint, patent, contract, notice, court filing, application, + generic). All extend `base.py::BaseDraftingAgent` which builds a state graph: `agent_node` (LLM with tool calls) → `tools` (RAG/legal search) → `output_node` (extracts `GeneratedDocument`). Also houses `drafts/custom/` and `drafts/templates/`. **Important**: `output_node` captures the raw markdown from the agent's last message (preserving all formatting) and only uses structured output for metadata — see `base.py` for the rationale.
+- **`agents/translation/`** — Document translation pipeline. `service.py` orchestrates: extraction → LLM translation → PDF rendering. OCR for scanned PDFs is pluggable (Gemini Vision or Sarvam; see `utils/ocr.py`). WeasyPrint for PDF output (falls back to fpdf2), with `html_builder.py` providing script-aware CSS for 22 Indian languages.
 - **`services/draft_service.py`** — Routes to the right agent. Supports **per-request model override** (`request.model` field) via `_agent_classes` mapping + `_build_agent()`. Without override, uses the default-model instances in `_agents`.
 - **`services/job_manager.py`** — In-memory async job queue. All jobs (draft/translation/summary/synopsis) flow through this.
-- **`utils/ocr.py`** — Shared Gemini Vision OCR utility. Used by both the translation extractor and `rag_engine/parsers/pdf_parser.py`. Returns structured markdown or plain text based on `output_format` arg.
-- **`clients/`** — HTTP clients: `rag_client.py` (LocalRAGClient vs HTTPRAGClient based on `RAG_IN_PROCESS`), `s3_client.py`, `decryption.py` (AES-256-GCM for encrypted S3 files).
-- **`rag_engine/`** — In-process RAG stack (Qdrant + embeddings + parsers + reranker). Only loaded when `RAG_IN_PROCESS=true`. The in-process mode adds ~2.5GB memory footprint — see `legal_retrieval/` for the lighter case-law-only alternative.
+- **`services/content_preprocessor.py`** — Pre-processes uploaded content before agents consume it (chunk budgeting, text extraction normalisation).
+- **`utils/ocr.py`** — Shared OCR utility with dual backends: Gemini Vision (default) and Sarvam (better for Indic scripts; chunks >10-page PDFs via `SARVAM_OCR_CONCURRENCY`). Content-hashed S3 cache (`OCR_CACHE_ENABLED`, `OCR_CACHE_PREFIX`) avoids re-OCRing the same file. Used by both the translation extractor and `rag_engine/parsers/pdf_parser.py`. Returns structured markdown or plain text based on `output_format` arg.
+- **`utils/legal_postprocess.py`** — Post-processing pass over generated legal drafts (citation normalisation, structure fixes).
+- **`clients/`** — `rag_client.py` (`LocalRAGClient` for in-process workspace RAG), `s3_client.py`, `decryption.py` (AES-256-GCM for encrypted S3 files).
+- **`rag_engine/`** — In-process RAG stack (Qdrant + embeddings + parsers + reranker), mounted at `/api/v1/collections/*`. Heavy memory footprint (~2.5GB with full stack) — see `legal_retrieval/` for the lighter case-law-only alternative.
 - **`legal_retrieval/`** — PostgreSQL + pgvector hybrid search over Indian case law. Independent of `rag_engine/`. **Schema note**: `judgment_paragraphs.judgment_id` is the FK to `judgments.id` (not `case_id`) — see `db.py` for the hybrid RRF query.
-- **`workspace_chat/`, `draft_chat/`, `research_chat/`** — Conversational agents. `workspace_chat` uses `chat_llm_default_model` (Gemini by default) with per-request model override. These don't go through `JobManager` — they stream via SSE.
-- **`summary/`, `synopsis/`** — Document summarization/synopsis. Output markdown to S3, same async job pattern.
+- **`workspace_chat/`** — Conversational agent over workspace docs. Uses `chat_llm_default_model` (Gemini by default) with per-request model override. Does not go through `JobManager` — streams via SSE.
+- **`chat/`** — Chat-side utilities shared across conversational flows: `citation_utils.py`, `session_title.py`, `web_search.py` (Serper), and Firecrawl-based legal web search (`legal_web_search_firecrawl.py`, `firecrawl_verify.py`).
+- **`summary/`, `synopsis/`** — Document summarization/synopsis (supports multi-document input). Output markdown to S3, same async job pattern.
+- **`precedents/`** — Precedent extraction/generation over case-law retrieval.
 - **`causelist/`** — Court cause list scraping via Camoufox (anti-detect Firefox). **Memory-heavy**: launches a fresh browser per request, consuming 400-800MB. A single instance running this + Playwright + torch needs ~2-4GB in production.
-- **`case_agent/`** — Case management from cause lists.
 - **`prompts/`** — Centralized prompt templates. Per-agent prompts live in each agent file (e.g. `bail_agent.py`).
 - **`data/`** — Few-shot examples loaded at draft time via `services/examples_loader.py`.
 
 ### LLM configuration
 
-- **Draft model**: `LLM_PROVIDER` + `LLM_MODEL` in `.env` (default: OpenAI gpt-4o-mini). Applied at service init; every agent gets the same model.
+- **Draft model**: `LLM_PROVIDER` + `LLM_MODEL` in `.env` (`.env.example` ships OpenAI flagship `gpt-5.4`). Applied at service init; every agent gets the same model.
 - **Per-request override**: `CreateDraftJobRequest.model` lets callers override per job. The provider is inferred from the model prefix (`gemini-*` → google-genai, `gpt-*`/`o*` → openai, `claude-*` → anthropic).
 - **Max output tokens**: `base.py::_PROVIDER_MAX_TOKENS` — 16384 for OpenAI and Google, 8192 for Anthropic.
 - **Workspace chat default**: `chat_llm_default_model` (separate from drafting).
 - **Translation**: `generator.py::_MODEL_ALIASES` maps `"gemini"`/`"claude"`/`"openai"` to specific model IDs — requests can send either an alias or a full model name.
 
-### RAG modes
+### Workspace RAG
 
-- **In-process** (`RAG_IN_PROCESS=true`, default): Qdrant + embeddings + reranker all in this service. Use for dev or if you don't have a separate RAG service.
-- **Remote** (`RAG_IN_PROCESS=false`): Delegates to `RAG_ENGINE_BASE_URL`. Use in low-memory deployments.
+Workspace document RAG (user uploads) always runs in-process in this service (`LocalRAGClient` + `rag_engine/` HTTP routes under `/api/v1/collections`).
 
 ### Embedding configs — two independent systems
 
@@ -83,9 +85,12 @@ Embedding configs are **split per data source** because each uses a different pr
 Copy `.env.example` to `.env`. Key vars:
 - `LLM_PROVIDER` / `LLM_MODEL` — Default LLM for drafting
 - `CHAT_LLM_DEFAULT_MODEL` — Default for workspace chat
-- `GEMINI_API_KEY` — Used for Vision OCR + translation regardless of LLM_PROVIDER
-- `RAG_IN_PROCESS` — Toggle in-process RAG
-- `QDRANT_HOST` / `QDRANT_PORT`, `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` — RAG stack
+- `GEMINI_API_KEY` — Used for Vision OCR (when `OCR_PROVIDER=gemini`) + translation regardless of LLM_PROVIDER
+- `OCR_PROVIDER` — `gemini` (default) or `sarvam`. Sarvam caps at ≤10 pages/job; long PDFs are chunked (`SARVAM_OCR_CONCURRENCY`, `SARVAM_OCR_LANGUAGE`)
+- `OCR_CACHE_ENABLED` / `OCR_CACHE_PREFIX` — S3-backed content-hashed OCR cache; disable only for debugging
+- `SARVAM_API_KEY`, `SARVAM_CHAT_MODEL`, `SARVAM_API_BASE_URL` — Sarvam OCR + OpenAI-compatible chat
+- `SERPER_API_KEY`, `FIRECRAWL_API_KEY` — web search + legal web research tools (chat flows)
+- `QDRANT_HOST` / `QDRANT_PORT`, `EMBEDDING_PROVIDER` / `EMBEDDING_MODEL` — workspace RAG stack
 - `LEGAL_DB_URL` — Postgres for `legal_retrieval/` case law search
 - `S3_*` — AWS S3 for document storage
 - `DOCUMENT_ENCRYPTION_MASTER_KEY` — Needed for decrypting user-uploaded files in the translation flow

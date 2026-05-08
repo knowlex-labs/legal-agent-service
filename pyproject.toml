@@ -5,6 +5,8 @@ description = "Legal drafting agent service for Indian legal firms"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
+    # anyio (via FastAPI) imports typing_extensions; pin explicitly so uv resolves it reliably.
+    "typing-extensions>=4.10.0",
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
     "pydantic>=2.5.0",
@@ -16,6 +18,7 @@ dependencies = [
     "langchain-google-genai>=2.1.0",
     "google-genai>=1.0.0",
     "sarvamai>=0.1.0",
+    "mistralai>=1.0.0",
     "firecrawl-py>=2.0.0",
     "langgraph>=0.2.0",
     "httpx>=0.26.0",
@@ -44,6 +47,8 @@ dependencies = [
     "fpdf2>=2.8.0",
     "weasyprint>=62.0",
     "markdown>=3.5",
+    "pdf2docx>=0.5.8",
+    "mammoth>=1.8.0",
     # NumPy 2.x avoids broken/partial 1.26 installs that raise
     # ImportError: cannot import name 'matrix_power' from 'numpy.linalg' (unknown location)
     "numpy>=2.1.0,<3",
@@ -69,7 +74,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [tool.setuptools.package-data]
-legal_agent = ["**/*.md", "**/*.json", "**/*.yaml"]
+legal_agent = ["**/*.md", "**/*.json", "**/*.yaml", "**/*.css"]
 
 [tool.ruff]
 line-length = 100

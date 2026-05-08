@@ -34,7 +34,7 @@ from legal_agent.api.routes import router, set_services
 from legal_agent.agents.translation.generator import TranslationGenerator
 from legal_agent.agents.translation.service import TranslationService
 from legal_agent.causelist.routes import causelist_router
-from legal_agent.clients.rag_client import HTTPRAGClient, LocalRAGClient, MockRAGClient
+from legal_agent.clients.rag_client import LocalRAGClient, MockRAGClient
 from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.config import get_settings
@@ -65,7 +65,7 @@ def _setup_llm_environment() -> None:
 
 _setup_llm_environment()
 job_manager: JobManager | None = None
-rag_client: LocalRAGClient | HTTPRAGClient | MockRAGClient | None = None
+rag_client: LocalRAGClient | MockRAGClient | None = None
 workspace_chat_agent: WorkspaceChatAgent | None = None
 
 async def _init_workspace_chat_agent(retriever: LegalCaseRetriever | None):
@@ -85,17 +85,8 @@ async def lifespan(app: FastAPI):
     settings = get_settings()
     logger.info(f"Starting legal-agent-service (draft={settings.llm_model}, chat_default={settings.chat_llm_default_model})")
     job_manager = JobManager()
-    if settings.rag_in_process:
-        rag_client = MockRAGClient() if settings.debug else LocalRAGClient()
-        logger.info("RAG mode: in-process (LocalRAGClient)")
-    else:
-        rag_client = HTTPRAGClient(settings)
-        logger.info(f"RAG mode: external HTTP → {settings.rag_engine_base_url}")
-        _rag_url = settings.rag_engine_base_url.lower()
-        if "localhost" in _rag_url or "127.0.0.1" in _rag_url:
-            logger.warning(
-                "rag_in_process=false but RAG_ENGINE_BASE_URL looks local; set a reachable URL in production"
-            )
+    rag_client = MockRAGClient() if settings.debug else LocalRAGClient()
+    logger.info("RAG: in-process (LocalRAGClient)" if not settings.debug else "RAG: debug (MockRAGClient)")
     legal_retriever: LegalCaseRetriever | None = None
     try:
         legal_retriever = LegalCaseRetriever()
@@ -107,6 +98,7 @@ async def lifespan(app: FastAPI):
     # operation). Avoids blocking startup on a cold/suspended Neon DB.
     template_service = TemplateService(s3_client=s3_client, settings=settings)
     set_template_service(template_service)
+    decryption_service = DecryptionService(settings) if settings.document_encryption_master_key else None
     draft_service = DraftService(
         settings=settings,
         job_manager=job_manager,
@@ -114,6 +106,7 @@ async def lifespan(app: FastAPI):
         s3_client=s3_client,
         retriever=legal_retriever,
         template_service=template_service,
+        decryption=decryption_service,
     )
     summary_service = SummaryService(
         generator=SummaryGenerator(rag_client), job_manager=job_manager, s3_client=s3_client
@@ -126,7 +119,6 @@ async def lifespan(app: FastAPI):
         job_manager=job_manager,
         s3_client=s3_client,
     )
-    decryption_service = DecryptionService(settings) if settings.document_encryption_master_key else None
     translation_service = TranslationService(
         generator=TranslationGenerator(),
         job_manager=job_manager,
@@ -172,9 +164,9 @@ def create_app() -> FastAPI:
     app.include_router(templates_router, prefix="/api/v1/drafts/templates", tags=["draft-templates"])
     app.include_router(workspace_chat_router, prefix="/api/v1", tags=["workspace-chat"])
     app.include_router(causelist_router, prefix="/api/v1", tags=["causelist"])
-    if settings.rag_in_process:
-        from legal_agent.rag_engine.api.routes.collections import router as rag_collections_router
-        app.include_router(rag_collections_router, prefix="/api/v1/collections", tags=["rag"])
+    from legal_agent.rag_engine.api.routes.collections import router as rag_collections_router
+
+    app.include_router(rag_collections_router, prefix="/api/v1/collections", tags=["rag"])
     @app.get("/")
     async def root():
         return {"service": "legal-agent-service", "version": "0.1.0", "docs": "/docs"}

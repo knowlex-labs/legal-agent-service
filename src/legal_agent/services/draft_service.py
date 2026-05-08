@@ -1,5 +1,6 @@
 """Draft service that orchestrates the document drafting workflow."""
 
+import asyncio
 import logging
 import re
 
@@ -21,6 +22,10 @@ from legal_agent.agents.drafts.revision_petition_agent import RevisionPetitionAg
 from legal_agent.agents.drafts.slp_agent import SLPAgent
 from legal_agent.agents.drafts.written_arguments_agent import WrittenArgumentsAgent
 from legal_agent.agents.drafts.written_statement_agent import WrittenStatementAgent
+from legal_agent.agents.translation.structure_aware_extractor import (
+    extract_for_translation,
+)
+from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import Settings
@@ -33,6 +38,7 @@ from legal_agent.models.documents import DocumentType, GeneratedDocument
 from legal_agent.models.requests import CreateDraftJobRequest
 from legal_agent.models.responses import JobStatus, JobType
 from legal_agent.services.content_preprocessor import (
+    FAST_CHAT_MODELS,
     assemble_config_text,
     preprocess_and_enhance,
     preprocess_title,
@@ -48,16 +54,39 @@ def _slugify(text: str) -> str:
     return re.sub(r"[\s_]+", "-", text)
 
 
+_FILENAME_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_FILENAME_MAX_LEN = 200
+
+
+def _safe_filename(title: str | None, *, ext: str = ".md", fallback: str = "Draft") -> str:
+    """Sanitize a user-provided title into a display filename.
+
+    - Strips filesystem-illegal chars (Windows + POSIX) and control bytes.
+    - Trims trailing dots/whitespace (Windows reserves these).
+    - Caps length so the stem stays under `_FILENAME_MAX_LEN` chars.
+    - Avoids double-appending `ext` if the title already ends with it.
+    - Falls back to `fallback` when the result is empty.
+    """
+    cleaned = _FILENAME_ILLEGAL.sub("", title or "").strip()
+    cleaned = cleaned.rstrip(". ").strip()
+    if cleaned.lower().endswith(ext.lower()):
+        cleaned = cleaned[: -len(ext)].rstrip(". ").strip()
+    if not cleaned:
+        cleaned = fallback
+    if len(cleaned) > _FILENAME_MAX_LEN:
+        cleaned = cleaned[:_FILENAME_MAX_LEN].rstrip(". ").strip() or fallback
+    return f"{cleaned}{ext}"
+
+
 def _markdown_for_upload(document: GeneratedDocument) -> str:
     """Assemble final markdown and run safety post-processing.
 
     Steps:
     1. Prefer `document.draft` (the agent's raw markdown). Fall back to
        assembling from `document.sections` if `draft` is empty.
-    2. Run `apply_draft_postprocess` — masks Aadhaar, asserts no unfilled
-       placeholders (`[Amount]`, `XXXX`, etc.), asserts minimum length.
-       Raises ValueError on failure → job fails loudly instead of shipping
-       malformed content.
+    2. Run `apply_draft_postprocess` — masks Aadhaar, warns on any unfilled
+       placeholders (`[Amount]`, `XXXX`, etc.) without failing, and asserts
+       minimum length. Length is still a hard failure.
     """
     from legal_agent.utils.legal_postprocess import apply_draft_postprocess
 
@@ -87,6 +116,10 @@ def _markdown_for_upload(document: GeneratedDocument) -> str:
 class DraftService:
     """Service that orchestrates the document drafting workflow."""
 
+    # ~20K tokens; leaves room in a Tier 1 context for system prompt,
+    # examples, and the generated draft.
+    _UPLOAD_TEXT_CHAR_CAP = 80_000
+
     def __init__(
         self,
         settings: Settings,
@@ -95,6 +128,7 @@ class DraftService:
         s3_client: S3Client,
         retriever: LegalCaseRetriever | None = None,
         template_service: TemplateService | None = None,
+        decryption: DecryptionService | None = None,
     ):
         self.settings = settings
         self.job_manager = job_manager
@@ -102,6 +136,7 @@ class DraftService:
         self.s3_client = s3_client
         self.retriever = retriever
         self.template_service = template_service
+        self.decryption = decryption
 
         # Mapping of document type -> agent class. Used to instantiate one-off
         # agents when the request overrides the default model.
@@ -139,13 +174,7 @@ class DraftService:
 
     def _get_enhance_model_string(self) -> str:
         provider = self.settings.llm_provider
-        fast_models = {
-            "openai": "gpt-4o-mini",
-            "anthropic": "claude-3-5-haiku-latest",
-            "gemini": "gemini-2.0-flash",
-        }
-        model = fast_models.get(provider, "gpt-4o-mini")
-        return f"{provider}:{model}"
+        return f"{provider}:{FAST_CHAT_MODELS.get(provider, 'gpt-4o-mini')}"
 
     def _get_agent(self, document_type: DocumentType) -> BaseDraftingAgent:
         if document_type not in self._agents:
@@ -174,6 +203,80 @@ class DraftService:
         agent_cls = self._agent_classes[document_type]
         provider = self._resolve_provider(model)
         return agent_cls(model, provider)
+
+    async def _fetch_and_parse_uploads(
+        self, file_ids: list[str], user_id: str, job_id: str
+    ) -> tuple[str | None, list[str]]:
+        """Download + decrypt + parse user-uploaded source PDFs for prompt context.
+
+        Returns (merged_text, dropped_file_ids). dropped_file_ids surfaces
+        in job metadata so the FE can warn the user that an attached PDF
+        didn't reach the agent.
+        """
+        if not file_ids:
+            return None, []
+        if not self.decryption:
+            logger.warning(
+                f"[{job_id}] Cannot fetch uploaded docs — DecryptionService not configured "
+                f"(DOCUMENT_ENCRYPTION_MASTER_KEY missing). Falling back to RAG."
+            )
+            return None, list(file_ids)
+
+        async def fetch_one(file_id: str) -> tuple[str, str | None, str | None]:
+            """Returns (file_id, filename, text). text=None signals a drop."""
+            try:
+                encrypted = await self.s3_client.download_bytes(file_id)
+                plaintext = await asyncio.to_thread(
+                    self.decryption.decrypt_file, encrypted, user_id
+                )
+                filename = file_id.rsplit("/", 1)[-1]
+                text, _ledger = await asyncio.to_thread(
+                    extract_for_translation, plaintext, filename, None
+                )
+                return file_id, filename, text
+            except Exception as exc:
+                # Log with traceback so a future S3/decryption/parse failure
+                # surfaces the cause instead of a one-line warning.
+                logger.exception(
+                    f"[{job_id}] Failed to fetch/parse upload {file_id}: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                return file_id, None, None
+
+        results = await asyncio.gather(*(fetch_one(fid) for fid in file_ids))
+
+        parts: list[str] = []
+        dropped: list[str] = []
+        total = 0
+        cap = self._UPLOAD_TEXT_CHAR_CAP
+        truncated = False
+        for file_id, filename, text in results:
+            if not text or not text.strip() or filename is None:
+                dropped.append(file_id)
+                continue
+
+            header = f"\n\n--- {filename} ---\n"
+            if total + len(header) + len(text) > cap:
+                remaining = cap - total - len(header)
+                if remaining > 200:
+                    parts.append(header)
+                    parts.append(text[:remaining])
+                    total = cap
+                truncated = True
+                break
+
+            parts.append(header)
+            parts.append(text)
+            total += len(header) + len(text)
+
+        if truncated:
+            logger.warning(
+                f"[{job_id}] Truncated upload context to {cap} chars "
+                f"(across {len(file_ids)} file(s))"
+            )
+
+        merged = "".join(parts).strip() or None
+        return merged, dropped
 
     async def create_draft_job(self, request: CreateDraftJobRequest, user_id: str) -> str:
         """Create a new draft job and start processing. Returns job_id."""
@@ -210,6 +313,21 @@ class DraftService:
     ) -> str:
         """Execute the drafting task. Returns s3_path."""
         logger.debug(f"[{job_id}] Starting draft execution")
+
+        uploaded_doc_text: str | None = None
+        if request.file_ids:
+            uploaded_doc_text, dropped_uploads = await self._fetch_and_parse_uploads(
+                request.file_ids, user_id, job_id
+            )
+            if uploaded_doc_text:
+                logger.info(
+                    f"[{job_id}] Injected uploaded doc text: "
+                    f"{len(uploaded_doc_text)} chars from {len(request.file_ids)} file(s)"
+                )
+            if dropped_uploads:
+                await self.job_manager.update_job_metadata(
+                    job_id, dropped_uploads=dropped_uploads
+                )
 
         # Step 1: Preprocess + enhance content
         cleaned_title = preprocess_title(request.title)
@@ -271,6 +389,7 @@ class DraftService:
             language=language,
             retriever=self.retriever,
             sub_type=sub_type,
+            uploaded_doc_text=uploaded_doc_text,
         )
 
         logger.debug(f"[{job_id}] Calling agent.draft()")
@@ -291,7 +410,8 @@ class DraftService:
         )
 
         # Step 4: Upload to S3
-        # Use request title for proper naming (user-provided title)
+        # Slug is used only for the S3 key; the displayed file_name preserves
+        # the user-provided title verbatim (sans filesystem-illegal chars).
         slug = _slugify(request.title)
         s3_path = f"{request.case_folder_id}/drafts/{slug}.md"
         try:
@@ -299,9 +419,8 @@ class DraftService:
         except Exception as exc:
             raise StagedError(ErrorStage.UPLOAD, exc) from exc
 
-        # Get signed URL and update job with file details
         signed_url = await self.s3_client.signed_url(s3_path)
-        file_name = f"{slug}.md"
+        file_name = _safe_filename(request.title)
         await self.job_manager.update_job_status(
             job_id,
             JobStatus.COMPLETED,

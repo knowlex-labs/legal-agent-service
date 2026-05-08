@@ -32,7 +32,7 @@ def rerank(query: str, documents: list[dict], top_k: int) -> list[dict]:
 
     # Try the shared RAG reranker first (may use a lighter model already loaded)
     settings = get_settings()
-    if settings.rag_in_process and settings.reranker_enabled:
+    if settings.reranker_enabled:
         try:
             from legal_agent.rag_engine.core.reranker import reranker as rag_reranker
 

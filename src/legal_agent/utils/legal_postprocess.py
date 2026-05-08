@@ -42,11 +42,24 @@ _PLACEHOLDER_WORDS = re.compile(
 _EXTERNAL_TBD = re.compile(r"(?i)^to be \w+(?:\s+\w+)*\s+by\s+\w+")
 
 
+# Cause-title HTML emits its own bracketed gaps (e.g. [Court Name]) when
+# extraction misses a field; those are advocate-editable and must not trip
+# the placeholder regex.
+_CAUSE_TITLE_SPAN = re.compile(
+    r"<!-- cause-title:start -->.*?<!-- cause-title:end -->", re.DOTALL
+)
+
+
+def _strip_cause_title_spans(markdown: str) -> str:
+    return _CAUSE_TITLE_SPAN.sub("", markdown)
+
+
 def detect_placeholders(markdown: str) -> list[str]:
     """Return a list of placeholder snippets found in the draft, empty if clean.
 
     Distinct values only, capped at 20 entries so a runaway template with
-    hundreds of placeholders produces a readable error message.
+    hundreds of placeholders produces a readable error message. Cause-title
+    sentinel spans are stripped before scanning (see `_CAUSE_TITLE_SPAN`).
     """
     found: list[str] = []
     seen: set[str] = set()
@@ -57,15 +70,17 @@ def detect_placeholders(markdown: str) -> list[str]:
             seen.add(snippet)
             found.append(snippet)
 
-    for m in _PLACEHOLDER_BRACKET.finditer(markdown):
+    scoped = _strip_cause_title_spans(markdown)
+
+    for m in _PLACEHOLDER_BRACKET.finditer(scoped):
         if _EXTERNAL_TBD.match(m.group(1)):
             continue
         _add(m.group(0))
-    for m in _PLACEHOLDER_MUSTACHE.finditer(markdown):
+    for m in _PLACEHOLDER_MUSTACHE.finditer(scoped):
         _add(m.group(0))
-    for m in _PLACEHOLDER_UNDERSCORES.finditer(markdown):
+    for m in _PLACEHOLDER_UNDERSCORES.finditer(scoped):
         _add(m.group(0))
-    for m in _PLACEHOLDER_WORDS.finditer(markdown):
+    for m in _PLACEHOLDER_WORDS.finditer(scoped):
         _add(m.group(0))
 
     return found[:20]
@@ -221,13 +236,20 @@ def check_citation_grounding(
 # ──────────────────────────────────────────────────────────────────────
 
 def apply_draft_postprocess(markdown: str) -> str:
-    """Run Aadhaar masking, then assert placeholders + length. Returns cleaned text.
+    """Run Aadhaar masking, log (don't raise on) placeholders, assert length.
 
-    Mutating step (Aadhaar) runs first so the assertion sees the post-mask text
-    and doesn't mistake a real Aadhaar number for a placeholder. Placeholder
-    and length assertions raise ValueError on failure.
+    Mutating step (Aadhaar) runs first so detection sees the post-mask text
+    and doesn't mistake a real Aadhaar number for a placeholder. Unfilled
+    placeholders are logged as a warning and shipped as-is — the lawyer can
+    edit them downstream. Length assertion still raises.
     """
     masked, _ = mask_aadhaar(markdown)
-    assert_no_placeholders(masked)
+    placeholders = detect_placeholders(masked)
+    if placeholders:
+        preview = ", ".join(f"'{p}'" for p in placeholders[:8])
+        more = f" (+{len(placeholders) - 8} more)" if len(placeholders) > 8 else ""
+        logger.warning(
+            "Draft shipped with unfilled placeholders: %s%s", preview, more
+        )
     assert_draft_length(masked)
     return masked

@@ -1,13 +1,20 @@
 """Translation generator — LLM-based legal document translation with strict terminology."""
 
+from __future__ import annotations
+
 import logging
 import re
+from typing import TYPE_CHECKING
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage, SystemMessage
 
+from legal_agent.agents.translation.glossary_loader import get_glossary, merge_overlay
 from legal_agent.config import get_settings
 from legal_agent.models.documents import LANGUAGE_NATIVE_NAMES, TranslationLanguage
+
+if TYPE_CHECKING:
+    from legal_agent.agents.translation.doc_profiles import DocProfile
 
 logger = logging.getLogger(__name__)
 
@@ -31,385 +38,11 @@ _MODEL_ALIASES: dict[str, str] = {
 }
 
 # ── Mandatory legal terminology per language ──────────────────────────────────
-# When a term appears in the source, the model MUST use the mapped translation.
-# Only the target language's terms are injected into the prompt.
+# Loaded at module init from `data/glossaries/base.json` via `glossary_loader`.
+# Doc-type profiles (see `doc_profiles.py`) layer their own overlay on top in
+# `_build_system_prompt`, so a bail filing gets bail-specific terms without
+# affecting unrelated translations.
 
-_LEGAL_TERMS: dict[str, dict[str, str]] = {
-    "hindi": {
-        "Petition": "याचिका",
-        "Application": "आवेदन",
-        "Affidavit": "शपथ पत्र",
-        "Applicant": "आवेदक",
-        "Respondent": "प्रत्यर्थी",
-        "Appellant": "अपीलार्थी",
-        "Plaintiff": "वादी",
-        "Defendant": "प्रतिवादी",
-        "Accused": "अभियुक्त",
-        "Bail": "जमानत",
-        "Anticipatory Bail": "अग्रिम जमानत",
-        "FIR": "प्रथम सूचना रिपोर्ट",
-        "Charge Sheet": "आरोप पत्र",
-        "Section": "धारा",
-        "Act": "अधिनियम",
-        "Code": "संहिता",
-        "Rule": "नियम",
-        "Order": "आदेश",
-        "Judgment": "निर्णय",
-        "Decree": "डिक्री",
-        "Prayer": "प्रार्थना",
-        "Grounds": "आधार",
-        "Facts": "तथ्य",
-        "Witness": "साक्षी",
-        "Evidence": "साक्ष्य",
-        "Testimony": "गवाही",
-        "Hon'ble Court": "माननीय न्यायालय",
-        "Advocate": "अधिवक्ता",
-        "Judge": "न्यायाधीश",
-        "Versus": "विरुद्ध",
-        "Jurisdiction": "अधिकार क्षेत्र",
-        "Injunction": "व्यादेश",
-        "Stay": "स्थगन",
-        "Contempt": "अवमानना",
-        "Compromise": "समझौता",
-        "Settlement": "निपटान",
-        "Arbitration": "मध्यस्थता",
-        "Power of Attorney": "मुख्तारनामा",
-        "Notarized": "नोटरीकृत",
-        "Criminal": "आपराधिक",
-        "Civil": "दीवानी",
-        "Non-compete": "प्रतिस्पर्धा-निषेध",
-        "Non-solicitation": "ग्राहक/कर्मचारी अनाकर्षण",
-        "Termination": "समाप्ति",
-        "Indemnity": "क्षतिपूर्ति",
-        "Confidentiality": "गोपनीयता",
-        "Force Majeure": "अप्रत्याशित घटना",
-        "Liability": "दायित्व",
-        "Negligence": "लापरवाही",
-        "Probation": "परीक्षाकाल",
-        "CrPC": "दण्ड प्रक्रिया संहिता",
-        "BNSS": "भारतीय नागरिक सुरक्षा संहिता",
-        "BNS": "भारतीय न्याय संहिता",
-        "IPC": "भारतीय दण्ड संहिता",
-    },
-    "bengali": {
-        "Petition": "আবেদনপত্র",
-        "Application": "দরখাস্ত",
-        "Affidavit": "হলফনামা",
-        "Applicant": "আবেদনকারী",
-        "Respondent": "প্রতিবাদী",
-        "Plaintiff": "বাদী",
-        "Defendant": "বিবাদী",
-        "Accused": "অভিযুক্ত",
-        "Bail": "জামিন",
-        "Section": "ধারা",
-        "Act": "আইন",
-        "Order": "আদেশ",
-        "Judgment": "রায়",
-        "Witness": "সাক্ষী",
-        "Hon'ble Court": "মাননীয় আদালত",
-        "Advocate": "আইনজীবী",
-        "Prayer": "প্রার্থনা",
-        "Grounds": "ভিত্তি",
-        "Facts": "তথ্য",
-    },
-    "tamil": {
-        "Petition": "மனு",
-        "Application": "விண்ணப்பம்",
-        "Affidavit": "சத்தியப்பிரமாணம்",
-        "Applicant": "மனுதாரர்",
-        "Respondent": "எதிர்மனுதாரர்",
-        "Plaintiff": "வாதி",
-        "Defendant": "பிரதிவாதி",
-        "Accused": "குற்றவாளி",
-        "Bail": "ஜாமீன்",
-        "Section": "பிரிவு",
-        "Act": "சட்டம்",
-        "Order": "ஆணை",
-        "Judgment": "தீர்ப்பு",
-        "Witness": "சாட்சி",
-        "Hon'ble Court": "மாண்புமிகு நீதிமன்றம்",
-        "Advocate": "வழக்கறிஞர்",
-        "Prayer": "வேண்டுகோள்",
-        "Grounds": "அடிப்படை",
-        "Facts": "உண்மைகள்",
-    },
-    "marathi": {
-        "Petition": "याचिका",
-        "Application": "अर्ज",
-        "Affidavit": "प्रतिज्ञापत्र",
-        "Applicant": "अर्जदार",
-        "Respondent": "सामनेवाला",
-        "Plaintiff": "वादी",
-        "Defendant": "प्रतिवादी",
-        "Accused": "आरोपी",
-        "Bail": "जामीन",
-        "Section": "कलम",
-        "Act": "अधिनियम",
-        "Order": "आदेश",
-        "Judgment": "निकालपत्र",
-        "Witness": "साक्षीदार",
-        "Hon'ble Court": "मा. न्यायालय",
-        "Advocate": "अधिवक्ता",
-        "Prayer": "प्रार्थना",
-        "Grounds": "कारणे",
-        "Facts": "वस्तुस्थिती",
-    },
-    "telugu": {
-        "Petition": "పిటిషన్",
-        "Application": "దరఖాస్తు",
-        "Affidavit": "అఫిడవిట్",
-        "Applicant": "దరఖాస్తుదారు",
-        "Respondent": "ప్రతివాది",
-        "Plaintiff": "వాది",
-        "Defendant": "ప్రతివాది",
-        "Accused": "నిందితుడు",
-        "Bail": "బెయిల్",
-        "Section": "సెక్షన్",
-        "Act": "చట్టం",
-        "Order": "ఉత్తర్వు",
-        "Judgment": "తీర్పు",
-        "Witness": "సాక్షి",
-        "Hon'ble Court": "గౌరవనీయ న్యాయస్థానం",
-        "Advocate": "న్యాయవాది",
-    },
-    "gujarati": {
-        "Petition": "અરજી",
-        "Application": "અરજી",
-        "Affidavit": "સોગંદનામું",
-        "Applicant": "અરજદાર",
-        "Respondent": "સામાવાળા",
-        "Plaintiff": "વાદી",
-        "Defendant": "પ્રતિવાદી",
-        "Accused": "આરોપી",
-        "Bail": "જામીન",
-        "Section": "કલમ",
-        "Act": "અધિનિયમ",
-        "Order": "હુકમ",
-        "Judgment": "ચુકાદો",
-        "Witness": "સાક્ષી",
-        "Hon'ble Court": "માનનીય અદાલત",
-        "Advocate": "વકીલ",
-    },
-    "kannada": {
-        "Petition": "ಅರ್ಜಿ",
-        "Application": "ಅರ್ಜಿ",
-        "Affidavit": "ಪ್ರಮಾಣ ಪತ್ರ",
-        "Applicant": "ಅರ್ಜಿದಾರ",
-        "Respondent": "ಪ್ರತಿವಾದಿ",
-        "Plaintiff": "ವಾದಿ",
-        "Defendant": "ಪ್ರತಿವಾದಿ",
-        "Accused": "ಆರೋಪಿ",
-        "Bail": "ಜಾಮೀನು",
-        "Section": "ಕಲಂ",
-        "Act": "ಅಧಿನಿಯಮ",
-        "Order": "ಆದೇಶ",
-        "Judgment": "ತೀರ್ಪು",
-        "Witness": "ಸಾಕ್ಷಿ",
-        "Hon'ble Court": "ಮಾನ್ಯ ನ್ಯಾಯಾಲಯ",
-        "Advocate": "ನ್ಯಾಯವಾದಿ",
-    },
-    "malayalam": {
-        "Petition": "ഹർജി",
-        "Application": "അപേക്ഷ",
-        "Affidavit": "സത്യവാങ്മൂലം",
-        "Applicant": "അപേക്ഷകൻ",
-        "Respondent": "എതിർകക്ഷി",
-        "Plaintiff": "വാദി",
-        "Defendant": "പ്രതിവാദി",
-        "Accused": "പ്രതി",
-        "Bail": "ജാമ്യം",
-        "Section": "വകുപ്പ്",
-        "Act": "നിയമം",
-        "Order": "ഉത്തരവ്",
-        "Judgment": "വിധി",
-        "Witness": "സാക്ഷി",
-        "Hon'ble Court": "ബഹുമാനപ്പെട്ട കോടതി",
-        "Advocate": "അഭിഭാഷകൻ",
-    },
-    "punjabi": {
-        "Petition": "ਅਰਜ਼ੀ",
-        "Applicant": "ਅਰਜ਼ੀਕਰਤਾ",
-        "Bail": "ਜ਼ਮਾਨਤ",
-        "Section": "ਧਾਰਾ",
-        "Act": "ਕਾਨੂੰਨ",
-        "Order": "ਹੁਕਮ",
-        "Judgment": "ਫੈਸਲਾ",
-        "Witness": "ਗਵਾਹ",
-        "Hon'ble Court": "ਮਾਨਯੋਗ ਅਦਾਲਤ",
-        "Advocate": "ਵਕੀਲ",
-    },
-    "urdu": {
-        "Petition": "درخواست",
-        "Application": "درخواست",
-        "Affidavit": "حلف نامہ",
-        "Applicant": "درخواست گزار",
-        "Respondent": "مدعا علیہ",
-        "Plaintiff": "مدعی",
-        "Defendant": "مدعا علیہ",
-        "Accused": "ملزم",
-        "Bail": "ضمانت",
-        "Section": "دفعہ",
-        "Act": "ایکٹ",
-        "Order": "حکم",
-        "Judgment": "فیصلہ",
-        "Witness": "گواہ",
-        "Hon'ble Court": "معزز عدالت",
-        "Advocate": "وکیل",
-        "Prayer": "التجا",
-        "Grounds": "بنیادیں",
-        "Facts": "حقائق",
-    },
-    "odia": {
-        "Petition": "ଆବେଦନ",
-        "Application": "ଦରଖାସ୍ତ",
-        "Affidavit": "ଶପଥପତ୍ର",
-        "Applicant": "ଆବେଦନକାରୀ",
-        "Respondent": "ପ୍ରତିବାଦୀ",
-        "Bail": "ଜାମିନ",
-        "Section": "ଦଫା",
-        "Act": "ଆଇନ",
-        "Order": "ଆଦେଶ",
-        "Judgment": "ରାୟ",
-        "Witness": "ସାକ୍ଷୀ",
-        "Hon'ble Court": "ମାନ୍ୟବର ନ୍ୟାୟାଳୟ",
-        "Advocate": "ଅଧିବକ୍ତା",
-    },
-    "assamese": {
-        "Petition": "আবেদন",
-        "Application": "দৰখাস্ত",
-        "Affidavit": "শপতনামা",
-        "Applicant": "আবেদনকাৰী",
-        "Respondent": "প্ৰতিবাদী",
-        "Bail": "জামিন",
-        "Section": "ধাৰা",
-        "Act": "আইন",
-        "Order": "আদেশ",
-        "Judgment": "ৰায়",
-        "Witness": "সাক্ষী",
-        "Hon'ble Court": "মাননীয় ন্যায়ালয়",
-        "Advocate": "অধিবক্তা",
-    },
-    "nepali": {
-        "Petition": "निवेदन",
-        "Application": "आवेदन",
-        "Affidavit": "शपथपत्र",
-        "Applicant": "निवेदक",
-        "Respondent": "विपक्षी",
-        "Bail": "जमानत",
-        "Section": "दफा",
-        "Act": "ऐन",
-        "Order": "आदेश",
-        "Judgment": "फैसला",
-        "Witness": "साक्षी",
-        "Hon'ble Court": "माननीय अदालत",
-        "Advocate": "अधिवक्ता",
-    },
-    "sanskrit": {
-        "Petition": "निवेदनपत्रम्",
-        "Application": "आवेदनम्",
-        "Affidavit": "शपथपत्रम्",
-        "Applicant": "आवेदकः",
-        "Respondent": "प्रत्यर्थी",
-        "Bail": "प्रतिभूतिः",
-        "Section": "अनुच्छेदः",
-        "Act": "अधिनियमः",
-        "Order": "आदेशः",
-        "Judgment": "निर्णयः",
-        "Witness": "साक्षी",
-        "Hon'ble Court": "माननीयं न्यायालयम्",
-        "Advocate": "अधिवक्ता",
-    },
-    "maithili": {
-        "Petition": "आवेदन",
-        "Application": "दरखास्त",
-        "Bail": "जमानत",
-        "Section": "धारा",
-        "Act": "अधिनियम",
-        "Order": "आदेश",
-        "Judgment": "निर्णय",
-        "Witness": "गवाह",
-        "Hon'ble Court": "माननीय न्यायालय",
-        "Advocate": "वकील",
-    },
-    "sindhi": {
-        "Petition": "درخواست",
-        "Application": "عرضي",
-        "Bail": "ضمانت",
-        "Section": "دفعو",
-        "Act": "قانون",
-        "Order": "حڪم",
-        "Judgment": "فيصلو",
-        "Witness": "گواهه",
-        "Hon'ble Court": "معزز عدالت",
-        "Advocate": "وڪيل",
-    },
-    "dogri": {
-        "Petition": "अर्जी",
-        "Application": "दरख्वास्त",
-        "Bail": "ज़मानत",
-        "Section": "धारा",
-        "Act": "कानून",
-        "Order": "हुक्म",
-        "Judgment": "फ़ैसला",
-        "Witness": "गवाह",
-        "Hon'ble Court": "माननीय अदालत",
-        "Advocate": "वकील",
-    },
-    "konkani": {
-        "Petition": "अर्ज",
-        "Application": "अर्ज",
-        "Bail": "जामीन",
-        "Section": "कलम",
-        "Act": "कायदो",
-        "Order": "हुकूम",
-        "Judgment": "निवाडो",
-        "Witness": "साक्षीदार",
-        "Hon'ble Court": "मानेस्त न्यायालय",
-        "Advocate": "वकील",
-    },
-    "kashmiri": {
-        "Petition": "عرضی",
-        "Application": "درخواست",
-        "Bail": "ضمانت",
-        "Section": "دفعہ",
-        "Act": "قانون",
-        "Order": "حکم",
-        "Judgment": "فیصلہ",
-        "Witness": "گواہ",
-        "Hon'ble Court": "محترم عدالت",
-        "Advocate": "وکیل",
-    },
-    "manipuri": {
-        "Petition": "ꯑꯄꯤꯜ",
-        "Application": "ꯑꯄ꯭ꯂꯤꯀꯦꯁꯟ",
-        "Bail": "ꯖꯥꯃꯤꯟ",
-        "Section": "ꯁꯦꯛꯁꯟ",
-        "Order": "ꯑꯣꯔꯗꯔ",
-        "Judgment": "ꯐꯩꯁꯜ",
-        "Witness": "ꯁꯥꯛꯁꯤ",
-        "Advocate": "ꯑꯦꯗꯚꯣꯀꯦꯠ",
-    },
-    "bodo": {
-        "Petition": "आर्जि",
-        "Application": "नायबिजिरनाय",
-        "Bail": "जामिन",
-        "Section": "धारा",
-        "Order": "आदेश",
-        "Judgment": "रायजोनाय",
-        "Witness": "साक्षी",
-        "Advocate": "उकिल",
-    },
-    "santali": {
-        "Petition": "ᱟᱨᱡᱤ",
-        "Application": "ᱟᱨᱡᱤ",
-        "Bail": "ᱡᱟᱢᱤᱱ",
-        "Section": "ᱫᱷᱟᱨᱟ",
-        "Order": "ᱦᱩᱠᱩᱢ",
-        "Judgment": "ᱵᱤᱪᱟᱹᱨ",
-        "Witness": "ᱜᱚᱣᱟᱦ",
-        "Advocate": "ᱣᱠᱤᱞ",
-    },
-}
 
 _LATIN_MAXIMS = (
     "habeas corpus, certiorari, mandamus, quo warranto, inter alia, "
@@ -475,6 +108,7 @@ def _format_term_table(terms: dict[str, str]) -> str:
 def _build_system_prompt(
     target_language: TranslationLanguage,
     source_language: TranslationLanguage | None,
+    profile: "DocProfile | None" = None,
 ) -> str:
     target_name = LANGUAGE_NATIVE_NAMES[target_language.value]
     source_desc = (
@@ -483,8 +117,14 @@ def _build_system_prompt(
         else "Auto-detect the source language."
     )
 
-    # Get terminology for target language, or empty dict for unsupported ones
-    terms = _LEGAL_TERMS.get(target_language.value, {})
+    # Get terminology for target language; merge any doc-type overlay on top.
+    base_terms = get_glossary(target_language.value)
+    overlay = (
+        profile.glossary_overlay.get(target_language.value, {})
+        if profile and profile.glossary_overlay
+        else {}
+    )
+    terms = merge_overlay(base_terms, overlay)
     if terms:
         term_section = f"""═══ MANDATORY TERMINOLOGY ═══
 
@@ -501,11 +141,15 @@ If NO established term exists, keep the English term and add a parenthetical exp
 Use established legal terminology as used in {target_language.value} High Court and subordinate court proceedings.
 If no established term exists for a concept, keep the English term and add a parenthetical explanation in {target_language.value}."""
 
+    profile_section = (
+        f"\n{profile.system_prompt_extension}\n" if profile and profile.system_prompt_extension else ""
+    )
+
     return f"""You are an Indian lawyer who drafts legal documents in {target_language.value} ({target_name}).
 You write like a native — simple, precise, formal. NOT like a translator.
 TASK: Translate the provided legal document into {target_language.value} ({target_name}).
 {source_desc}
-
+{profile_section}
 {term_section}
 
 ═══ TRANSLATION STYLE ═══
@@ -606,7 +250,7 @@ def _enforce_glossary(text: str, target_language: str) -> str:
       first via length-sorted iteration; short terms then skip if the longer
       form exists in the text).
     """
-    terms = _LEGAL_TERMS.get(target_language, {})
+    terms = get_glossary(target_language)
     if not terms:
         return text
 
@@ -747,14 +391,19 @@ class TranslationGenerator:
         target_language: TranslationLanguage,
         source_language: TranslationLanguage | None = None,
         model: str | None = None,
+        profile: "DocProfile | None" = None,
     ) -> str:
-        """Translate a legal document. Returns translated markdown text."""
+        """Translate a legal document. Returns translated markdown text.
+
+        `profile` carries the doc-type system-prompt extension and glossary
+        overlay (consumed in `_build_system_prompt`). None → default behaviour.
+        """
         model = model or "gemini"
         model, provider = _resolve_model(model)
         max_tokens = _PROVIDER_MAX_TOKENS.get(provider, 16384)
 
         llm = _init_llm(model, provider, max_tokens)
-        system_prompt = _build_system_prompt(target_language, source_language)
+        system_prompt = _build_system_prompt(target_language, source_language, profile)
         # sarvam-m is a hybrid reasoning model — reasoning adds no value for
         # deterministic translation and burns tokens. /no_think disables it.
         if provider == "sarvam":
