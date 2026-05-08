@@ -54,6 +54,30 @@ def _slugify(text: str) -> str:
     return re.sub(r"[\s_]+", "-", text)
 
 
+_FILENAME_ILLEGAL = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+_FILENAME_MAX_LEN = 200
+
+
+def _safe_filename(title: str | None, *, ext: str = ".md", fallback: str = "Draft") -> str:
+    """Sanitize a user-provided title into a display filename.
+
+    - Strips filesystem-illegal chars (Windows + POSIX) and control bytes.
+    - Trims trailing dots/whitespace (Windows reserves these).
+    - Caps length so the stem stays under `_FILENAME_MAX_LEN` chars.
+    - Avoids double-appending `ext` if the title already ends with it.
+    - Falls back to `fallback` when the result is empty.
+    """
+    cleaned = _FILENAME_ILLEGAL.sub("", title or "").strip()
+    cleaned = cleaned.rstrip(". ").strip()
+    if cleaned.lower().endswith(ext.lower()):
+        cleaned = cleaned[: -len(ext)].rstrip(". ").strip()
+    if not cleaned:
+        cleaned = fallback
+    if len(cleaned) > _FILENAME_MAX_LEN:
+        cleaned = cleaned[:_FILENAME_MAX_LEN].rstrip(". ").strip() or fallback
+    return f"{cleaned}{ext}"
+
+
 def _markdown_for_upload(document: GeneratedDocument) -> str:
     """Assemble final markdown and run safety post-processing.
 
@@ -396,8 +420,7 @@ class DraftService:
             raise StagedError(ErrorStage.UPLOAD, exc) from exc
 
         signed_url = await self.s3_client.signed_url(s3_path)
-        display_title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "", request.title or "").strip() or "Draft"
-        file_name = f"{display_title}.md"
+        file_name = _safe_filename(request.title)
         await self.job_manager.update_job_status(
             job_id,
             JobStatus.COMPLETED,

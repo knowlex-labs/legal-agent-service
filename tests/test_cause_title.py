@@ -297,8 +297,8 @@ def test_postprocess_skips_placeholders_inside_sentinel_span():
 
     body = (
         f"{SENTINEL_START}\n"
-        '<p style="text-align:center;margin:0;"><strong><u>IN THE HON\'BLE [Court Name]</u></strong></p>\n'
-        '<p style="text-align:right;margin:0;"><strong>Civil Suit No. ______ / [Year]</strong></p>\n'
+        '<p style="text-align:center;"><strong><u>IN THE HON\'BLE [Court Name]</u></strong></p>\n'
+        '<p style="text-align:right;"><strong>Civil Suit No. ______ / [Year]</strong></p>\n'
         f"{SENTINEL_END}\n\n"
         "## 1. BRIEF FACTS\n\n1.1 Real body content."
     )
