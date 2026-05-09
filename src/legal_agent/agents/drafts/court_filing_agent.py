@@ -161,7 +161,7 @@ may kindly be pleased to:
 (e) Pass any other order as this Hon'ble Court may deem fit and proper in
     the interest of justice.
 
-<table style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
+<table class="signature-block" style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
 <tbody>
 <tr>
 <td style="border:0;padding:0;text-align:left;vertical-align:top;width:40%;">Place: [City]</td>
@@ -190,7 +190,7 @@ what is stated in the above paragraphs no. [1 to N] is true and correct to
 the best of my knowledge and information, which I believe to be true. Hence
 verified at **[City]** on this **[DD]** day of **[Month, Year]**.
 
-<table style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
+<table class="signature-block" style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
 <tbody>
 <tr>
 <td style="border:0;padding:0;text-align:left;vertical-align:top;width:50%;">Place: [City]</td>
