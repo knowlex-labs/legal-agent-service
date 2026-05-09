@@ -134,8 +134,6 @@ may kindly be pleased to:
 (e) Pass any other order as this Hon'ble Court may deem fit and proper in
     the interest of justice.
 
----
-
 <table style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
 <tbody>
 <tr>
@@ -155,8 +153,6 @@ may kindly be pleased to:
 </tr>
 </tbody>
 </table>
-
----
 
 <p style="text-align:center;margin:0.5rem 0;"><strong><u>VERIFICATION</u></strong></p>
 
@@ -200,12 +196,14 @@ I know the Deponent.
    underlined HTML paragraph below the cause title. Indian-court drafts use a
    centered title block, not a left-aligned markdown heading.
 
-3. **CAUSE TITLE IS COHESIVE — no `---` rules inside it.** Do NOT emit `---`
-   horizontal rules between the court banner, case-number, and party blocks.
-   The only `---` rules allowed in the document are (i) before the centered
-   `PRAYER` heading and (ii) before the centered `VERIFICATION` heading. Do
-   NOT insert `---` between numbered body paragraphs — they should flow as
-   one continuous block.
+3. **NO `---` HORIZONTAL RULES ANYWHERE IN THE DOCUMENT.** Do NOT emit
+   `---` between the cause-title block and the document title, between
+   numbered body paragraphs, before PRAYER, before the signature block,
+   or before VERIFICATION. Indian-court convention is a clean continuous
+   document with no horizontal rules — section breaks are signalled by
+   the centered + bold + underlined PRAYER and VERIFICATION headings
+   alone. The whole document should read as one uniform block on white
+   paper.
 
 3a. **PRAYER AND VERIFICATION HEADINGS ARE HTML, NOT `##`.** Both are
     rendered as centered + bold + underlined HTML paragraphs (matching the
