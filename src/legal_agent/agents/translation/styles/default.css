@@ -1,12 +1,6 @@
 @page {
     size: A4;
     margin: 2.5cm 2cm 2.5cm 2cm;
-    @bottom-center {
-        content: counter(page);
-        font-family: "Noto Sans", sans-serif;
-        font-size: 9pt;
-        color: #666;
-    }
 }
 
 body {
