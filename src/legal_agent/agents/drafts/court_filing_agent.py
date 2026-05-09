@@ -54,51 +54,65 @@ is rendered deterministically by the system and PREPENDED to your output.
 
 DO NOT emit any of those elements. DO NOT emit a `## CAUSE TITLE` heading,
 a `# IN THE HON'BLE …` banner, or any party block at the top of your draft.
-Start your output directly at the first body section: `## 1. BRIEF FACTS`.
+Start your output directly with the body opening line shown below.
 ===== END CAUSE TITLE =====
 
-## 1. BRIEF FACTS
+===== BODY STRUCTURE =====
+The body is a FLAT LIST OF NUMBERED PARAGRAPHS — Indian-court convention for
+interim applications. Do NOT emit `##` section headings for "BRIEF FACTS",
+"PRIMA FACIE CASE", "IRREPARABLE HARM", or any similar heading inside the
+body. Do NOT use sub-numbering like `1.1`, `1.2`, `2.1` inside the body.
+Use a single flat numbering: `1.`, `2.`, `3.`, … each paragraph standing on
+its own line with a blank line between paragraphs.
 
-1.1 State the parent case in this clause: case type, case number, year, and the
-court before which it is pending. Use values from STRUCTURED INPUT first, then
-REFERENCE DOCUMENTS. If the case number is not yet assigned, write
-`Civil Suit No. ______ / [Year]` with the year filled.
+Begin the body with the line:
 
-1.2 Summarise the main-suit facts in 2–4 numbered sub-paragraphs (1.2.1, 1.2.2,
-…) drawn from the uploaded source document and the user's structured facts.
-Each sub-paragraph names the parties by their actual names, includes specific
-dates (DD/MM/YYYY), specific amounts in figures and words
-(e.g., Rs. 8,500/- (Rupees Eight Thousand Five Hundred Only)), and the
-property / contract / transaction particulars from the source.
+  The applicant respectfully submits as follows:
 
-1.3 State the urgency in one paragraph naming the specific imminent harm,
-threatened act, or continuing wrong that necessitates urgent intervention.
-Reference the date and event from the source.
+Then emit numbered paragraphs covering — in this order, each as ONE paragraph:
 
-## 2. PRIMA FACIE CASE
+1. The parent case: case type, case number, year, and the court before which
+   it is pending. Use values from STRUCTURED INPUT first, then REFERENCE
+   DOCUMENTS. If the case number is not yet assigned, write
+   `Civil Suit No. ______ / [Year]` with the year filled.
 
-2.1 Set out, in one to two paragraphs, the legal and factual basis for the
-applicant's claim — title document / lease deed / agreement / statutory right —
-naming the document, its date, and the parties to it. Pull these from the source.
+2. The applicant's identity and standing in the parent matter — name,
+   relationship to the suit (Plaintiff / Defendant / Petitioner / Applicant),
+   and a one-line statement of what the parent suit is about, drawn from
+   STRUCTURED INPUT and REFERENCE DOCUMENTS. Include parties' actual names.
 
-2.2 Cite the applicable statutory provision or legal principle that entitles
-the applicant to the interim relief sought (e.g., Order 39 Rules 1 & 2 CPC for
-temporary injunction; Section 9 of the Arbitration and Conciliation Act, 1996,
-for interim measures pending arbitration). If the governing provision is not
-evident from the source, leave it as `[Statutory Provision]` for the advocate.
+3. The substantive facts — the underlying transaction, agreement, lease,
+   title document, FIR, or other dealing between the parties. Use specific
+   dates (DD/MM/YYYY), specific amounts in figures and words (e.g., Rs.
+   8,500/- (Rupees Eight Thousand Five Hundred Only)), and the property /
+   contract / transaction particulars from the source. Split into 2–3
+   numbered paragraphs (4., 5., …) if the factual narrative is long.
 
-## 3. IRREPARABLE HARM AND BALANCE OF CONVENIENCE
+(Continue as necessary — keep each paragraph self-contained.)
 
-3.1 Describe, in concrete terms tied to the source facts, the specific
-irreparable harm that will result if interim relief is refused — loss of
-possession, destruction of property, dissipation of assets, irreversible
-third-party transfer, etc. Damages are NOT an adequate remedy; explain why.
+Then a paragraph stating the prima facie case: the legal and factual basis
+for the applicant's claim — naming the document/date/parties — and the
+applicable statutory provision (e.g., Order 39 Rules 1 & 2 CPC for temporary
+injunction; Section 9 of the Arbitration and Conciliation Act, 1996). If
+the governing provision is not evident from the source, leave it as
+`[Statutory Provision]` for the advocate.
 
-3.2 State that the balance of convenience lies in favour of the applicant,
-with specific reasons drawn from the source. Confirm the respondent will not
-suffer prejudice proportionate to the harm to the applicant.
+Then a paragraph on irreparable harm: the specific harm that will result if
+interim relief is refused — loss of possession, destruction of property,
+dissipation of assets, irreversible third-party transfer. Explain why
+damages are NOT an adequate remedy.
 
-## 4. PRAYER
+Then a paragraph on the balance of convenience and urgency: that it lies in
+favour of the applicant, the specific imminent threat or continuing wrong,
+and the date/event from the source that necessitates urgent intervention.
+
+Then a closing paragraph: that the applicant has a strong prima facie case,
+the balance of convenience lies in favour of the applicant, and the
+applicant will suffer irreparable loss and injury if interim relief is not
+granted.
+===== END BODY STRUCTURE =====
+
+<p style="text-align:center;margin:0.5rem 0;"><strong><u>PRAYER</u></strong></p>
 
 It is, therefore, most humbly and respectfully prayed that this Hon'ble Court
 may kindly be pleased to:
@@ -122,33 +136,53 @@ may kindly be pleased to:
 
 ---
 
-<p style="margin:0;">Place: [City]<span style="float:right;"><b>[First Party Role]</b></span></p>
-<p style="margin:0;">Date: DD/MM/YYYY</p>
-
-<p style="margin:0; text-align:right;">Through Counsel</p>
-<p style="margin:0; text-align:right;">[Advocate Name]</p>
-<p style="margin:0; text-align:right;">Advocate, [Enrolment No.]</p>
+<table style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
+<tbody>
+<tr>
+<td style="border:0;padding:0;text-align:left;vertical-align:top;width:40%;">Place: [City]</td>
+<td style="border:0;padding:0;text-align:center;vertical-align:top;width:20%;"></td>
+<td style="border:0;padding:0;text-align:right;vertical-align:top;width:40%;"></td>
+</tr>
+<tr>
+<td style="border:0;padding:0;text-align:left;vertical-align:top;">Date: DD/MM/YYYY</td>
+<td style="border:0;padding:0;text-align:center;vertical-align:top;"><strong>[First Party Role]</strong></td>
+<td style="border:0;padding:0;text-align:right;vertical-align:top;"><strong>Advocate for the [First Party Role]</strong></td>
+</tr>
+<tr>
+<td style="border:0;padding:0;"></td>
+<td style="border:0;padding:0;"></td>
+<td style="border:0;padding:0;text-align:right;vertical-align:top;"><strong>[Advocate Name]</strong></td>
+</tr>
+</tbody>
+</table>
 
 ---
 
-<p style="text-align:center; margin:0;"><b><u>VERIFICATION</u></b></p>
+<p style="text-align:center;margin:0.5rem 0;"><strong><u>VERIFICATION</u></strong></p>
 
 I, **[First Party Full Name]**, aged [First Party Age] years, occupation
-[First Party Occupation], residing at [First Party Address], the
-[First Party Role] in the above matter, do hereby state on solemn affirmation
-that the contents of the above application in paragraphs 1 to 4 are true and
-correct to the best of my knowledge, information, and belief, and nothing
-material has been concealed therefrom.
+[First Party Occupation], the [First Party Role] in the above matter,
+residing at [First Party Address], do hereby state on solemn affirmation that
+what is stated in the above paragraphs no. [1 to N] is true and correct to
+the best of my knowledge and information, which I believe to be true. Hence
+verified at **[City]** on this **[DD]** day of **[Month, Year]**.
 
-Verified at **[City]** on this **[DD]** day of **[Month, Year]**.
+<table style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
+<tbody>
+<tr>
+<td style="border:0;padding:0;text-align:left;vertical-align:top;width:50%;">Place: [City]</td>
+<td style="border:0;padding:0;text-align:right;vertical-align:top;width:50%;"></td>
+</tr>
+<tr>
+<td style="border:0;padding:0;text-align:left;vertical-align:top;">Date: DD/MM/YYYY</td>
+<td style="border:0;padding:0;text-align:right;vertical-align:top;"><strong>[First Party Role]</strong></td>
+</tr>
+</tbody>
+</table>
 
-<p style="margin:0;">Place: [City]<span style="float:right;"><b>[First Party Role]</b></span></p>
-<p style="margin:0;">Date: DD/MM/YYYY</p>
+I know the Deponent.
 
-I know the deponent.
-
-[Advocate Name]
-Advocate for the [First Party Role]
+**Advocate for the [First Party Role]**
 
 ===== END TEMPLATE =====
 
@@ -168,9 +202,25 @@ Advocate for the [First Party Role]
 
 3. **CAUSE TITLE IS COHESIVE — no `---` rules inside it.** Do NOT emit `---`
    horizontal rules between the court banner, case-number, and party blocks.
-   The only `---` rules in the document go (i) between the cause-title block
-   and the document-title heading, and (ii) between major body sections
-   (Brief Facts → Prima Facie Case → Irreparable Harm → Prayer → Verification).
+   The only `---` rules allowed in the document are (i) before the centered
+   `PRAYER` heading and (ii) before the centered `VERIFICATION` heading. Do
+   NOT insert `---` between numbered body paragraphs — they should flow as
+   one continuous block.
+
+3a. **PRAYER AND VERIFICATION HEADINGS ARE HTML, NOT `##`.** Both are
+    rendered as centered + bold + underlined HTML paragraphs (matching the
+    court-banner style):
+    `<p style="text-align:center;margin:0.5rem 0;"><strong><u>PRAYER</u></strong></p>`
+    `<p style="text-align:center;margin:0.5rem 0;"><strong><u>VERIFICATION</u></strong></p>`
+    Do NOT emit `## PRAYER` or `## VERIFICATION` markdown headings.
+
+3b. **SIGNATURE BLOCKS ARE BORDERLESS HTML TABLES.** Emit them VERBATIM
+    from the template — do not rewrite as plain paragraphs. The first
+    (post-prayer) is 3-column: Place/Date on left, [First Party Role] in
+    middle, Advocate-for-the-[Role] + [Advocate Name] on right. The second
+    (post-verification) is 2-column: Place/Date left, [First Party Role]
+    right; followed by the plain lines `I know the Deponent.` and
+    `**Advocate for the [First Party Role]**`.
 
 4. **PRECEDENCE OF SOURCES**: when STRUCTURED INPUT (the wizard form fields)
    and REFERENCE DOCUMENTS CONTEXT (the uploaded PDF text) disagree on a value,

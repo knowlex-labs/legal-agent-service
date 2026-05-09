@@ -81,8 +81,14 @@ class CauseTitleData(BaseModel):
     document_title: str | None = Field(
         None,
         description=(
-            'Title of the present filing as the user named it, e.g., '
-            '"Stay Application On Behalf of the Plaintiff".'
+            "Indian-court legal title for the present filing, derived from the "
+            "substantive content (statute invoked + relief sought). Examples: "
+            '"APPLICATION FOR TEMPORARY INJUNCTION UNDER ORDER 39 RULES 1 AND 2 '
+            'OF THE CODE OF CIVIL PROCEDURE, 1908", '
+            '"STAY APPLICATION ON BEHALF OF THE PLAINTIFF", '
+            '"APPLICATION UNDER SECTION 9 OF THE ARBITRATION AND CONCILIATION ACT, 1996". '
+            "Do NOT copy the user's filename verbatim (e.g., 'Interim Application "
+            "Test 12') — it is for reference only."
         ),
     )
 
@@ -111,12 +117,24 @@ when the reference shows a parent caption:
    Do NOT replace with a real number.
 8. Strip the "IN THE HON'BLE" prefix from `court_name`. The renderer adds it back.
 9. Do not output explanations or extra prose — just fill the schema.
+10. `document_title`: derive an Indian-court legal title from the substantive \
+   content — name the statute / order / rule invoked and the relief sought, \
+   in ALL CAPS or Title Case as suits a court filing. Examples: \
+   "APPLICATION FOR TEMPORARY INJUNCTION UNDER ORDER 39 RULES 1 AND 2 OF THE \
+   CODE OF CIVIL PROCEDURE, 1908", "STAY APPLICATION ON BEHALF OF THE \
+   PLAINTIFF", "APPLICATION UNDER SECTION 9 OF THE ARBITRATION AND \
+   CONCILIATION ACT, 1996". Do NOT copy the user's filename verbatim (e.g., \
+   "Interim Application Test 12") — it is informational only. If the form \
+   input and reference are silent on the specific statute, fall back to a \
+   neutral title such as "INTERIM APPLICATION" or "APPLICATION ON BEHALF OF \
+   THE [Role]".
 """
 
 
 _EXTRACT_USER_PROMPT_TEMPLATE = """Today's date: {today}
 
-Document title (user-provided, use verbatim): {document_title}
+User filename for reference only (DO NOT copy verbatim — derive a proper \
+Indian-court legal title from the substantive content): {document_title}
 
 --- FORM INPUT (from the drafting wizard; PRIORITY source) ---
 {instructions}
@@ -160,9 +178,18 @@ async def extract_cause_title(
     ]
     result = await llm.ainvoke(messages)
     data = result if isinstance(result, CauseTitleData) else CauseTitleData.model_validate(result)
-    if not data.document_title and document_title:
-        data.document_title = document_title
+    # If the LLM failed to derive a content-based title, leave it null so the
+    # renderer emits a `[Document Title]` placeholder for the advocate. We do
+    # NOT fall back to the user's filename — that's how `Interim Application
+    # Test 12` ended up in the cause title.
     return data
+
+
+# Inline <p> style for cause-title lines. Pins the cause-title block at the
+# tight density the user signed off on (≈Tailwind my-1 + leading-snug),
+# overriding the editor's looser default `[&_p]:my-2 leading-normal` that we
+# want for body paragraphs.
+_P_STYLE = "margin:0.25rem 0;line-height:1.375;"
 
 
 def _placeholder(label: str) -> str:
@@ -181,7 +208,7 @@ def _render_name_line(party: Party) -> str:
         full = f"{party.honorific} {name}"
     else:
         full = name
-    return f"<p><strong>{full}</strong></p>"
+    return f'<p style="{_P_STYLE}"><strong>{full}</strong></p>'
 
 
 def _render_age_occ_line(party: Party) -> str | None:
@@ -189,7 +216,7 @@ def _render_age_occ_line(party: Party) -> str | None:
         return None
     age = party.age or _placeholder(f"{party.role} Age")
     occ = party.occupation or _placeholder(f"{party.role} Occupation")
-    return f"<p>Age: {age}, Occ: {occ}</p>"
+    return f'<p style="{_P_STYLE}">Age: {age}, Occ: {occ}</p>'
 
 
 def _render_address_lines(party: Party) -> list[str]:
@@ -197,9 +224,9 @@ def _render_address_lines(party: Party) -> list[str]:
     lines = [ln.strip() for ln in party.address_lines if ln and ln.strip()]
     if not lines:
         lines = [_placeholder(f"{party.role} Address")]
-    out = [f"<p>{intro}: {lines[0]}</p>"]
+    out = [f'<p style="{_P_STYLE}">{intro}: {lines[0]}</p>']
     for ln in lines[1:]:
-        out.append(f"<p>{ln}</p>")
+        out.append(f'<p style="{_P_STYLE}">{ln}</p>')
     return out
 
 
@@ -227,10 +254,12 @@ def _render_mobile_and_role(party: Party) -> list[str]:
 def _render_party_block(party: Party, *, ordinal_label: bool) -> list[str]:
     out: list[str] = []
     if ordinal_label and party.ordinal:
-        out.append(f"<p><strong>{_party_role_phrase(party)}</strong></p>")
+        out.append(
+            f'<p style="{_P_STYLE}"><strong>{_party_role_phrase(party)}</strong></p>'
+        )
     out.append(_render_name_line(party))
     if party.description:
-        out.append(f"<p>{party.description}</p>")
+        out.append(f'<p style="{_P_STYLE}">{party.description}</p>')
     age_line = _render_age_occ_line(party)
     if age_line:
         out.append(age_line)
@@ -252,13 +281,13 @@ def render_cause_title_html(data: CauseTitleData) -> str:
 
     lines: list[str] = [SENTINEL_START]
     lines.append(
-        f'<p style="text-align:center;"><strong><u>IN THE HON\'BLE {court_name}</u></strong></p>'
+        f'<p style="text-align:center;{_P_STYLE}"><strong><u>IN THE HON\'BLE {court_name}</u></strong></p>'
     )
     lines.append(
-        f'<p style="text-align:center;"><strong><u>AT {court_seat}</u></strong></p>'
+        f'<p style="text-align:center;{_P_STYLE}"><strong><u>AT {court_seat}</u></strong></p>'
     )
     lines.append(
-        f'<p style="text-align:right;"><strong>{case_type} No. {case_number} / {case_year}</strong></p>'
+        f'<p style="text-align:right;{_P_STYLE}"><strong>{case_type} No. {case_number} / {case_year}</strong></p>'
     )
 
     first_side = [p for p in data.parties if p.role in _FIRST_SIDE_ROLES]
@@ -274,13 +303,15 @@ def render_cause_title_html(data: CauseTitleData) -> str:
     for party in first_side:
         lines.extend(_render_party_block(party, ordinal_label=first_multi))
 
-    lines.append('<p style="text-align:center;"><em><strong>Vs.</strong></em></p>')
+    lines.append(
+        f'<p style="text-align:center;{_P_STYLE}"><em><strong>Vs.</strong></em></p>'
+    )
 
     for party in second_side:
         lines.extend(_render_party_block(party, ordinal_label=second_multi))
 
     lines.append(
-        f'<p style="text-align:center;"><strong><u>{document_title}</u></strong></p>'
+        f'<p style="text-align:center;{_P_STYLE}"><strong><u>{document_title}</u></strong></p>'
     )
     lines.append(SENTINEL_END)
     return "\n".join(lines)
@@ -301,6 +332,12 @@ def _is_skippable_heading(heading_full: str, heading_text: str, document_title: 
 
 
 def _strip_llm_cause_title_prefix(body: str, document_title: str | None) -> str:
+    # Only strip if the body actually starts with a `##` heading — otherwise
+    # the body is flat numbered prose (interim-application format) and we'd
+    # incorrectly chop everything before the first mid-document heading
+    # (e.g. `## PRAYER`).
+    if not body.lstrip().startswith("##"):
+        return body
     for m in _BODY_HEADING.finditer(body):
         if not _is_skippable_heading(m.group(0), m.group(1), document_title):
             return body[m.start():]
