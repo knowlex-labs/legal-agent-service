@@ -52,38 +52,47 @@ The cause title is rendered as inline-styled HTML and is editor-agnostic. Key po
 
 ---
 
-## 3. Body structure — flat numbered paragraphs, no section headings
+## 3. Body structure — flat numbered HTML `<p>` blocks, no section headings
 
-**The single most important rule: drop the `##` section headings.**
+**The two single most important rules:**
 
-Indian-court drafts read as continuous numbered prose. We do NOT emit `## BRIEF FACTS`, `## PRIMA FACIE CASE`, `## IRREPARABLE HARM`, etc. These were inflating drafts beyond convention.
+1. **Drop the `##` section headings.** Indian-court drafts read as continuous numbered prose. We do NOT emit `## BRIEF FACTS`, `## PRIMA FACIE CASE`, `## IRREPARABLE HARM`, etc. These were inflating drafts beyond convention.
 
-**Pattern:**
+2. **Emit numbered paragraphs as plain HTML `<p>` blocks, NOT as a markdown numbered list.** When the agent emits `1. text\n\n2. text\n\n3. text` (markdown numbered-list syntax), `marked` parses it into `<ol><li>...</li><li>...</li></ol>`. That structure does not survive the contentEditable / TipTap edit-save round-trip — the editor collapses everything into one paragraph with literal `**` markers and explicit "1.", "2." text. Plain HTML `<p>` blocks pass through marked unchanged and round-trip cleanly.
 
-```markdown
-The applicant respectfully submits as follows:
+**Pattern (HTML):**
 
-1. The present [document type] is filed in [Case Type] No. [Number] / [Year]
-   pending before this Hon'ble Court.
+```html
+<p>The applicant respectfully submits as follows:</p>
 
-2. The applicant is [identity / standing in parent matter — name, role,
-   one-line summary of what the parent suit is about].
+<p>1. The present [document type] is filed in [Case Type] No. [Number] / [Year]
+pending before this Hon'ble Court.</p>
 
-3. [Substantive facts — underlying transaction, lease, agreement, FIR, etc.
-   with specific dates DD/MM/YYYY and amounts in figures + words.]
+<p>2. The applicant herein, <strong>[Full Name]</strong>, age [Age] years,
+occupation [Occupation], residing at [Address], is the
+<strong>[First Party Role]</strong> in the aforesaid suit, and the said suit
+concerns [one-line description of parent suit].</p>
 
-4. [Continue: 2–3 numbered paragraphs for the factual narrative.]
+<p>3. The respondent, <strong>[Full Name]</strong>, age [Age] years, …</p>
 
-5. [Prima facie case / legal basis paragraph — names the document, date,
-   parties; cites the applicable statutory provision.]
+<p>4. [Substantive facts — underlying transaction, lease, agreement, FIR, etc.
+with specific dates DD/MM/YYYY and amounts in figures + words.]</p>
 
-6. [Irreparable harm paragraph — concrete harm; why damages aren't adequate.]
+<p>5. [Prima facie case / legal basis paragraph — names the document, date,
+parties; cites the applicable statutory provision.]</p>
 
-7. [Balance of convenience / urgency paragraph.]
+<p>6. [Irreparable harm paragraph — concrete harm; why damages aren't adequate.]</p>
 
-8. [Closing paragraph — prima facie case + balance of convenience + irreparable
-   loss summary.]
+<p>7. [Balance of convenience / urgency paragraph.]</p>
+
+<p>8. [Closing paragraph — prima facie case + balance of convenience +
+irreparable loss summary.]</p>
 ```
+
+**Inside `<p>` blocks, use HTML emphasis tags, NOT markdown:**
+
+- `<strong>Name</strong>` — NOT `**Name**` (markdown emphasis is not parsed inside HTML blocks; the asterisks would render as literal text)
+- `<em>italic</em>` — NOT `*italic*`
 
 **Variations per document type:**
 - **Bail application:** opening line + numbered paragraphs covering FIR particulars, sections invoked, applicant's role, custody status, grounds for bail, conditions willing to abide by.
@@ -413,6 +422,7 @@ When creating `MyNewAgent`:
 
 - **Don't put the user's filename in the document title.** The LLM must derive a real legal title from content. Filename is informational only. Renderer falls back to `[Document Title]` placeholder, never to the filename.
 - **Don't sprinkle `##` headings through the body.** The LLM is tempted because it makes drafts feel "structured", but Indian-court drafts are flat numbered prose. Pure visual headings break the convention.
+- **Don't emit body paragraphs as markdown numbered lists.** `1. text\n\n2. text\n\n3. text` becomes `<ol><li>` after `marked`, and the `<ol><li>` structure collapses on contentEditable / TipTap edit-save round-trips into a wall of text with literal `**` markers. Always emit body paragraphs as `<p>N. text</p>` HTML blocks with `<strong>` for emphasis instead of `**bold**`.
 - **Don't use `---` horizontal rules anywhere.** Section breaks come from the centered headings (PRAYER / VERIFICATION) alone.
 - **Don't rewrite signature blocks as plain paragraphs.** They must be borderless HTML tables — emit verbatim from the template. The 3-col / 2-col layout is intentional.
 - **Don't change `.legal-document` CSS without updating the TipTap class list (and vice versa).** They render the same content; drift will show up as visual inconsistency between `/drafting` and `/documents`.
