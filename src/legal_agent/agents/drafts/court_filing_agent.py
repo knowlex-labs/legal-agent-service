@@ -59,57 +59,84 @@ Start your output directly with the body opening line shown below.
 
 ===== BODY STRUCTURE =====
 The body is a FLAT LIST OF NUMBERED PARAGRAPHS — Indian-court convention for
-interim applications. Do NOT emit `##` section headings for "BRIEF FACTS",
-"PRIMA FACIE CASE", "IRREPARABLE HARM", or any similar heading inside the
-body. Do NOT use sub-numbering like `1.1`, `1.2`, `2.1` inside the body.
-Use a single flat numbering: `1.`, `2.`, `3.`, … each paragraph standing on
-its own line with a blank line between paragraphs.
+interim applications.
 
-Begin the body with the line:
+**CRITICAL — EMIT EACH NUMBERED PARAGRAPH AS A PLAIN HTML `<p>` BLOCK.** Do
+NOT use markdown numbered-list syntax (`1.`, `2.`, `3.` at line start with
+blank lines between). Markdown list parsing collapses the structure on
+edit-save round-trips, producing a wall of text with literal `**` markers.
+Instead, write each paragraph as its own `<p>` element with the explicit
+number inside the paragraph text:
 
-  The applicant respectfully submits as follows:
+  <p>1. The present Interim Application is filed in Civil Suit No.
+  ______ / [Year] pending before this Hon'ble Court.</p>
 
-Then emit numbered paragraphs covering — in this order, each as ONE paragraph:
+  <p>2. The applicant herein, <strong>[Full Name]</strong>, age [Age]
+  years, occupation [Occupation], residing at [Address], is the
+  <strong>[First Party Role]</strong> in the aforesaid suit, and the
+  said suit concerns [one-line description of the parent suit].</p>
 
-1. The parent case: case type, case number, year, and the court before which
-   it is pending. Use values from STRUCTURED INPUT first, then REFERENCE
-   DOCUMENTS. If the case number is not yet assigned, write
+  <p>3. The respondent, <strong>[Full Name]</strong>, age [Age] years,
+  occupation [Occupation], residing at [Address], is the
+  <strong>[Second Party Role]</strong> in the aforesaid suit.</p>
+
+Use `<strong>...</strong>` for emphasis (party names, key terms,
+defined references). Do NOT use markdown `**bold**` inside the body
+HTML — markdown emphasis is not parsed inside HTML blocks and will
+render as literal asterisks.
+
+Do NOT emit `##` section headings for "BRIEF FACTS", "PRIMA FACIE
+CASE", "IRREPARABLE HARM", or any similar heading inside the body.
+Do NOT use sub-numbering like `1.1`, `1.2`, `2.1`.
+
+Begin the body with a single `<p>` opener:
+
+  <p>The applicant respectfully submits as follows:</p>
+
+Then emit numbered `<p>` paragraphs covering — in this order, each as
+ONE `<p>`:
+
+1. The parent case: case type, case number, year, and the court before
+   which it is pending. Use values from STRUCTURED INPUT first, then
+   REFERENCE DOCUMENTS. If the case number is not yet assigned, write
    `Civil Suit No. ______ / [Year]` with the year filled.
 
-2. The applicant's identity and standing in the parent matter — name,
-   relationship to the suit (Plaintiff / Defendant / Petitioner / Applicant),
-   and a one-line statement of what the parent suit is about, drawn from
-   STRUCTURED INPUT and REFERENCE DOCUMENTS. Include parties' actual names.
+2. The applicant's identity and standing in the parent matter — name
+   (in `<strong>`), age, occupation, address, role in the parent suit,
+   and a one-line statement of what the parent suit is about.
 
-3. The substantive facts — the underlying transaction, agreement, lease,
-   title document, FIR, or other dealing between the parties. Use specific
-   dates (DD/MM/YYYY), specific amounts in figures and words (e.g., Rs.
-   8,500/- (Rupees Eight Thousand Five Hundred Only)), and the property /
-   contract / transaction particulars from the source. Split into 2–3
-   numbered paragraphs (4., 5., …) if the factual narrative is long.
+3. The respondent's identity — name (in `<strong>`), age, occupation,
+   address, role in the parent suit.
 
-(Continue as necessary — keep each paragraph self-contained.)
+4. The substantive facts — the underlying transaction, agreement, lease,
+   title document, FIR, or other dealing between the parties. Use
+   specific dates (DD/MM/YYYY) and specific amounts in figures and words
+   (e.g., Rs. 8,500/- (Rupees Eight Thousand Five Hundred Only)).
+   Continue with paragraphs 5., 6., 7. if the factual narrative is long.
 
-Then a paragraph stating the prima facie case: the legal and factual basis
-for the applicant's claim — naming the document/date/parties — and the
-applicable statutory provision (e.g., Order 39 Rules 1 & 2 CPC for temporary
-injunction; Section 9 of the Arbitration and Conciliation Act, 1996). If
-the governing provision is not evident from the source, leave it as
-`[Statutory Provision]` for the advocate.
+Then a `<p>` numbered paragraph stating the prima facie case: the legal
+and factual basis for the applicant's claim — naming the document /
+date / parties — and the applicable statutory provision (e.g., Order
+39 Rules 1 & 2 CPC for temporary injunction; Section 9 of the
+Arbitration and Conciliation Act, 1996). If the governing provision is
+not evident, leave `[Statutory Provision]` for the advocate.
 
-Then a paragraph on irreparable harm: the specific harm that will result if
-interim relief is refused — loss of possession, destruction of property,
-dissipation of assets, irreversible third-party transfer. Explain why
-damages are NOT an adequate remedy.
+Then a `<p>` numbered paragraph on irreparable harm: the specific harm
+if interim relief is refused — loss of possession, destruction of
+property, dissipation of assets, irreversible third-party transfer.
+Explain why damages are NOT an adequate remedy.
 
-Then a paragraph on the balance of convenience and urgency: that it lies in
-favour of the applicant, the specific imminent threat or continuing wrong,
-and the date/event from the source that necessitates urgent intervention.
+Then a `<p>` numbered paragraph on balance of convenience and urgency:
+that it lies in favour of the applicant, the specific imminent threat
+or continuing wrong, and the date / event from the source.
 
-Then a closing paragraph: that the applicant has a strong prima facie case,
-the balance of convenience lies in favour of the applicant, and the
-applicant will suffer irreparable loss and injury if interim relief is not
-granted.
+Then a closing `<p>` numbered paragraph: that the applicant has a
+strong prima facie case, the balance of convenience lies in favour of
+the applicant, and the applicant will suffer irreparable loss and
+injury if interim relief is not granted.
+
+Number every body `<p>` consecutively (1, 2, 3, …) in the order
+emitted. Do NOT skip numbers. Keep each paragraph self-contained.
 ===== END BODY STRUCTURE =====
 
 <p style="text-align:center;margin:0.5rem 0;"><strong><u>PRAYER</u></strong></p>
@@ -204,6 +231,17 @@ I know the Deponent.
    the centered + bold + underlined PRAYER and VERIFICATION headings
    alone. The whole document should read as one uniform block on white
    paper.
+
+3c. **BODY PARAGRAPHS ARE HTML `<p>` BLOCKS, NOT MARKDOWN LIST ITEMS.**
+    Each numbered body paragraph must be emitted as a standalone
+    `<p>N. text</p>` HTML block. Do NOT emit them as markdown numbered
+    list syntax (`1. text\n\n2. text` at line start). Markdown list
+    parsing creates an `<ol><li>` structure that does not survive the
+    edit-save round-trip — the editor flattens it into a wall of text
+    with literal asterisks. HTML `<p>` blocks pass through markdown
+    rendering unchanged and round-trip cleanly. Use `<strong>...</strong>`
+    inside `<p>` blocks for emphasis (party names, key terms) — NOT
+    `**...**` markdown, which is not parsed inside HTML blocks.
 
 3a. **PRAYER AND VERIFICATION HEADINGS ARE HTML, NOT `##`.** Both are
     rendered as centered + bold + underlined HTML paragraphs (matching the
