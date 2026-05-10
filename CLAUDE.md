@@ -50,7 +50,7 @@ Platform API (Java) → POST /api/v1/jobs (this service)
 
 ### LLM configuration
 
-- **Draft model**: `LLM_PROVIDER` + `LLM_MODEL` in `.env` (`.env.example` ships OpenAI flagship `gpt-5.4`). Applied at service init; every agent gets the same model.
+- **Draft model**: `DRAFT_LLM_PROVIDER` + `DRAFT_LLM_MODEL` in `.env` (`.env.example` ships OpenAI flagship `gpt-5.4`). Applied at service init; every drafting agent gets the same model.
 - **Per-request override**: `CreateDraftJobRequest.model` lets callers override per job. The provider is inferred from the model prefix (`gemini-*` → google-genai, `gpt-*`/`o*` → openai, `claude-*` → anthropic).
 - **Max output tokens**: `base.py::_PROVIDER_MAX_TOKENS` — 16384 for OpenAI and Google, 8192 for Anthropic.
 - **Workspace chat default**: `chat_llm_default_model` (separate from drafting).
@@ -83,9 +83,10 @@ Embedding configs are **split per data source** because each uses a different pr
 ## Configuration
 
 Copy `.env.example` to `.env`. Key vars:
-- `LLM_PROVIDER` / `LLM_MODEL` — Default LLM for drafting
+- `DRAFT_LLM_PROVIDER` / `DRAFT_LLM_MODEL` — Default LLM for drafting (the main agent_node call)
+- `METADATA_EXTRACTION_PROVIDER` / `METADATA_EXTRACTION_MODEL` — LLM for the structured-metadata extraction call inside `output_node` (defaults to Anthropic Haiku 4.5; kept separate so Haiku-cheap extraction doesn't burn the drafting model's TPM)
 - `CHAT_LLM_DEFAULT_MODEL` — Default for workspace chat
-- `GEMINI_API_KEY` — Used for Vision OCR (when `OCR_PROVIDER=gemini`) + translation regardless of LLM_PROVIDER
+- `GEMINI_API_KEY` — Used for Vision OCR (when `OCR_PROVIDER=gemini`) + translation regardless of `DRAFT_LLM_PROVIDER`
 - `OCR_PROVIDER` — `gemini` (default) or `sarvam`. Sarvam caps at ≤10 pages/job; long PDFs are chunked (`SARVAM_OCR_CONCURRENCY`, `SARVAM_OCR_LANGUAGE`)
 - `OCR_CACHE_ENABLED` / `OCR_CACHE_PREFIX` — S3-backed content-hashed OCR cache; disable only for debugging
 - `SARVAM_API_KEY`, `SARVAM_CHAT_MODEL`, `SARVAM_API_BASE_URL` — Sarvam OCR + OpenAI-compatible chat

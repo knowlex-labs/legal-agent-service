@@ -170,10 +170,10 @@ class DraftService:
         }
 
     def _get_model_config(self) -> tuple[str, str]:
-        return self.settings.llm_model, self.settings.get_langchain_provider()
+        return self.settings.draft_llm_model, self.settings.get_langchain_provider()
 
     def _get_enhance_model_string(self) -> str:
-        provider = self.settings.llm_provider
+        provider = self.settings.draft_llm_provider
         return f"{provider}:{FAST_CHAT_MODELS.get(provider, 'gpt-4o-mini')}"
 
     def _get_agent(self, document_type: DocumentType) -> BaseDraftingAgent:

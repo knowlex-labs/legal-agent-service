@@ -24,8 +24,8 @@ def _fast_model_string(settings: Settings) -> str:
         "gemini": "gemini-2.0-flash",
     }
     # Fall back to the configured model so we never produce an invalid cross-provider string
-    model = fast_models.get(settings.llm_provider, settings.llm_model)
-    return f"{settings.llm_provider}:{model}"
+    model = fast_models.get(settings.draft_llm_provider, settings.draft_llm_model)
+    return f"{settings.draft_llm_provider}:{model}"
 
 
 def _filename_from_s3_path(s3_path: str) -> str:

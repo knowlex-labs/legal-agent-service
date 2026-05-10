@@ -8,7 +8,7 @@ logger = logging.getLogger(__name__)
 
 class LlmClient:
     def __init__(self):
-        self.provider = get_settings().llm_provider
+        self.provider = get_settings().draft_llm_provider
 
         if self.provider == "gemini":
             from google import genai

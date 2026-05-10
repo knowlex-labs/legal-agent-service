@@ -16,10 +16,11 @@ _LANGCHAIN_PROVIDERS = {"openai": "openai", "anthropic": "anthropic", "gemini": 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
-    # LLM (drafting) — default is GPT-5.4 (OpenAI's current flagship as of Apr 2026).
-    # Per-request model overrides still work via CreateDraftJobRequest.model.
-    llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
-    llm_model: str = "gpt-5.4"
+    # LLM used for DRAFT generation (the main agent_node call).
+    # Per-request override via CreateDraftJobRequest.model still works.
+    # Env vars: DRAFT_LLM_PROVIDER / DRAFT_LLM_MODEL.
+    draft_llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
+    draft_llm_model: str = "gpt-5.4"
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
@@ -182,7 +183,7 @@ class Settings(BaseSettings):
     semantic_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     def get_langchain_provider(self) -> str:
-        return _LANGCHAIN_PROVIDERS.get(self.llm_provider, self.llm_provider)
+        return _LANGCHAIN_PROVIDERS.get(self.draft_llm_provider, self.draft_llm_provider)
 
     @staticmethod
     def get_langchain_provider_for_model(model_id: str) -> str:
@@ -193,7 +194,7 @@ class Settings(BaseSettings):
 
     def get_llm_api_key(self) -> str | None:
         keys = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "gemini": self.gemini_api_key}
-        return keys.get(self.llm_provider)
+        return keys.get(self.draft_llm_provider)
 
 
 
