@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
         legal_retriever = LegalCaseRetriever()
         logger.info("LegalCaseRetriever created (DB pool lazy-initialized on first query)")
     except Exception:
-        logger.warning("LegalCaseRetriever unavailable — drafts will not have case law tool")
+        logger.warning("LegalCaseRetriever unavailable — chat + precedent flows will not have case law tool")
     s3_client = S3Client(settings)
     # Custom templates: table creation is now lazy (runs on first template
     # operation). Avoids blocking startup on a cold/suspended Neon DB.
@@ -104,7 +104,6 @@ async def lifespan(app: FastAPI):
         job_manager=job_manager,
         rag_client=rag_client,
         s3_client=s3_client,
-        retriever=legal_retriever,
         template_service=template_service,
         decryption=decryption_service,
     )

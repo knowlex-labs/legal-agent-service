@@ -29,7 +29,6 @@ from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
 from legal_agent.clients.rag_client import RAGClient
 from legal_agent.config import Settings
-from legal_agent.legal_retrieval.retriever import LegalCaseRetriever
 from legal_agent.data.examples_loader import (
     format_as_prompt_section,
     get_examples_for_document_type,
@@ -126,7 +125,6 @@ class DraftService:
         job_manager: JobManager,
         rag_client: RAGClient,
         s3_client: S3Client,
-        retriever: LegalCaseRetriever | None = None,
         template_service: TemplateService | None = None,
         decryption: DecryptionService | None = None,
     ):
@@ -134,7 +132,6 @@ class DraftService:
         self.job_manager = job_manager
         self.rag_client = rag_client
         self.s3_client = s3_client
-        self.retriever = retriever
         self.template_service = template_service
         self.decryption = decryption
 
@@ -378,6 +375,7 @@ class DraftService:
 
         # Step 3: Create dependencies and call agent
         sub_type = request.metadata.get("subtype")
+        # retriever stays None — case-law search is reserved for the chat agent.
         deps = DraftingDependencies(
             rag_client=self.rag_client,
             file_ids=request.file_ids,
@@ -387,7 +385,7 @@ class DraftService:
             document_type=request.document_type,
             examples=formatted_examples,
             language=language,
-            retriever=self.retriever,
+            retriever=None,
             sub_type=sub_type,
             uploaded_doc_text=uploaded_doc_text,
         )
