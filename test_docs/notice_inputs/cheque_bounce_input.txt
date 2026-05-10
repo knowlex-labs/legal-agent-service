@@ -1,0 +1,21 @@
+Client (payee): Mr Sandeep Pradeep Joshi, age 42, business, Flat 304 Sai Krupa Apts Aundh Pune 411007. Mob 9822334455.
+
+Drawer: Mr Vikrant Anand Kulkarni, individual, friend of client. Address Bibwewadi Pune (will get exact addr).
+
+Friendly loan of Rs 5,00,000 given by client to Vikrant on 02/12/2025. Loan acknowledged via UPI ref 524817642 + a hand written reciept signed by Vikrant on the same day.
+
+Vikrant gave one cheque in repayment:
+- Cheque no 412567 dated 15/03/2026
+- Amount Rs 5,00,000
+- Drawn on HDFC Bank, Pune Camp branch (MG Road, Pune 411001)
+- Vikrant's a/c no XXXXXX4287 (last 4)
+
+Client deposited the cheque at his ICICI Aundh branch on 25/04/2026.
+
+Returned by HDFC vide Cheque Return Memo dt 27/04/2026 — "FUNDS INSUFFICIENT".
+
+Client recieved the return memo on 29/04/2026. So 30 day window for sec 138 notice — calculate from 29/04/26.
+
+Vikrant has been dodging calls. Refusing to pay. Want to send statutory 138 notice today (12/05/2026).
+
+Advocate: Sattyajeet S. Karale Patil, Pune. Enrl no MAH/12345/2014. Notice costs Rs 11,000.
