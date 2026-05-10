@@ -68,15 +68,15 @@ edit-save round-trips, producing a wall of text with literal `**` markers.
 Instead, write each paragraph as its own `<p>` element with the explicit
 number inside the paragraph text:
 
-  <p>1. The present Interim Application is filed in Civil Suit No.
+  <p style="padding:0 2.5rem;">1. The present Interim Application is filed in Civil Suit No.
   ______ / [Year] pending before this Hon'ble Court.</p>
 
-  <p>2. The applicant herein, <strong>[Full Name]</strong>, age [Age]
+  <p style="padding:0 2.5rem;">2. The applicant herein, <strong>[Full Name]</strong>, age [Age]
   years, occupation [Occupation], residing at [Address], is the
   <strong>[First Party Role]</strong> in the aforesaid suit, and the
   said suit concerns [one-line description of the parent suit].</p>
 
-  <p>3. The respondent, <strong>[Full Name]</strong>, age [Age] years,
+  <p style="padding:0 2.5rem;">3. The respondent, <strong>[Full Name]</strong>, age [Age] years,
   occupation [Occupation], residing at [Address], is the
   <strong>[Second Party Role]</strong> in the aforesaid suit.</p>
 
@@ -85,13 +85,20 @@ defined references). Do NOT use markdown `**bold**` inside the body
 HTML — markdown emphasis is not parsed inside HTML blocks and will
 render as literal asterisks.
 
+**EVERY body `<p>` MUST include `style="padding:0 2.5rem;"`** — uniform
+2.5rem padding on BOTH left AND right — so the numbered body sits inset
+symmetrically from the page edges, matching standard Indian-court
+layout. The opener `<p>` and every numbered paragraph carry this exact
+style. Do NOT apply this padding to PRAYER and VERIFICATION centered
+headings (they're already centered).
+
 Do NOT emit `##` section headings for "BRIEF FACTS", "PRIMA FACIE
 CASE", "IRREPARABLE HARM", or any similar heading inside the body.
 Do NOT use sub-numbering like `1.1`, `1.2`, `2.1`.
 
-Begin the body with a single `<p>` opener:
+Begin the body with a single `<p>` opener (same uniform padding):
 
-  <p>The applicant respectfully submits as follows:</p>
+  <p style="padding:0 2.5rem;">The applicant respectfully submits as follows:</p>
 
 Then emit numbered `<p>` paragraphs covering — in this order, each as
 ONE `<p>`:
@@ -161,51 +168,29 @@ may kindly be pleased to:
 (e) Pass any other order as this Hon'ble Court may deem fit and proper in
     the interest of justice.
 
-<table class="signature-block" style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
-<tbody>
-<tr>
-<td style="border:0;padding:0;text-align:left;vertical-align:top;width:40%;">Place: [City]</td>
-<td style="border:0;padding:0;text-align:center;vertical-align:top;width:20%;"></td>
-<td style="border:0;padding:0;text-align:right;vertical-align:top;width:40%;"></td>
-</tr>
-<tr>
-<td style="border:0;padding:0;text-align:left;vertical-align:top;">Date: DD/MM/YYYY</td>
-<td style="border:0;padding:0;text-align:center;vertical-align:top;"><strong>[First Party Role]</strong></td>
-<td style="border:0;padding:0;text-align:right;vertical-align:top;"><strong>Advocate for the [First Party Role]</strong></td>
-</tr>
-<tr>
-<td style="border:0;padding:0;"></td>
-<td style="border:0;padding:0;"></td>
-<td style="border:0;padding:0;text-align:right;vertical-align:top;"><strong>[Advocate Name]</strong></td>
-</tr>
-</tbody>
-</table>
+<p style="margin:1.5rem 0 0;padding:0 2.5rem;">Place: [City]</p>
+<p style="margin:0;padding:0 2.5rem;">Date: DD/MM/YYYY</p>
 
-<p style="text-align:center;margin:0.5rem 0;"><strong><u>VERIFICATION</u></strong></p>
+<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>[First Party Role]</strong></p>
+<p style="text-align:right;margin:0 2.5rem;">[First Party Full Name]</p>
 
-I, **[First Party Full Name]**, aged [First Party Age] years, occupation
-[First Party Occupation], the [First Party Role] in the above matter,
-residing at [First Party Address], do hereby state on solemn affirmation that
-what is stated in the above paragraphs no. [1 to N] is true and correct to
-the best of my knowledge and information, which I believe to be true. Hence
-verified at **[City]** on this **[DD]** day of **[Month, Year]**.
+<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>Advocate for the [First Party Role]</strong></p>
+<p style="text-align:right;margin:0 2.5rem;"><strong>[Advocate Name]</strong></p>
 
-<table class="signature-block" style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">
-<tbody>
-<tr>
-<td style="border:0;padding:0;text-align:left;vertical-align:top;width:50%;">Place: [City]</td>
-<td style="border:0;padding:0;text-align:right;vertical-align:top;width:50%;"></td>
-</tr>
-<tr>
-<td style="border:0;padding:0;text-align:left;vertical-align:top;">Date: DD/MM/YYYY</td>
-<td style="border:0;padding:0;text-align:right;vertical-align:top;"><strong>[First Party Role]</strong></td>
-</tr>
-</tbody>
-</table>
+<p style="text-align:center;margin:1.5rem 0 0.5rem;"><strong><u>VERIFICATION</u></strong></p>
 
-I know the Deponent.
+<p style="padding:0 2.5rem;">I, <strong>[First Party Full Name]</strong>, aged [First Party Age] years, occupation [First Party Occupation], the [First Party Role] in the above matter, residing at [First Party Address], do hereby state on solemn affirmation that what is stated in the above paragraphs no. [1 to N] is true and correct to the best of my knowledge and information, which I believe to be true. Hence verified at <strong>[City]</strong> on this <strong>[DD]</strong> day of <strong>[Month, Year]</strong>.</p>
 
-**Advocate for the [First Party Role]**
+<p style="margin:1.5rem 0 0;padding:0 2.5rem;">Place: [City]</p>
+<p style="margin:0;padding:0 2.5rem;">Date: DD/MM/YYYY</p>
+
+<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>[First Party Role]</strong></p>
+<p style="text-align:right;margin:0 2.5rem;">[First Party Full Name]</p>
+
+<p style="margin:1.5rem 0 0;padding:0 2.5rem;">I know the Deponent.</p>
+
+<p style="margin:1.5rem 0 0;padding:0 2.5rem;"><strong>Advocate for the [First Party Role]</strong></p>
+<p style="margin:0;padding:0 2.5rem;"><strong>[Advocate Name]</strong></p>
 
 ===== END TEMPLATE =====
 
@@ -250,13 +235,22 @@ I know the Deponent.
     `<p style="text-align:center;margin:0.5rem 0;"><strong><u>VERIFICATION</u></strong></p>`
     Do NOT emit `## PRAYER` or `## VERIFICATION` markdown headings.
 
-3b. **SIGNATURE BLOCKS ARE BORDERLESS HTML TABLES.** Emit them VERBATIM
-    from the template — do not rewrite as plain paragraphs. The first
-    (post-prayer) is 3-column: Place/Date on left, [First Party Role] in
-    middle, Advocate-for-the-[Role] + [Advocate Name] on right. The second
-    (post-verification) is 2-column: Place/Date left, [First Party Role]
-    right; followed by the plain lines `I know the Deponent.` and
-    `**Advocate for the [First Party Role]**`.
+3b. **SIGNATURE BLOCKS ARE STACKED PLAIN `<p>` PARAGRAPHS — NO TABLES,
+    NO 3-COLUMN LAYOUT.** Emit them VERBATIM from the template. Place
+    and Date sit left-aligned with `padding:0 2.5rem;` (same as body
+    indent). The role label `<strong>[First Party Role]</strong>` is
+    right-aligned with `margin:2.5rem 2.5rem 0;` — that 2.5rem
+    top-margin IS the signature space. The party's TYPED NAME
+    `[First Party Full Name]` appears immediately below, right-aligned
+    with `margin:0 2.5rem;` (no top margin). Then another `2.5rem`
+    top-margin gap before "Advocate for the [Role]" right-aligned BOLD,
+    and the advocate's typed name `<strong>[Advocate Name]</strong>`
+    right-aligned BOLD immediately below it. Both typed names MUST
+    appear — pull the party name from STRUCTURED INPUT, leave the
+    advocate name as a bracket if not provided. Do NOT render the
+    block as a 3-column / table layout where Date / Role / Advocate
+    sit on the same line — that wraps the typed name across lines and
+    looks broken.
 
 4. **PRECEDENCE OF SOURCES**: when STRUCTURED INPUT (the wizard form fields)
    and REFERENCE DOCUMENTS CONTEXT (the uploaded PDF text) disagree on a value,
