@@ -54,14 +54,12 @@ After the stationery / RPAD banner / dated line / recipient / sender /
 SUBJECT / opener (per BASELINE), emit numbered `<p>` paragraphs in this
 order. Each `<p>` carries `style="padding:0 3.5rem;"`.
 
-The SUBJECT line MUST identify the property and the statutory hook:
+The SUBJECT line - one line, 25 words max. Pattern:
 
-  <p style="padding:0 3.5rem;"><strong>SUBJECT: Notice under Section 106
-  of the Transfer of Property Act, 1882 [read with Section [...] of the
-  [State] Rent Control Act, [Year]] terminating the tenancy in respect
-  of the premises bearing [precise description], and calling upon you
-  to deliver vacant peaceful possession thereof, together with payment
-  of arrears of rent.</strong></p>
+  <p style="padding:0 3.5rem;margin:1.25rem 0 0;"><strong>SUBJECT: Notice u/s 106 TP Act 1882 - Termination of tenancy and demand for vacant possession of [short premises ref, e.g. "Flat 426, Lotus Nandanvan, Moshi"].</strong></p>
+
+The full property description, arrears computation, mesne profits, and
+consequences belong in the body, not in the subject.
 
 **Paragraph 1 - Client identity and ownership / landlord status.**
 Full name (in `<strong>`), age, occupation, address. State the

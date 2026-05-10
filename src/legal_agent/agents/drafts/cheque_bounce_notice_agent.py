@@ -45,13 +45,12 @@ After the stationery / RPAD banner / dated line / recipient / sender /
 SUBJECT / opener (per BASELINE), emit numbered `<p>` paragraphs in this
 order. Each `<p>` carries `style="padding:0 3.5rem;"`.
 
-The SUBJECT line MUST read substantially as follows:
+The SUBJECT line - one line, 25 words max. Pattern:
 
-  <p style="padding:0 3.5rem;"><strong>SUBJECT: Statutory Notice under
-  Section 138 of the Negotiable Instruments Act, 1881 demanding payment
-  of <strong>Rs. [Amount]/- (Rupees [Amount in Words] Only)</strong>
-  being the amount of cheque bearing No. [Cheque No.] dated DD/MM/YYYY,
-  drawn on [Drawee Bank, Branch], dishonoured upon presentation.</strong></p>
+  <p style="padding:0 3.5rem;margin:1.25rem 0 0;"><strong>SUBJECT: Statutory Notice u/s 138 NI Act, 1881 - Cheque No. [Cheque No.] dated DD/MM/YYYY for <strong>Rs. [Amount]/-</strong>, dishonoured.</strong></p>
+
+The full statutory regime, demand period, and consequences belong in the
+body, not in the subject.
 
 **Paragraph 1 - Client identity, addressee identity, underlying
 relationship.**

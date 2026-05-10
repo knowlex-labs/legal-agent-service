@@ -51,6 +51,13 @@ SUBJECT / opener (per BASELINE), emit numbered `<p>` paragraphs in this
 order. Each `<p>` carries `style="padding:0 3.5rem;"`. Number 1, 2,
 3, ...
 
+**SUBJECT line - one line, 25 words max.** Pattern:
+
+  <p style="padding:0 3.5rem;margin:1.25rem 0 0;"><strong>SUBJECT: Demand Notice - Recovery of <strong>Rs. [Amount]/- (Rupees [Words] Only)</strong> due under [short instrument reference, e.g. "Master Services Agreement dated 04/01/2025"].</strong></p>
+
+Do NOT recite the contractual interest rate, the consequences, or the
+list of statutory provisions in the SUBJECT - those go in the body.
+
 **Paragraph 1 - Client identity and the commercial relationship.**
 Full name (in `<strong>`), age, occupation / business, address. Then
 identify the addressee's relationship to my client (purchaser, borrower,
