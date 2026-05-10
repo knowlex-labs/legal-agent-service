@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 SENTINEL_START = "<!-- cause-title:start -->"
 SENTINEL_END = "<!-- cause-title:end -->"
 
-# Markdown ref-link comment — renders as nothing but starts with `[` not `<`,
+# Markdown ref-link comment - renders as nothing but starts with `[` not `<`,
 # so the FE's already-HTML check doesn't short-circuit and skip markdown.
 LEADING_MARKER = "[//]: # (cause-title-prepended)"
 
@@ -46,7 +46,7 @@ class Party(BaseModel):
     )
     address_lines: list[str] = Field(
         default_factory=list,
-        description="Street/area, city/district/state, pincode — split as 1 to 3 lines as in the source.",
+        description="Street/area, city/district/state, pincode - split as 1 to 3 lines as in the source.",
     )
     mobile: str | None = Field(None, description="Mobile number as written. Null if absent.")
     role: RoleLabel = Field(..., description="Role label for this party in the filing.")
@@ -89,7 +89,7 @@ class CauseTitleData(BaseModel):
             '"STAY APPLICATION ON BEHALF OF THE PLAINTIFF", '
             '"APPLICATION UNDER SECTION 9 OF THE ARBITRATION AND CONCILIATION ACT, 1996". '
             "Do NOT copy the user's filename verbatim (e.g., 'Interim Application "
-            "Test 12') — it is for reference only."
+            "Test 12') - it is for reference only."
         ),
     )
 
@@ -102,7 +102,7 @@ Rules:
 invent court names, party names, ages, addresses, mobile numbers, case \
 numbers, or years. Leave a field null when absent in BOTH the form input \
 and the reference document.
-2. Form input wins when both sources disagree — the form is the user's \
+2. Form input wins when both sources disagree - the form is the user's \
 ground-truth intent for THIS filing.
 3. Role labels for an interim application inherit from the parent suit \
 when the reference shows a parent caption:
@@ -117,15 +117,15 @@ when the reference shows a parent caption:
 7. `case_number`: keep literal blanks "___" if that is what the source shows. \
    Do NOT replace with a real number.
 8. Strip the "IN THE HON'BLE" prefix from `court_name`. The renderer adds it back.
-9. Do not output explanations or extra prose — just fill the schema.
+9. Do not output explanations or extra prose - just fill the schema.
 10. `document_title`: derive an Indian-court legal title from the substantive \
-   content — name the statute / order / rule invoked and the relief sought, \
+   content - name the statute / order / rule invoked and the relief sought, \
    in ALL CAPS or Title Case as suits a court filing. Examples: \
    "APPLICATION FOR TEMPORARY INJUNCTION UNDER ORDER 39 RULES 1 AND 2 OF THE \
    CODE OF CIVIL PROCEDURE, 1908", "STAY APPLICATION ON BEHALF OF THE \
    PLAINTIFF", "APPLICATION UNDER SECTION 9 OF THE ARBITRATION AND \
    CONCILIATION ACT, 1996". Do NOT copy the user's filename verbatim (e.g., \
-   "Interim Application Test 12") — it is informational only. If the form \
+   "Interim Application Test 12") - it is informational only. If the form \
    input and reference are silent on the specific statute, fall back to a \
    neutral title such as "INTERIM APPLICATION" or "APPLICATION ON BEHALF OF \
    THE [Role]".
@@ -134,7 +134,7 @@ when the reference shows a parent caption:
 
 _EXTRACT_USER_PROMPT_TEMPLATE = """Today's date: {today}
 
-User filename for reference only (DO NOT copy verbatim — derive a proper \
+User filename for reference only (DO NOT copy verbatim - derive a proper \
 Indian-court legal title from the substantive content): {document_title}
 
 --- FORM INPUT (from the drafting wizard; PRIORITY source) ---
@@ -181,7 +181,7 @@ async def extract_cause_title(
     data = result if isinstance(result, CauseTitleData) else CauseTitleData.model_validate(result)
     # If the LLM failed to derive a content-based title, leave it null so the
     # renderer emits a `[Document Title]` placeholder for the advocate. We do
-    # NOT fall back to the user's filename — that's how `Interim Application
+    # NOT fall back to the user's filename - that's how `Interim Application
     # Test 12` ended up in the cause title.
     return data
 
@@ -235,7 +235,7 @@ def _render_mobile_and_role(party: Party) -> list[str]:
     """Render the `Mob.no. NNNN ………Role` line.
 
     Uses a 1-row 2-cell borderless table so the role tag sits on the SAME
-    line as the mobile, right-aligned — matching the canonical court draft
+    line as the mobile, right-aligned - matching the canonical court draft
     layout. TipTap preserves table structure; inline `border:0;padding:0`
     overrides the editor's default table CSS.
     """
@@ -285,9 +285,12 @@ def render_cause_title_html(data: CauseTitleData) -> str:
     lines.append(
         f'<p style="text-align:center;{_P_STYLE}text-transform:uppercase;"><strong><u>IN THE HON\'BLE {court_name}</u></strong></p>'
     )
-    lines.append(
-        f'<p style="text-align:center;{_P_STYLE}"><strong><u>AT {court_seat}</u></strong></p>'
-    )
+    # Skip the AT line when court_name already contains the seat (avoids "Pune ... AT PUNE" duplication).
+    seat_lower = (data.court_seat or "").strip().lower()
+    if seat_lower and seat_lower not in (data.court_name or "").lower():
+        lines.append(
+            f'<p style="text-align:center;{_P_STYLE}"><strong><u>AT {court_seat}</u></strong></p>'
+        )
     lines.append(
         f'<p style="text-align:right;{_P_STYLE}"><strong>{case_type} No. {case_number} / {case_year}</strong></p>'
     )
@@ -334,7 +337,7 @@ def _is_skippable_heading(heading_full: str, heading_text: str, document_title: 
 
 
 def _strip_llm_cause_title_prefix(body: str, document_title: str | None) -> str:
-    # Only strip if the body actually starts with a `##` heading — otherwise
+    # Only strip if the body actually starts with a `##` heading - otherwise
     # the body is flat numbered prose (interim-application format) and we'd
     # incorrectly chop everything before the first mid-document heading
     # (e.g. `## PRAYER`).
