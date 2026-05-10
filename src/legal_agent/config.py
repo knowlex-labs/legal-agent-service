@@ -76,7 +76,7 @@ class Settings(BaseSettings):
     legal_db_url: str | None = None
 
     # Chat LLM default (frontend sends model ID directly)
-    chat_llm_default_model: str = "gemini-2.0-flash"
+    chat_llm_default_model: str = "gemini-2.5-flash"
 
     # Web search — Firecrawl is primary (scrapes full article text), Serper is fallback.
     # Both restricted to the 3 trusted Indian legal sources below (no Indian Kanoon).

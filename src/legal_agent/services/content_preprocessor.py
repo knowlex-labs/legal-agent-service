@@ -24,7 +24,7 @@ logger = logging.getLogger(__name__)
 FAST_CHAT_MODELS: dict[str, str] = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-haiku-4-5-20251001",
-    "gemini": "gemini-2.0-flash",
+    "gemini": "gemini-2.5-flash",
 }
 
 LANGCHAIN_PROVIDER_MAP: dict[str, str] = {

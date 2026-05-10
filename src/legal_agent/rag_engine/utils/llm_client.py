@@ -14,7 +14,7 @@ class LlmClient:
             from google import genai
             logger.info("Using Gemini via google-genai")
             self.client = genai.Client(api_key=get_settings().gemini_api_key or "")
-            self.model_id = get_settings().gemini_model # e.g. "gemini-2.0-flash"
+            self.model_id = get_settings().gemini_model # e.g. "gemini-2.5-flash"
             self.max_tokens = get_settings().gemini_max_tokens
             self.temperature = get_settings().gemini_temperature
 

@@ -20,8 +20,8 @@ def _fast_model_string(settings: Settings) -> str:
     """Return 'provider:model' for the fast/cheap model matching the configured provider."""
     fast_models = {
         "openai": "gpt-4o-mini",
-        "anthropic": "claude-3-5-haiku-latest",
-        "gemini": "gemini-2.0-flash",
+        "anthropic": "claude-haiku-4-5-20251001",
+        "gemini": "gemini-2.5-flash",
     }
     # Fall back to the configured model so we never produce an invalid cross-provider string
     model = fast_models.get(settings.draft_llm_provider, settings.draft_llm_model)
