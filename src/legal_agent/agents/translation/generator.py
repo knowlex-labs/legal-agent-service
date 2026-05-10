@@ -73,7 +73,7 @@ def _resolve_model(model: str) -> tuple[str, str]:
         return model, "openai"
     if model.startswith("sarvam"):
         return model, "sarvam"
-    return model, get_settings().llm_provider
+    return model, get_settings().draft_llm_provider
 
 
 def _init_llm(model: str, provider: str, max_tokens: int):

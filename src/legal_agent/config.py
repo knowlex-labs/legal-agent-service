@@ -16,10 +16,8 @@ _LANGCHAIN_PROVIDERS = {"openai": "openai", "anthropic": "anthropic", "gemini": 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
-    # LLM (drafting) — default is GPT-5.4 (OpenAI's current flagship as of Apr 2026).
-    # Per-request model overrides still work via CreateDraftJobRequest.model.
-    llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
-    llm_model: str = "gpt-5.4"
+    draft_llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
+    draft_llm_model: str = "gpt-5.4"
     openai_api_key: str | None = None
     gemini_api_key: str | None = None
     anthropic_api_key: str | None = None
@@ -75,7 +73,7 @@ class Settings(BaseSettings):
     legal_db_url: str | None = None
 
     # Chat LLM default (frontend sends model ID directly)
-    chat_llm_default_model: str = "gemini-2.0-flash"
+    chat_llm_default_model: str = "gemini-2.5-flash"
 
     # Web search — Firecrawl is primary (scrapes full article text), Serper is fallback.
     # Both restricted to the 3 trusted Indian legal sources below (no Indian Kanoon).
@@ -182,7 +180,7 @@ class Settings(BaseSettings):
     semantic_model: str = "sentence-transformers/all-MiniLM-L6-v2"
 
     def get_langchain_provider(self) -> str:
-        return _LANGCHAIN_PROVIDERS.get(self.llm_provider, self.llm_provider)
+        return _LANGCHAIN_PROVIDERS.get(self.draft_llm_provider, self.draft_llm_provider)
 
     @staticmethod
     def get_langchain_provider_for_model(model_id: str) -> str:
@@ -193,7 +191,7 @@ class Settings(BaseSettings):
 
     def get_llm_api_key(self) -> str | None:
         keys = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "gemini": self.gemini_api_key}
-        return keys.get(self.llm_provider)
+        return keys.get(self.draft_llm_provider)
 
 
 

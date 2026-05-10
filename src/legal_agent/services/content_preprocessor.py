@@ -16,12 +16,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Fast / cheap chat model per provider — used for content enhancement and
-# draft-field extraction.
+# Fast / cheap chat model per provider. Keep the Anthropic entry aligned with
+# Settings.metadata_extraction_model — drift causes 404s on some accounts.
 FAST_CHAT_MODELS: dict[str, str] = {
     "openai": "gpt-4o-mini",
-    "anthropic": "claude-3-5-haiku-latest",
-    "gemini": "gemini-2.0-flash",
+    "anthropic": "claude-haiku-4-5-20251001",
+    "gemini": "gemini-2.5-flash",
 }
 
 LANGCHAIN_PROVIDER_MAP: dict[str, str] = {

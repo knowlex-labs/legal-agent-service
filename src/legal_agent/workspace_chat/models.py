@@ -27,7 +27,7 @@ class WorkspaceChatMessageRequest(BaseModel):
         default="balanced", description="Response detail level"
     )
     file_ids: list[str] = Field(default_factory=list, description="File IDs for RAG scope")
-    model: str = Field(default="gemini-2.0-flash", description="Model ID to use")
+    model: str = Field(default="gemini-2.5-flash", description="Model ID to use")
     web_search: bool = Field(
         default=False,
         description=(

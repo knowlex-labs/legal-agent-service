@@ -83,7 +83,7 @@ async def _init_workspace_chat_agent(retriever: LegalCaseRetriever | None):
 async def lifespan(app: FastAPI):
     global job_manager, rag_client
     settings = get_settings()
-    logger.info(f"Starting legal-agent-service (draft={settings.llm_model}, chat_default={settings.chat_llm_default_model})")
+    logger.info(f"Starting legal-agent-service (draft={settings.draft_llm_model}, chat_default={settings.chat_llm_default_model})")
     job_manager = JobManager()
     rag_client = MockRAGClient() if settings.debug else LocalRAGClient()
     logger.info("RAG: in-process (LocalRAGClient)" if not settings.debug else "RAG: debug (MockRAGClient)")
@@ -92,7 +92,7 @@ async def lifespan(app: FastAPI):
         legal_retriever = LegalCaseRetriever()
         logger.info("LegalCaseRetriever created (DB pool lazy-initialized on first query)")
     except Exception:
-        logger.warning("LegalCaseRetriever unavailable — drafts will not have case law tool")
+        logger.warning("LegalCaseRetriever unavailable — chat + precedent flows will not have case law tool")
     s3_client = S3Client(settings)
     # Custom templates: table creation is now lazy (runs on first template
     # operation). Avoids blocking startup on a cold/suspended Neon DB.
@@ -104,7 +104,6 @@ async def lifespan(app: FastAPI):
         job_manager=job_manager,
         rag_client=rag_client,
         s3_client=s3_client,
-        retriever=legal_retriever,
         template_service=template_service,
         decryption=decryption_service,
     )

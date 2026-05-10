@@ -88,7 +88,7 @@ _EXTRACT_USER_PROMPT_TEMPLATE = """Extract drafting-form metadata from the docum
 def _resolve_model() -> tuple[str, str]:
     from legal_agent.config import get_settings
 
-    return pick_fast_chat_model(get_settings().llm_provider)
+    return pick_fast_chat_model(get_settings().draft_llm_provider)
 
 
 async def extract_draft_fields(

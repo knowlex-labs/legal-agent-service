@@ -39,7 +39,7 @@ class _EmbeddingConfig:
 class _LlmConfig:
     @property
     def PROVIDER(self):
-        return get_settings().llm_provider
+        return get_settings().draft_llm_provider
 
     @property
     def OPENAI_API_KEY(self):

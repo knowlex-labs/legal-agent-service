@@ -55,9 +55,9 @@ cp .env.example .env
 
 4. Configure your `.env` file:
 ```env
-# LLM Provider Configuration
-LLM_PROVIDER=openai
-LLM_MODEL=gpt-4o
+# LLM Provider Configuration (drafting agent)
+DRAFT_LLM_PROVIDER=openai
+DRAFT_LLM_MODEL=gpt-4o
 OPENAI_API_KEY=your-openai-api-key-here
 
 # Service Configuration
@@ -193,8 +193,8 @@ curl "http://localhost:8001/api/v1/drafts?limit=10&offset=0"
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `LLM_PROVIDER` | `openai` | LLM provider (openai/anthropic/gemini) |
-| `LLM_MODEL` | `gpt-4o` | Model name |
+| `DRAFT_LLM_PROVIDER` | `openai` | Drafting-agent LLM provider (openai/anthropic/gemini) |
+| `DRAFT_LLM_MODEL` | `gpt-5.4` | Drafting-agent model name (per-request override via `CreateDraftJobRequest.model`) |
 | `OPENAI_API_KEY` | - | OpenAI API key |
 | `ANTHROPIC_API_KEY` | - | Anthropic API key |
 | `GEMINI_API_KEY` | - | Google Gemini API key |

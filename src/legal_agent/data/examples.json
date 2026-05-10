@@ -6,7 +6,7 @@
       "If exact date unknown, use 'on or about [month/year]' or describe contextually",
       "If name unknown, use role descriptors ('the plaintiff', 'the defendant')",
       "Document must be complete and ready to file - NO blanks",
-      "Output CLEAN MARKDOWN only — no HTML tags, no code fences",
+      "Output CLEAN MARKDOWN only - no HTML tags, no code fences",
       "Use markdown pipe tables with |---| separator for ALL tabular data",
       "Use **bold** for names and emphasis, ## headings for sections",
       "MINIMIZE horizontal rules (---) - use ONLY between major sections, never between paragraphs",
@@ -22,7 +22,7 @@
       "date": "**Dated: DD/MM/YYYY**",
       "recipient_section": "**To,**\n1. **Recipient Name**\n   Full Address\n   Contact Number\n\n2. Second Recipient (if any)...",
       "subject": "**SUBJECT:** Notice for [specific issue] caused by you to my client **[Client Name]**",
-      "opening": "Under instructions from and on behalf of my client **[Client Name]**, [Occupation], R/O [Full Address], I am sending this legal notice to you as under –",
+      "opening": "Under instructions from and on behalf of my client **[Client Name]**, [Occupation], R/O [Full Address], I am sending this legal notice to you as under -",
       "body": "Numbered paragraphs (1, 2, 3...) with chronological facts. Each paragraph starts with 'That...' and states specific facts with dates, amounts, and details.",
       "legal_grounds": "State applicable sections of law (IPC Section 406, 420 / BNS equivalents, NI Act Section 138, etc.)",
       "demand_clause": "Within **[X] days** from the receipt of this notice, you are called upon to [specific demand - pay amount, return property, cease action, etc.]",
@@ -40,9 +40,9 @@
       "State legal provisions clearly (Section 406, 420 of IPC / BNS)",
       "Give reasonable time limit (typically 7-15 days)",
       "End with clear consequences of non-compliance",
-      "Output clean MARKDOWN — no HTML tags"
+      "Output clean MARKDOWN - no HTML tags"
     ],
-    "example_snippet": "**SUBJECT:** Notice for Criminal Breach of Trust, Cheating and Mental Harassment caused by you to my client **Dr. Mahavir Bhagwandas Gandhi**\n\n---\n\nUnder instructions from and on behalf of my client **Dr. Mahavir Bhagwandas Gandhi**, R/O 49 Samta Colony, Vinayak Nagar, Nagpur, I am sending this legal notice to you as under –\n\n1. That my client is a Medical Practitioner and was running a clinic...\n\n2. That the Noticee No. 1 approached my client in year 2022...\n\n15. Within **7 days** from the receipt of this notice, you are called upon to refund Rs. 80,000/- (Rupees Eighty Thousand Only) along with interest..."
+    "example_snippet": "**SUBJECT:** Notice for Criminal Breach of Trust, Cheating and Mental Harassment caused by you to my client **Dr. Mahavir Bhagwandas Gandhi**\n\n---\n\nUnder instructions from and on behalf of my client **Dr. Mahavir Bhagwandas Gandhi**, R/O 49 Samta Colony, Vinayak Nagar, Nagpur, I am sending this legal notice to you as under -\n\n1. That my client is a Medical Practitioner and was running a clinic...\n\n2. That the Noticee No. 1 approached my client in year 2022...\n\n15. Within **7 days** from the receipt of this notice, you are called upon to refund Rs. 80,000/- (Rupees Eighty Thousand Only) along with interest..."
   },
   "affidavit": {
     "description": "Affidavits for various court proceedings",
@@ -69,7 +69,7 @@
           "State cause of action clearly",
           "Include jurisdiction statement",
           "End with verification on oath",
-          "Output clean MARKDOWN — no HTML tags"
+          "Output clean MARKDOWN - no HTML tags"
         ],
         "example_snippet": "I, Shri Jagdish Panditrao Chaudhari, Age 50 years, residing at 41, Mahaveer Nagar, Part 2, Darwha Road, Yavatmal, Maharashtra - 445001, the plaintiff, do hereby state on solemn affirmation as under:\n\n1. I say that I am the owner of the property situated at flat no. 426 measuring about 717 sq ft, in Lotus Nandanvan society, Moshi, Pimpri Chinchwad, Pune...\n\n2. That the defendant was in need of a flat and therefore inquired with the security guard..."
       },
@@ -92,7 +92,7 @@
           "NUMBERED PARAGRAPHS: Start with 'I say that' for first paragraph, 'That' for subsequent",
           "AMOUNTS: Always write in figures AND words: Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only)",
           "DATES: Use DD/MM/YYYY format for specific dates, 'on or about [month/year]' for approximate",
-          "Output clean MARKDOWN — no HTML tags"
+          "Output clean MARKDOWN - no HTML tags"
         ],
         "content_requirements": [
           "Para 1: State ownership/relationship to suit property",
@@ -137,7 +137,7 @@
           "Include bonafide requirement if applicable",
           "State cause of action with specific dates",
           "Prayer should have specific reliefs (a, b, c, d format)",
-          "Output clean MARKDOWN — no HTML tags"
+          "Output clean MARKDOWN - no HTML tags"
         ],
         "example_snippet": "## SUIT FOR POSSESSION UNDER SECTION 26 OF THE PROVINCIAL SMALL CAUSE COURTS ACT, 1887\n\n1. The plaintiff submits that he is the owner of the property situated at flat no. 426 measuring about 717 sqft, in Lotus Nandanvan society, Moshi, Pimpri Chinchwad, Pune...\n\n17. The Defendant did not pay the rent for 50 months which is Rs. 4,25,000/- (Rupees Four Lakh Twenty Five Thousand Only)...\n\n23. The plaintiff therefore prays that,\na. The defendant be ordered to pay the license fee amount of Rs. 4,08,000/- (Rupees Four Lakh Eight Thousand Only)\nb. The defendant be ordered to pay Rs. 5,00,000/- (Rupees Five Lakh Only) for the inconvenience caused..."
       }
@@ -161,7 +161,7 @@
       "Provide grounds for the application",
       "Be specific in prayer clause",
       "Use respectful language for court",
-      "Output clean MARKDOWN — no HTML tags"
+      "Output clean MARKDOWN - no HTML tags"
     ]
   },
   "contract": {
@@ -193,45 +193,47 @@
       "Add stamp duty consideration note if relevant",
       "Include witness signature blocks",
       "Number all clauses and sub-clauses",
-      "Output clean MARKDOWN — no HTML tags"
+      "Output clean MARKDOWN - no HTML tags"
     ]
   },
   "bail_application": {
-    "description": "Bail applications (regular, anticipatory, default) for criminal cases",
+    "description": "Bail applications (regular, default) for criminal cases. Cause title is rendered separately by cause_title.py - this agent emits ONLY the body and signature blocks below.",
     "agent": "BailApplicationAgent",
     "structure": {
-      "case_title": "**MCRC No._______ / YYYY**\n**(Under Section 439/438 CrPC / 483/482 BNSS)**",
-      "applicant_note": "**(Applicant in Jail)** if in custody",
-      "parties": "**[Full Name]** S/o Shri [Father], Age, Address ………Applicant\n\n**Vs**\n\nState of [State] through [Police Station], District [District] ………Non-Applicant",
-      "crime_table": "| Description of Crime | Details of Impugned Order |\n|----------------------|--------------------------|\n| Crime No. | B.A. No. |\n| U/s [Sections] | Name of Judge |\n| PS [Name], Distt. | Name of Court |\n| Date of arrest | Date of order |",
-      "criminal_history_table": "| S.No | FIR No. | Sections | Police Station | District | Status |\n|------|---------|----------|----------------|----------|--------|\n| 1 | ... | ... | ... | ... | ... |",
-      "co_accused_table": "| Name of Accused | MCRC nos | Order date | Status | Name of Judge |\n|-----------------|----------|------------|--------|---------------|\n| ... | ... | ... | ... | ... |",
-      "declaration": "Declaration about pending bail applications",
-      "facts": "**Facts of case :-** Numbered paragraphs with chronological facts",
-      "grounds": "**GROUNDS** with Roman numerals (I), (II), (III)... citing legal arguments and case laws",
-      "prayer": "## PRAYER\nPrayer for grant of bail with specific terms"
+      "cause_title": "Rendered deterministically by cause_title.py - court banner, MCRC No., applicant + State respondent blocks, document title. The agent does NOT emit any of these.",
+      "custody_annotation": "Optional first <p>: <p style='text-align:center;margin:0.5rem 0;'><strong>(Applicant in Jail)</strong></p> - only when applicant is in custody.",
+      "body_opener": "<p style='padding:0 3.5rem;'>The applicant most respectfully submits as under:</p>",
+      "body": "Flat numbered HTML <p> blocks, every one with style='padding:0 3.5rem;'. No ## or ### headings. No --- horizontal rules. No sub-numbering (1.1, 1.2). HTML <strong> for emphasis, NOT **markdown bold**.",
+      "data_tables": "Bordered HTML <table> for prior bail applications, case details, criminal antecedents, co-accused parity, legal authorities. Each preceded by an introductory numbered <p>. Omit table entirely when data is absent (state absence in prose).",
+      "grounds": "<p> paragraphs continuing the body sequence. CATEGORY-OPENING paragraphs (those with the (A)/(B)/(C) Title Case label) do NOT carry a leading number - the (A)/(B)/(C) letter IS the marker. Continuation paragraphs within the same category keep the flat numbering, picking up from the last numbered paragraph. Result: 6, 7, (A) Title - substance, 8, 9, (B) Title - substance, 10, (C) Title - substance, 11, ...",
+      "prayer": "Centered HTML heading: <p style='text-align:center;margin:0.5rem 0;'><strong><u>PRAYER</u></strong></p>. Reliefs as plain markdown (a), (b), (c).",
+      "signature_block": "Stacked right-aligned <p> paragraphs with 3.5rem signature gaps. Place + Date left-aligned. Then 'Applicant' BOLD right-aligned (signature space above), applicant's typed name right-aligned plain immediately below. Then 'Advocate for the Applicant' BOLD right-aligned, advocate's typed name BOLD right-aligned. NO 3-column / NO table layout.",
+      "verification": "Centered HTML heading: <p style='text-align:center;...'><strong><u>VERIFICATION</u></strong></p> with page-break-after:avoid. Body in <p style='padding:0 3.5rem;break-inside:avoid;'>. Then Place + Date left, deponent role + name right-aligned (signature space), then 'I know the Deponent.' + 'Advocate for the [Role]' + advocate name LEFT-aligned with `padding:0 3.5rem;`."
     },
     "format_guidelines": [
-      "Use MCRC (Miscellaneous Criminal Case) format for High Court bail applications",
-      "All tables must use markdown pipe syntax with |---| separator rows",
-      "Roman numerals (I, II, III...) for GROUNDS section",
-      "Cite BOTH old law (CrPC/IPC) and new law (BNSS/BNS) section references",
-      "Include relevant Supreme Court judgments in grounds (Arnesh Kumar, Sanjay Chandra, etc.)",
-      "Mark '**(Applicant in Jail)**' prominently if applicant is in custody",
-      "State co-accused bail status if co-accused have been granted bail",
-      "Output clean MARKDOWN — no HTML tags"
+      "DO NOT emit the cause title (court banner, MCRC No., parties, document title) - the system prepends it.",
+      "Body paragraphs are HTML <p style='padding:0 3.5rem;'> blocks, numbered consecutively 1, 2, 3, ... - uniform 3.5rem padding on BOTH left and right.",
+      "Use <strong>...</strong> inside <p>, NOT **markdown bold** - markdown emphasis is not parsed inside HTML blocks.",
+      "Grounds category labels are inline <strong> in Title Case - '(A) False Implication and Merits -' NOT '(A) FALSE IMPLICATION AND MERITS'. Category-opening paragraphs do NOT have a numeric prefix; only continuation paragraphs do. Numbering jumps over each (A)/(B)/(C) opener line.",
+      "Data tables are bordered HTML (1px solid #cbd5e1), each preceded by an introductory numbered <p>. Omit table entirely when data is absent.",
+      "PRAYER and VERIFICATION are centered + bold + underlined HTML <p>, NOT '## PRAYER' markdown headings.",
+      "Signature blocks are stacked right-aligned <p> with 3.5rem top-margin gaps between role label and the next signatory. Both the applicant's typed name and the advocate's typed name MUST appear below their respective role labels. NEVER use a 3-column layout or a <table>.",
+      "Cite BOTH old law (CrPC/IPC) and new law (BNSS/BNS) for every section reference.",
+      "No '---' horizontal rules anywhere in the document."
     ],
     "content_requirements": [
-      "FIR/Crime details with all section numbers",
+      "FIR/Crime details with all section numbers (paragraph 2)",
       "Date of arrest and period of custody",
-      "Prior bail history (applications and outcomes)",
-      "Criminal antecedents (or state clean record)",
-      "Co-accused bail status",
-      "Brief facts from applicant's perspective",
-      "At least 8-10 grounds with legal citations",
-      "Clear prayer with specific relief sought"
+      "Prior bail history - table if any, prose 'no prior application' if none (paragraph 3)",
+      "Case details table (paragraph 4)",
+      "Criminal antecedents - table if any, prose 'no prior antecedents' if none (paragraph 5)",
+      "Co-accused parity table only if co-accused exist (paragraph 6, optional)",
+      "Brief prosecution case narrative (paragraph 7)",
+      "8-10 grounds with categorical Title Case labels (paragraphs 8 onwards)",
+      "Undertaking paragraph with conditions inline (a)-(e)",
+      "Legal authorities table if legal_case_search returned cases (optional, last body paragraph)"
     ],
-    "example_snippet": "**MCRC No._______ / 2025**\n**(Under Section 439 of CrPC / Section 483 of BNSS)**\n\n**(Applicant in Jail)**\n\n**Ramesh Kumar** S/o Shri Mohan Lal\nAge: 32 years, R/o Village Barkheda,\nTehsil Harda, District Harda (M.P.) &emsp;&emsp;&emsp;&emsp; ………Applicant\n\n**Vs**\n\nState of Madhya Pradesh\nThrough P.S. Harda, District Harda &emsp;&emsp;&emsp;&emsp; ………Non-Applicant\n\n---\n\n| Description of Crime | Details |\n|----------------------|---------|\n| Crime No. 142/2025 | PS Harda |\n| U/s 303, 34 BNS | FIR Date: 15/01/2025 |\n\n---\n\n**GROUNDS:**\n\n(I) That the applicant is innocent and has been falsely implicated in the present case.\n\n(II) That the investigation is complete and chargesheet has been filed. The applicant is no longer required for investigation.\n\n(III) That the applicant has deep roots in the community and is not a flight risk.\n\n---\n\n## PRAYER\n\nIt is therefore most respectfully prayed that this Hon'ble Court may be pleased to grant regular bail to the applicant in Crime No. 142/2025 registered at P.S. Harda, District Harda.",
+    "example_snippet": "<p style=\"text-align:center;margin:0.5rem 0;\"><strong>(Applicant in Jail)</strong></p>\n\n<p style=\"padding:0 3.5rem;\">The applicant most respectfully submits as under:</p>\n\n<p style=\"padding:0 3.5rem;\">1. The applicant, <strong>Ramesh Kumar</strong>, S/O Shri Mohan Lal, aged about 32 years, Occupation: Farmer, R/o Village Barkheda, Tehsil Harda, District Harda, Madhya Pradesh - 461331, is a permanent resident of the said address and supports a family of five including his elderly parents, wife, and two minor children.</p>\n\n<p style=\"padding:0 3.5rem;\">2. The applicant was arrested on <strong>15/01/2025</strong> in connection with Crime No. 142/2025 registered at Police Station Harda, District Harda, under Sections <strong>303</strong> and <strong>34</strong> of the Bharatiya Nyaya Sanhita, 2023, corresponding to Sections 379 and 34 of the Indian Penal Code, 1860.</p>\n\n<p style=\"padding:0 3.5rem;\">3. No prior bail application has been filed by the applicant before this Hon'ble Court, before any subordinate court, or before the Hon'ble Supreme Court of India in connection with the present Crime No.</p>\n\n<p style=\"padding:0 3.5rem;\">4. The particulars of the case and the impugned remand order are as under:</p>\n\n<table style=\"width:100%;border-collapse:collapse;margin:0.5rem 0;\">\n<thead><tr><th style=\"border:1px solid #cbd5e1;padding:8px 12px;text-align:left;\">Description of Crime</th><th style=\"border:1px solid #cbd5e1;padding:8px 12px;text-align:left;\">Details of Impugned Order</th></tr></thead>\n<tbody>\n<tr><td style=\"border:1px solid #cbd5e1;padding:8px 12px;vertical-align:top;\">Crime No. 142/2025, U/s 303, 34 BNS, PS Harda, Distt. Harda. Date of arrest: 15/01/2025. Chargesheet filed on 28/03/2025.</td><td style=\"border:1px solid #cbd5e1;padding:8px 12px;vertical-align:top;\">B.A. No. 78/2025 - bail rejected by Sessions Judge, Harda vide order dated 20/01/2025.</td></tr>\n</tbody>\n</table>\n\n<p style=\"padding:0 3.5rem;\">5. The applicant has no prior criminal antecedents and has never been involved in any criminal case previously.</p>\n\n<p style=\"padding:0 3.5rem;\">6. As per the prosecution case, the applicant is alleged to have committed the offence on the night of 14/01/2025 in Village Barkheda. The applicant categorically denies the said allegations and submits that he has been falsely implicated due to a long-standing land dispute with the complainant pending in Civil Suit No. 56/2023 before the Civil Judge, Harda.</p>\n\n<p style=\"padding:0 3.5rem;\"><strong>(A) False Implication and Merits -</strong> The applicant is absolutely innocent. The prosecution case rests entirely on the testimony of the complainant and his close relatives, who have a direct enmity with the applicant arising from the pending land dispute. There is no independent witness to the alleged incident.</p>\n\n<p style=\"padding:0 3.5rem;\">7. The contradictions between the FIR and the witness statements recorded under Section 161 CrPC go to the root of the prosecution case and render its narrative wholly unreliable.</p>\n\n<p style=\"padding:0 3.5rem;\"><strong>(B) Investigation Complete -</strong> The investigation in the present case is complete and the chargesheet was filed on 28/03/2025. The continued custody of the applicant is no longer required for the purpose of investigation.</p>\n\n<p style=\"padding:0 3.5rem;\"><strong>(C) Community Ties - No Flight Risk -</strong> The applicant is a permanent resident of Village Barkheda, where he owns 4 acres of ancestral agricultural land and supports a family of five. There is no likelihood whatsoever of the applicant absconding from justice.</p>\n\n<p style=\"padding:0 3.5rem;\"><strong>(F) Constitutional Rights -</strong> Pre-trial incarceration in disregard of Article 21 of the Constitution of India is impermissible. Bail is the rule and jail is the exception, as held by the Hon'ble Supreme Court in <strong>Sanjay Chandra v. CBI</strong> - (2012) 1 SCC 40.</p>\n\n<p style=\"padding:0 3.5rem;\">8. The applicant undertakes that if enlarged on bail, he shall (a) appear before the trial court on each and every date fixed without fail; (b) not leave the jurisdiction of this Hon'ble Court without prior permission; (c) not tamper with evidence or contact, intimidate, or influence any prosecution witness; (d) abide by all such conditions as this Hon'ble Court may impose.</p>\n\n<p style=\"text-align:center;margin:0.5rem 0;page-break-after:avoid;break-after:avoid;\"><strong><u>PRAYER</u></strong></p>\n\nIt is, therefore, most humbly and respectfully prayed that this Hon'ble Court may kindly be pleased to:\n\n(a) **Allow** this application and **enlarge the applicant on bail** in Crime No. 142/2025, Police Station Harda, District Harda, Madhya Pradesh, registered under Sections 303 and 34 of the Bharatiya Nyaya Sanhita, 2023, pending trial;\n\n(b) Fix such conditions as this Hon'ble Court may deem appropriate;\n\n(c) Pass any other order as this Hon'ble Court may deem fit and proper in the interest of justice.\n\n<p style=\"margin:1.5rem 0 0;padding:0 3.5rem;\">Place: Harda</p>\n<p style=\"margin:0;padding:0 3.5rem;\">Date: 15/05/2025</p>\n\n<p style=\"text-align:right;margin:3.5rem 3.5rem 0;\"><strong>Applicant</strong></p>\n<p style=\"text-align:right;margin:0 3.5rem;\">Ramesh Kumar</p>\n\n<p style=\"text-align:right;margin:3.5rem 3.5rem 0;\"><strong>Advocate for the Applicant</strong></p>\n<p style=\"text-align:right;margin:0 3.5rem;\"><strong>Adv. Sunil Sharma</strong></p>\n\n<p style=\"text-align:center;margin:1.5rem 0 0.5rem;page-break-after:avoid;break-after:avoid;\"><strong><u>VERIFICATION</u></strong></p>\n\n<p style=\"padding:0 3.5rem;break-inside:avoid;page-break-inside:avoid;\">I, <strong>Ramesh Kumar</strong>, S/O <strong>Mohan Lal</strong>, aged 32 years, occupation Farmer, the Applicant in the above matter, residing at Village Barkheda, Tehsil Harda, District Harda, Madhya Pradesh - 461331, do hereby state on solemn affirmation that what is stated in the above paragraphs no. 1 to 8 is true and correct to the best of my knowledge and information, which I believe to be true. Hence verified at <strong>Harda</strong> on this <strong>15</strong> day of <strong>May, 2025</strong>.</p>\n\n<p style=\"margin:1.5rem 0 0;padding:0 3.5rem;\">Place: Harda</p>\n<p style=\"margin:0;padding:0 3.5rem;\">Date: 15/05/2025</p>\n\n<p style=\"text-align:right;margin:3.5rem 3.5rem 0;\"><strong>Applicant</strong></p>\n<p style=\"text-align:right;margin:0 3.5rem;\">Ramesh Kumar</p>\n\n<p style=\"margin:1.5rem 0 0;padding:0 3.5rem;\">I know the Deponent.</p>\n\n<p style=\"margin:3.5rem 0 0;padding:0 3.5rem;\"><strong>Advocate for the Applicant</strong></p>\n<p style=\"margin:0;padding:0 3.5rem;\"><strong>Adv. Sunil Sharma</strong></p>",
     "languages": {
       "hindi": {
         "example_snippet": "**म.अ.प्र. क्रमांक _______ / 2025**\n**(धारा 439 दण्ड प्रक्रिया संहिता / धारा 483 भारतीय नागरिक सुरक्षा संहिता के अंतर्गत)**\n\n**(आवेदक जेल में है)**\n\n**रमेश कुमार** पुत्र श्री मोहन लाल\nआयु: 32 वर्ष, निवासी ग्राम बरखेड़ा,\nतहसील हरदा, जिला हरदा (म.प्र.) &emsp;&emsp;&emsp;&emsp; ………आवेदक\n\n**विरुद्ध**\n\nमध्यप्रदेश शासन\nथाना हरदा, जिला हरदा द्वारा &emsp;&emsp;&emsp;&emsp; ………अनावेदक\n\n---\n\n| अपराध क्रमांक | थाना | धाराएं | प्राथमिकी दिनांक |\n|------------|------|--------|----------------|\n| 142/2025 | थाना हरदा | 303, 34 भा.न्या.सं. | 15/01/2025 |\n\n---\n\n**आधार:**\n\n(I) यह कि आवेदक निर्दोष है तथा उसे प्रस्तुत प्रकरण में झूठा फंसाया गया है।\n\n(II) यह कि विवेचना पूर्ण हो चुकी है एवं आरोप पत्र दाखिल किया जा चुका है। आवेदक की विवेचना हेतु आवश्यकता नहीं है।\n\n(III) यह कि आवेदक की समाज में गहरी जड़ें हैं तथा वह फरार होने की स्थिति में नहीं है।\n\n---\n\n## प्रार्थना\n\nअतः माननीय न्यायालय से सविनय प्रार्थना है कि आवेदक को अपराध क्रमांक 142/2025 थाना हरदा, जिला हरदा में नियमित जमानत प्रदान की जावे।"
@@ -256,7 +258,7 @@
       "Tables must use markdown pipe syntax with |---| separator rows",
       "Distinguish between appeal against conviction vs. appeal against sentence",
       "For SC/ST Act, NDPS, POCSO cases: cite specific provisions of those statutes",
-      "Output clean MARKDOWN — no HTML tags"
+      "Output clean MARKDOWN - no HTML tags"
     ],
     "content_requirements": [
       "Complete details of impugned judgment (court, case no., date, conviction, sentence)",

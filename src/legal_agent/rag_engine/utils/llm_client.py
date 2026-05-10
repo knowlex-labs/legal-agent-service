@@ -8,13 +8,13 @@ logger = logging.getLogger(__name__)
 
 class LlmClient:
     def __init__(self):
-        self.provider = get_settings().llm_provider
+        self.provider = get_settings().draft_llm_provider
 
         if self.provider == "gemini":
             from google import genai
             logger.info("Using Gemini via google-genai")
             self.client = genai.Client(api_key=get_settings().gemini_api_key or "")
-            self.model_id = get_settings().gemini_model # e.g. "gemini-2.0-flash"
+            self.model_id = get_settings().gemini_model # e.g. "gemini-2.5-flash"
             self.max_tokens = get_settings().gemini_max_tokens
             self.temperature = get_settings().gemini_temperature
 
