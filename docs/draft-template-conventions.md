@@ -431,3 +431,92 @@ When creating `MyNewAgent`:
 ---
 
 *Last updated: 2026-05-09 — established during the interim application rollout.*
+
+---
+
+## 14. Bail pilot — Round-2 learnings (instructions for Claude)
+
+Updates from the bail-agent migration test cycle. These supersede sections 1-13 wherever they conflict. Keep this checklist in mind when migrating any other court-filing agent or generating a fresh draft.
+
+### Output rules (non-negotiable)
+
+- **NO em-dashes (`—`, U+2014) or en-dashes (`–`, U+2013) anywhere in generated output.** Use ASCII hyphen-minus (`-`) for citations, addresses, category labels, prose, signatures - everything. The model has been observed to copy em-dashes from prompt narrative; the BASE prompt (Drafting Principle #9) bans them, but per-agent prompts and few-shots must also be clean.
+- **Body padding is uniform `padding:0 3.5rem;`** (left + right symmetric) on every body `<p>`. Was 2.5rem in early pilot; bumped after visual review. Don't drift back to 2.5rem.
+- **NO `##` / `###` headings inside the body.** Categorical structure goes inline via `<strong>` Title Case openers (e.g. `<strong>(A) False Implication and Merits -</strong> substance...`).
+- **Category-opener paragraphs do NOT carry a leading number.** The `(A)`/`(B)`/`(C)` letter IS the marker. Continuation paragraphs keep flat numbering and naturally "skip" each opener position.
+- **Citation format:** `**Case Name** - Citation` (hyphen, NOT em-dash). Example: `**Sanjay Chandra v. CBI** - (2012) 1 SCC 40`.
+
+### Cause-title rendering (`cause_title.py`)
+
+- Top banner (court name) renders **ALL CAPS via CSS** `text-transform:uppercase;`. Underlying `data.court_name` stays unmutated.
+- The `AT [seat]` line is auto-skipped when `court_seat` substring is already inside `court_name` (avoids `SMALL CAUSES COURT, PUNE / AT PUNE` duplication). Bombay HC + Nagpur bench still renders both.
+- `case_year` defaults to `str(date.today().year)` when extractor returns null. No more `[Year]` placeholder.
+
+### Signature blocks (asymmetric — important)
+
+NO tables (visible default borders bleed). NO 3-column / flex layouts. Stacked plain `<p>` paragraphs only.
+
+**Post-PRAYER block — ALL right-aligned:**
+```
+Place: [City]                   ← left, padding:0 3.5rem
+Date: DD/MM/YYYY                ← left, padding:0 3.5rem
+                                ← (3.5rem top-margin gap = signature space)
+                    [Role]      ← right, BOLD, margin:3.5rem 3.5rem 0
+                    [Full Name] ← right, plain, margin:0 3.5rem
+                                ← (3.5rem top-margin gap)
+        Advocate for the [Role] ← right, BOLD, margin:3.5rem 3.5rem 0
+              [Advocate Name]   ← right, BOLD, margin:0 3.5rem
+```
+
+**Post-VERIFICATION block — deponent RIGHT, advocate-cert LEFT:**
+```
+Place: [City]                   ← left, padding:0 3.5rem
+Date: DD/MM/YYYY                ← left, padding:0 3.5rem
+                                ← (signature gap)
+                    [Role]      ← right, BOLD
+                    [Full Name] ← right, plain
+I know the Deponent.            ← LEFT, padding:0 3.5rem
+                                ← (3.5rem top-margin gap)
+Advocate for the [Role]         ← LEFT, padding:0 3.5rem, BOLD
+[Advocate Name]                 ← LEFT, padding:0 3.5rem, BOLD
+```
+
+The advocate-cert under VERIFICATION is left-aligned ON PURPOSE - standard Indian-court convention places the "I know the deponent" cert at bottom-left, NOT mirroring the right-aligned post-PRAYER stack. Don't "fix" this asymmetry.
+
+### Page-break safety
+
+- PRAYER + VERIFICATION centered headings carry `page-break-after:avoid;break-after:avoid;` so the heading doesn't orphan from its content in PDF export.
+- Verification body paragraph carries `break-inside:avoid;page-break-inside:avoid;` so the verification text + place + date + deponent stack don't split across pages.
+- TipTap / contentEditable ignore these properties harmlessly (no pagination on screen).
+
+### Typed names in signature stack
+
+Both the party's typed name AND the advocate's typed name MUST appear below their respective role labels. Pull the party name from STRUCTURED INPUT. Leave `[Advocate Name]` as a bracket if not provided.
+
+### Grounds category labels
+
+Title Case, not ALL CAPS. Examples: `(A) False Implication and Merits -`, `(B) Investigation Status / Chargesheet / Default Bail -`, `(C) Community Ties - No Flight Risk -`.
+
+### Custody annotation
+
+For bail apps where applicant is in custody: emit `<p style="text-align:center;margin:0.5rem 0;"><strong>(Applicant in Jail)</strong></p>` as the very FIRST body element, above the body opener. Omit when not in custody / on interim protection / default bail.
+
+### Tool wiring
+
+- **Drafting agents NEVER use `legal_case_search`.** `deps.retriever` is hardcoded to `None` in `DraftService`. Case-law research is reserved for the chat agent. Don't re-add `retriever=self.retriever` to the deps build.
+- Per-agent prompts may still mention "use legal_case_search" in legacy text - the BASE prompt's "NOT available" instruction overrides them at runtime, but for cleaner drafts strip those refs when migrating each agent.
+
+### Few-shot integrity
+
+Per `feedback_few_shots_beat_prompts`: when the prompt and `examples.json` disagree, the LLM follows the example. Whenever the prompt structure changes (new layout, new alignment, new category labels), update the corresponding few-shot in `data/examples.json` to match. Otherwise the model regresses to the example's old shape.
+
+### Models
+
+- **Drafting**: `DRAFT_LLM_PROVIDER` + `DRAFT_LLM_MODEL` (renamed from generic `LLM_PROVIDER`/`LLM_MODEL`). For per-request override, send `data.model` in the request body.
+- **Cause-title + draft-field extraction (fast path)**: `pick_fast_chat_model("anthropic")` returns `claude-haiku-4-5-20251001`. Do NOT revert to `claude-3-5-haiku-latest` - that alias 404s on some Anthropic accounts.
+- **Metadata extraction (output_node)**: `Settings.metadata_extraction_model` defaults to Haiku 4.5. Keep aligned with `FAST_CHAT_MODELS` for consistency.
+
+### Cost note
+
+Sonnet 4.6 runs ~$0.30/draft on a structurally-rich bail prompt. Haiku 4.5 is ~5-8x cheaper but quality dips on complex prompt-following. gpt-4o-mini is cheaper still but mini-class adherence to layout rules (no em-dash, alignment, no `##`) is the weakest. When Haiku quality is not enough for a specific draft, override with Sonnet via `data.model` in the request body rather than switching the global default.
+
