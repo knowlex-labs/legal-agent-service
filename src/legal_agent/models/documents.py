@@ -75,6 +75,8 @@ class DocumentType(str, Enum):
     AGREEMENT = "agreement"
     LEGAL_NOTICE = "legal_notice"
     DEMAND_NOTICE = "demand_notice"
+    CHEQUE_BOUNCE_NOTICE = "cheque_bounce_notice"
+    EVICTION_NOTICE = "eviction_notice"
     PETITION = "petition"
     AFFIDAVIT = "affidavit"
     APPLICATION = "application"

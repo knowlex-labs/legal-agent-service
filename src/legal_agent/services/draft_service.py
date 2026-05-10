@@ -10,10 +10,13 @@ from legal_agent.agents.drafts.anticipatory_bail_agent import AnticipatoryBailAg
 from legal_agent.agents.drafts.application_agent import ApplicationAgent
 from legal_agent.agents.drafts.bail_agent import BailApplicationAgent
 from legal_agent.agents.drafts.base import BaseDraftingAgent, DraftingDependencies
+from legal_agent.agents.drafts.cheque_bounce_notice_agent import ChequeBounceNoticeAgent
 from legal_agent.agents.drafts.consumer_complaint_agent import ConsumerComplaintAgent
 from legal_agent.agents.drafts.contract_agent import ContractAgent
 from legal_agent.agents.drafts.court_filing_agent import CourtFilingAgent
 from legal_agent.agents.drafts.criminal_appeal_agent import CriminalAppealAgent
+from legal_agent.agents.drafts.demand_notice_agent import DemandNoticeAgent
+from legal_agent.agents.drafts.eviction_notice_agent import EvictionNoticeAgent
 from legal_agent.agents.drafts.execution_petition_agent import ExecutionPetitionAgent
 from legal_agent.agents.drafts.notice_agent import NoticeAgent
 from legal_agent.agents.drafts.patent_agent import PatentAgent
@@ -141,7 +144,9 @@ class DraftService:
             DocumentType.CONTRACT: ContractAgent,
             DocumentType.AGREEMENT: ContractAgent,
             DocumentType.LEGAL_NOTICE: NoticeAgent,
-            DocumentType.DEMAND_NOTICE: NoticeAgent,
+            DocumentType.DEMAND_NOTICE: DemandNoticeAgent,
+            DocumentType.CHEQUE_BOUNCE_NOTICE: ChequeBounceNoticeAgent,
+            DocumentType.EVICTION_NOTICE: EvictionNoticeAgent,
             DocumentType.PETITION: CourtFilingAgent,
             DocumentType.AFFIDAVIT: CourtFilingAgent,
             DocumentType.APPLICATION: CourtFilingAgent,
