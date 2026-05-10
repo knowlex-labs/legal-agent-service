@@ -16,11 +16,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-# Fast / cheap chat model per provider — used for content enhancement,
-# draft-field extraction, and cause-title extraction.
-# Keep the Anthropic entry aligned with `Settings.metadata_extraction_model`
-# (Haiku 4.5) — the older `claude-3-5-haiku-latest` alias 404s on some
-# Anthropic accounts and Haiku 4.5 is the supported successor.
+# Fast / cheap chat model per provider. Keep the Anthropic entry aligned with
+# Settings.metadata_extraction_model — drift causes 404s on some accounts.
 FAST_CHAT_MODELS: dict[str, str] = {
     "openai": "gpt-4o-mini",
     "anthropic": "claude-haiku-4-5-20251001",

@@ -39,8 +39,6 @@ class _EmbeddingConfig:
 class _LlmConfig:
     @property
     def PROVIDER(self):
-        # RAG-engine query LLM reuses the drafting provider — there is no
-        # separate RAG_LLM_PROVIDER env var today.
         return get_settings().draft_llm_provider
 
     @property

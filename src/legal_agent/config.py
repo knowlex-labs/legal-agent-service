@@ -16,9 +16,6 @@ _LANGCHAIN_PROVIDERS = {"openai": "openai", "anthropic": "anthropic", "gemini": 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
 
-    # LLM used for DRAFT generation (the main agent_node call).
-    # Per-request override via CreateDraftJobRequest.model still works.
-    # Env vars: DRAFT_LLM_PROVIDER / DRAFT_LLM_MODEL.
     draft_llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
     draft_llm_model: str = "gpt-5.4"
     openai_api_key: str | None = None

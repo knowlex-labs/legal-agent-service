@@ -277,16 +277,11 @@ def render_cause_title_html(data: CauseTitleData) -> str:
     court_seat = data.court_seat or _placeholder("Court Location")
     case_type = data.case_type or _placeholder("Case Type")
     case_number = data.case_number or "______"
-    # Year of filing — when extractor returns null (year not present in source),
-    # default to the current year. Bail / interim filings always carry the
-    # filing year; an unfilled `[Year]` placeholder served no one.
     case_year = data.case_year or str(date.today().year)
     document_title = data.document_title or _placeholder("Document Title")
 
     lines: list[str] = [SENTINEL_START]
-    # Topmost banner (court name) is rendered ALL CAPS via CSS — keeps the
-    # underlying data unmutated, just renders uppercase. Indian-court
-    # convention; remaining banners stay in their source case.
+    # text-transform on the top banner so the extracted court name stays unmutated.
     lines.append(
         f'<p style="text-align:center;{_P_STYLE}text-transform:uppercase;"><strong><u>IN THE HON\'BLE {court_name}</u></strong></p>'
     )
