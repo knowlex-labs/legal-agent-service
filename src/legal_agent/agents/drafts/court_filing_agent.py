@@ -68,15 +68,15 @@ edit-save round-trips, producing a wall of text with literal `**` markers.
 Instead, write each paragraph as its own `<p>` element with the explicit
 number inside the paragraph text:
 
-  <p style="padding:0 2.5rem;">1. The present Interim Application is filed in Civil Suit No.
+  <p style="padding:0 3.5rem;">1. The present Interim Application is filed in Civil Suit No.
   ______ / [Year] pending before this Hon'ble Court.</p>
 
-  <p style="padding:0 2.5rem;">2. The applicant herein, <strong>[Full Name]</strong>, age [Age]
+  <p style="padding:0 3.5rem;">2. The applicant herein, <strong>[Full Name]</strong>, age [Age]
   years, occupation [Occupation], residing at [Address], is the
   <strong>[First Party Role]</strong> in the aforesaid suit, and the
   said suit concerns [one-line description of the parent suit].</p>
 
-  <p style="padding:0 2.5rem;">3. The respondent, <strong>[Full Name]</strong>, age [Age] years,
+  <p style="padding:0 3.5rem;">3. The respondent, <strong>[Full Name]</strong>, age [Age] years,
   occupation [Occupation], residing at [Address], is the
   <strong>[Second Party Role]</strong> in the aforesaid suit.</p>
 
@@ -85,8 +85,8 @@ defined references). Do NOT use markdown `**bold**` inside the body
 HTML - markdown emphasis is not parsed inside HTML blocks and will
 render as literal asterisks.
 
-**EVERY body `<p>` MUST include `style="padding:0 2.5rem;"`** - uniform
-2.5rem padding on BOTH left AND right - so the numbered body sits inset
+**EVERY body `<p>` MUST include `style="padding:0 3.5rem;"`** - uniform
+3.5rem padding on BOTH left AND right - so the numbered body sits inset
 symmetrically from the page edges, matching standard Indian-court
 layout. The opener `<p>` and every numbered paragraph carry this exact
 style. Do NOT apply this padding to PRAYER and VERIFICATION centered
@@ -98,7 +98,7 @@ Do NOT use sub-numbering like `1.1`, `1.2`, `2.1`.
 
 Begin the body with a single `<p>` opener (same uniform padding):
 
-  <p style="padding:0 2.5rem;">The applicant respectfully submits as follows:</p>
+  <p style="padding:0 3.5rem;">The applicant respectfully submits as follows:</p>
 
 Then emit numbered `<p>` paragraphs covering - in this order, each as
 ONE `<p>`:
@@ -168,29 +168,29 @@ may kindly be pleased to:
 (e) Pass any other order as this Hon'ble Court may deem fit and proper in
     the interest of justice.
 
-<p style="margin:1.5rem 0 0;padding:0 2.5rem;">Place: [City]</p>
-<p style="margin:0;padding:0 2.5rem;">Date: DD/MM/YYYY</p>
+<p style="margin:1.5rem 0 0;padding:0 3.5rem;">Place: [City]</p>
+<p style="margin:0;padding:0 3.5rem;">Date: DD/MM/YYYY</p>
 
-<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>[First Party Role]</strong></p>
-<p style="text-align:right;margin:0 2.5rem;">[First Party Full Name]</p>
+<p style="text-align:right;margin:3.5rem 3.5rem 0;"><strong>[First Party Role]</strong></p>
+<p style="text-align:right;margin:0 3.5rem;">[First Party Full Name]</p>
 
-<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>Advocate for the [First Party Role]</strong></p>
-<p style="text-align:right;margin:0 2.5rem;"><strong>[Advocate Name]</strong></p>
+<p style="text-align:right;margin:3.5rem 3.5rem 0;"><strong>Advocate for the [First Party Role]</strong></p>
+<p style="text-align:right;margin:0 3.5rem;"><strong>[Advocate Name]</strong></p>
 
 <p style="text-align:center;margin:1.5rem 0 0.5rem;page-break-after:avoid;break-after:avoid;"><strong><u>VERIFICATION</u></strong></p>
 
-<p style="padding:0 2.5rem;break-inside:avoid;page-break-inside:avoid;">I, <strong>[First Party Full Name]</strong>, aged [First Party Age] years, occupation [First Party Occupation], the [First Party Role] in the above matter, residing at [First Party Address], do hereby state on solemn affirmation that what is stated in the above paragraphs no. [1 to N] is true and correct to the best of my knowledge and information, which I believe to be true. Hence verified at <strong>[City]</strong> on this <strong>[DD]</strong> day of <strong>[Month, Year]</strong>.</p>
+<p style="padding:0 3.5rem;break-inside:avoid;page-break-inside:avoid;">I, <strong>[First Party Full Name]</strong>, aged [First Party Age] years, occupation [First Party Occupation], the [First Party Role] in the above matter, residing at [First Party Address], do hereby state on solemn affirmation that what is stated in the above paragraphs no. [1 to N] is true and correct to the best of my knowledge and information, which I believe to be true. Hence verified at <strong>[City]</strong> on this <strong>[DD]</strong> day of <strong>[Month, Year]</strong>.</p>
 
-<p style="margin:1.5rem 0 0;padding:0 2.5rem;">Place: [City]</p>
-<p style="margin:0;padding:0 2.5rem;">Date: DD/MM/YYYY</p>
+<p style="margin:1.5rem 0 0;padding:0 3.5rem;">Place: [City]</p>
+<p style="margin:0;padding:0 3.5rem;">Date: DD/MM/YYYY</p>
 
-<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>[First Party Role]</strong></p>
-<p style="text-align:right;margin:0 2.5rem;">[First Party Full Name]</p>
+<p style="text-align:right;margin:3.5rem 3.5rem 0;"><strong>[First Party Role]</strong></p>
+<p style="text-align:right;margin:0 3.5rem;">[First Party Full Name]</p>
 
-<p style="text-align:right;margin:1.5rem 2.5rem 0;">I know the Deponent.</p>
+<p style="margin:1.5rem 0 0;padding:0 3.5rem;">I know the Deponent.</p>
 
-<p style="text-align:right;margin:1.5rem 2.5rem 0;"><strong>Advocate for the [First Party Role]</strong></p>
-<p style="text-align:right;margin:0 2.5rem;"><strong>[Advocate Name]</strong></p>
+<p style="margin:3.5rem 0 0;padding:0 3.5rem;"><strong>Advocate for the [First Party Role]</strong></p>
+<p style="margin:0;padding:0 3.5rem;"><strong>[Advocate Name]</strong></p>
 
 ===== END TEMPLATE =====
 
@@ -236,21 +236,27 @@ may kindly be pleased to:
     Do NOT emit `## PRAYER` or `## VERIFICATION` markdown headings.
 
 3b. **SIGNATURE BLOCKS ARE STACKED PLAIN `<p>` PARAGRAPHS - NO TABLES,
-    NO 3-COLUMN LAYOUT.** Emit them VERBATIM from the template. Place
-    and Date sit left-aligned with `padding:0 2.5rem;` (same as body
-    indent). The role label `<strong>[First Party Role]</strong>` is
-    right-aligned with `margin:2.5rem 2.5rem 0;` - that 2.5rem
-    top-margin IS the signature space. The party's TYPED NAME
-    `[First Party Full Name]` appears immediately below, right-aligned
-    with `margin:0 2.5rem;` (no top margin). Then another `2.5rem`
-    top-margin gap before "Advocate for the [Role]" right-aligned BOLD,
-    and the advocate's typed name `<strong>[Advocate Name]</strong>`
-    right-aligned BOLD immediately below it. Both typed names MUST
-    appear - pull the party name from STRUCTURED INPUT, leave the
-    advocate name as a bracket if not provided. Do NOT render the
-    block as a 3-column / table layout where Date / Role / Advocate
-    sit on the same line - that wraps the typed name across lines and
-    looks broken.
+    NO 3-COLUMN LAYOUT.** Emit them VERBATIM from the template.
+
+    POST-PRAYER (full right-aligned signature stack): Place + Date
+    left-aligned `padding:0 3.5rem;`. Then `[First Party Role]` BOLD
+    right-aligned with `margin:3.5rem 3.5rem 0;` (the top-margin IS the
+    signature space). Typed party name plain right-aligned beneath. Then
+    another 3.5rem top-margin gap before "Advocate for the [First Party
+    Role]" BOLD right-aligned, and `[Advocate Name]` BOLD right-aligned
+    beneath.
+
+    POST-VERIFICATION (deponent right, advocate-cert LEFT): Place + Date
+    left. `[First Party Role]` + typed name right-aligned (same as the
+    deponent column above). Then "I know the Deponent." LEFT-aligned with
+    `padding:0 3.5rem;`. Then "Advocate for the [First Party Role]" + the
+    advocate's typed name BOTH LEFT-aligned with `padding:0 3.5rem;`. The
+    left-alignment for the advocate certification is intentional - standard
+    Indian-court convention places the advocate's "I know the deponent"
+    cert at the bottom-LEFT, not right.
+
+    Both typed names (party + advocate) MUST appear - pull from STRUCTURED
+    INPUT, leave `[Advocate Name]` for the advocate to fill if absent.
 
 4. **PRECEDENCE OF SOURCES**: when STRUCTURED INPUT (the wizard form fields)
    and REFERENCE DOCUMENTS CONTEXT (the uploaded PDF text) disagree on a value,

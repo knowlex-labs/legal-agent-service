@@ -55,11 +55,11 @@ edit-save round-trips, producing a wall of text with literal `**` markers.
 Instead, write each paragraph as its own `<p>` element with the explicit
 number inside the paragraph text:
 
-  <p style="padding:0 2.5rem;">1. The applicant, <strong>[Full Name]</strong>,
+  <p style="padding:0 3.5rem;">1. The applicant, <strong>[Full Name]</strong>,
   S/O <strong>[Father's Name]</strong>, aged about [XX] years, [Occupation], is
   a permanent resident of [Full Address] and has deep roots in the community.</p>
 
-  <p style="padding:0 2.5rem;">2. The applicant was arrested on
+  <p style="padding:0 3.5rem;">2. The applicant was arrested on
   <strong>[DD/MM/YYYY]</strong> in connection with Crime No. [X]/[Year]
   registered at Police Station [Name], District [District], under Sections
   [list all sections] of [IPC / BNS] / [special Act].</p>
@@ -68,8 +68,8 @@ Use `<strong>...</strong>` for emphasis (party names, key terms, statute
 references, dates). Do NOT use markdown `**bold**` inside body HTML - markdown
 emphasis is not parsed inside HTML blocks and will render as literal asterisks.
 
-**EVERY body `<p>` MUST include `style="padding:0 2.5rem;"`** - uniform
-2.5rem padding on BOTH left AND right - so the numbered body sits inset
+**EVERY body `<p>` MUST include `style="padding:0 3.5rem;"`** - uniform
+3.5rem padding on BOTH left AND right - so the numbered body sits inset
 symmetrically from the page edges, matching standard Indian-court layout.
 The opener `<p>` and every numbered paragraph carry this exact style. Do
 NOT apply this padding to the centered PRAYER and VERIFICATION headings
@@ -102,10 +102,10 @@ not yet arrested, or seeking default bail without prior custody.
 ===== BODY OPENER =====
 After the optional custody annotation, begin the body with a single opener:
 
-  <p style="padding:0 2.5rem;">The applicant most respectfully submits as under:</p>
+  <p style="padding:0 3.5rem;">The applicant most respectfully submits as under:</p>
 
 Then emit numbered `<p>` paragraphs in this order. Each `<p>` carries
-`style="padding:0 2.5rem;"`. Number consecutively 1, 2, 3, …
+`style="padding:0 3.5rem;"`. Number consecutively 1, 2, 3, …
 ===== END BODY OPENER =====
 
 ===== BODY PARAGRAPH SEQUENCE =====
@@ -214,7 +214,7 @@ Labels are Title Case - capitalise principal words only, NOT every letter:
 
 Example (Category opener - Title Case label, NO leading number):
 
-  <p style="padding:0 2.5rem;"><strong>(A) False Implication and
+  <p style="padding:0 3.5rem;"><strong>(A) False Implication and
   Merits -</strong> The applicant is absolutely innocent and has been
   falsely implicated in the present case. The applicant has no concern
   whatsoever with the alleged offence …</p>
@@ -222,7 +222,7 @@ Example (Category opener - Title Case label, NO leading number):
 Example (Continuation paragraph in category A - flat-numbered, picks up
 where the body numbering left off before the (A) opener):
 
-  <p style="padding:0 2.5rem;">8. The prosecution case is based solely on
+  <p style="padding:0 3.5rem;">8. The prosecution case is based solely on
   the testimony of [interested / partisan / tutored] witnesses, namely
   [PW-X, PW-Y], who are [related to the complainant / have prior enmity with
   the applicant]. There is no independent or cogent evidence connecting the
@@ -230,7 +230,7 @@ where the body numbering left off before the (A) opener):
 
 Example (Next category opener - again no leading number):
 
-  <p style="padding:0 2.5rem;"><strong>(B) Investigation Status /
+  <p style="padding:0 3.5rem;"><strong>(B) Investigation Status /
   Chargesheet / Default Bail -</strong> The investigation in the present
   case is complete and the chargesheet was filed on …</p>
 
@@ -296,55 +296,57 @@ may kindly be pleased to:
 (d) Pass any other order as this Hon'ble Court may deem fit and proper in
     the interest of justice.
 
-<p style="margin:1.5rem 0 0;padding:0 2.5rem;">Place: [City]</p>
-<p style="margin:0;padding:0 2.5rem;">Date: DD/MM/YYYY</p>
+<p style="margin:1.5rem 0 0;padding:0 3.5rem;">Place: [City]</p>
+<p style="margin:0;padding:0 3.5rem;">Date: DD/MM/YYYY</p>
 
-<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>Applicant</strong></p>
-<p style="text-align:right;margin:0 2.5rem;">[Applicant Full Name]</p>
+<p style="text-align:right;margin:3.5rem 3.5rem 0;"><strong>Applicant</strong></p>
+<p style="text-align:right;margin:0 3.5rem;">[Applicant Full Name]</p>
 
-<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>Advocate for the Applicant</strong></p>
-<p style="text-align:right;margin:0 2.5rem;"><strong>[Advocate Name]</strong></p>
+<p style="text-align:right;margin:3.5rem 3.5rem 0;"><strong>Advocate for the Applicant</strong></p>
+<p style="text-align:right;margin:0 3.5rem;"><strong>[Advocate Name]</strong></p>
 
 <p style="text-align:center;margin:1.5rem 0 0.5rem;page-break-after:avoid;break-after:avoid;"><strong><u>VERIFICATION</u></strong></p>
 
-<p style="padding:0 2.5rem;break-inside:avoid;page-break-inside:avoid;">I, <strong>[Applicant Full Name]</strong>, S/O <strong>[Father's Name]</strong>, aged [Applicant Age] years, occupation [Applicant Occupation], the Applicant in the above matter, residing at [Applicant Address], do hereby state on solemn affirmation that what is stated in the above paragraphs no. [1 to N] is true and correct to the best of my knowledge and information, which I believe to be true. Hence verified at <strong>[City]</strong> on this <strong>[DD]</strong> day of <strong>[Month, Year]</strong>.</p>
+<p style="padding:0 3.5rem;break-inside:avoid;page-break-inside:avoid;">I, <strong>[Applicant Full Name]</strong>, S/O <strong>[Father's Name]</strong>, aged [Applicant Age] years, occupation [Applicant Occupation], the Applicant in the above matter, residing at [Applicant Address], do hereby state on solemn affirmation that what is stated in the above paragraphs no. [1 to N] is true and correct to the best of my knowledge and information, which I believe to be true. Hence verified at <strong>[City]</strong> on this <strong>[DD]</strong> day of <strong>[Month, Year]</strong>.</p>
 
-<p style="margin:1.5rem 0 0;padding:0 2.5rem;">Place: [City]</p>
-<p style="margin:0;padding:0 2.5rem;">Date: DD/MM/YYYY</p>
+<p style="margin:1.5rem 0 0;padding:0 3.5rem;">Place: [City]</p>
+<p style="margin:0;padding:0 3.5rem;">Date: DD/MM/YYYY</p>
 
-<p style="text-align:right;margin:2.5rem 2.5rem 0;"><strong>Applicant</strong></p>
-<p style="text-align:right;margin:0 2.5rem;">[Applicant Full Name]</p>
+<p style="text-align:right;margin:3.5rem 3.5rem 0;"><strong>Applicant</strong></p>
+<p style="text-align:right;margin:0 3.5rem;">[Applicant Full Name]</p>
 
-<p style="text-align:right;margin:1.5rem 2.5rem 0;">I know the Deponent.</p>
+<p style="margin:1.5rem 0 0;padding:0 3.5rem;">I know the Deponent.</p>
 
-<p style="text-align:right;margin:1.5rem 2.5rem 0;"><strong>Advocate for the Applicant</strong></p>
-<p style="text-align:right;margin:0 2.5rem;"><strong>[Advocate Name]</strong></p>
+<p style="margin:3.5rem 0 0;padding:0 3.5rem;"><strong>Advocate for the Applicant</strong></p>
+<p style="margin:0;padding:0 3.5rem;"><strong>[Advocate Name]</strong></p>
 
 ===== END TEMPLATE =====
 
 ===== SIGNATURE BLOCK - CRITICAL LAYOUT RULE =====
-The signature blocks above are STACKED right-aligned `<p>` paragraphs.
-Emit them VERBATIM. Do NOT:
+The signature blocks above are STACKED `<p>` paragraphs. Emit them VERBATIM.
+Do NOT wrap them in a `<table>` (visible default borders), do NOT use
+3-column / flex / column container layouts (wrapping mess on long names).
 
-  - Render them as a 3-column / 2-column layout where Date sits left,
-    role label sits in the middle, and advocate sits on the right of
-    the SAME line. That column layout produces a wrapping mess where
-    the applicant's full name breaks across lines.
-  - Wrap them in a `<table>`. Tables here render with visible default
-    borders that look wrong.
-  - Use `<div>` flex / column containers.
+POST-PRAYER block (entire stack right-aligned):
+  Place left -> Date left -> [vertical signature gap via margin] ->
+  Applicant role BOLD right -> applicant's typed name plain right ->
+  [gap] -> "Advocate for the Applicant" BOLD right ->
+  advocate's typed name BOLD right.
 
-The CORRECT shape is: Place left, Date below it left, large vertical
-gap (the 2.5rem top-margin on the role label paragraph IS the signature
-space), role label right-aligned BOLD, applicant's typed name
-right-aligned plain immediately below it, another large vertical gap,
-"Advocate for the [Role]" right-aligned BOLD, advocate's typed name
-right-aligned BOLD immediately below.
+POST-VERIFICATION block (deponent right, advocate-cert LEFT):
+  Place left -> Date left -> [signature gap] ->
+  Applicant role BOLD right + typed name plain right (deponent column) ->
+  "I know the Deponent." LEFT-aligned with body padding ->
+  [signature gap] -> "Advocate for the Applicant" BOLD LEFT ->
+  advocate's typed name BOLD LEFT.
 
-Both the applicant's typed name (under "Applicant") and the advocate's
-typed name (under "Advocate for the Applicant") MUST appear - pull the
-applicant name from STRUCTURED INPUT and the advocate name from input
-or leave `[Advocate Name]` for the advocate to fill.
+The advocate certification under VERIFICATION is left-aligned (NOT right).
+That is intentional and different from the post-PRAYER block - in standard
+Indian-court convention the advocate's "I know the deponent" certification
+sits at the bottom-left of the page.
+
+Both typed names (applicant + advocate) MUST appear - pull from STRUCTURED
+INPUT, leave `[Advocate Name]` if not provided.
 ===== END SIGNATURE BLOCK RULE =====
 
 ===== CRITICAL NOTES =====
@@ -355,7 +357,7 @@ or leave `[Advocate Name]` for the advocate to fill.
    Jail)` annotation, then the body opener.
 
 2. **Body is flat numbered HTML `<p>` blocks**, each carrying
-   `style="padding:0 2.5rem;"`. No `## `/`### ` headings, no `---`
+   `style="padding:0 3.5rem;"`. No `## `/`### ` headings, no `---`
    horizontal rules, no sub-numbering (`1.1`, `1.2`).
 
 3. **Categorical grounds labels** ((A)-(G)) are inline `<strong>` openers of
