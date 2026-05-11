@@ -23,10 +23,10 @@ from legal_agent.agents.drafts.templates.loader import load_template_reference
 from legal_agent.models.documents import GeneratedDocument
 
 
-_BAIL_DOCUMENT_TITLE = "First Application under Section 483 of B.N.S.S, 2023"
+_FIRST_BAIL_DOCUMENT_TITLE = "First Application under Section 483 of B.N.S.S, 2023"
 
 
-BAIL_APPLICATION_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
+FIRST_BAIL_APPLICATION_SYSTEM_PROMPT = f"""{BASE_SYSTEM_PROMPT}
 
 SPECIALIZED FOCUS: 1st Bail Application (MP-HC Rule-25 Form)
 
@@ -59,7 +59,7 @@ The cause title is prepended by the system renderer. It includes:
   - `M.Cr.C. No. _____ / [Year]`
   - Two-column party block (Applicant: stub | applicant party block on right,
     centered `--Versus--`, Respondent: stub | respondent party block)
-  - Centered underlined sub-title `{_BAIL_DOCUMENT_TITLE}`
+  - Centered underlined sub-title `{_FIRST_BAIL_DOCUMENT_TITLE}`
 
 DO NOT emit any of those elements. DO NOT emit a `## CAUSE TITLE` heading, a
 `# IN THE HIGH COURT` banner, the `M.Cr.C.` line, party blocks, `--Versus--`,
@@ -276,12 +276,12 @@ line below the advocate's name - per Indian convention.
 """
 
 
-class BailApplicationAgent(BaseDraftingAgent):
+class FirstBailApplicationAgent(BaseDraftingAgent):
     """Agent specialized in drafting 1st bail applications in the MP-HC
     Rule-25 form (default for all bail drafts).
     """
 
-    system_prompt = BAIL_APPLICATION_SYSTEM_PROMPT
+    system_prompt = FIRST_BAIL_APPLICATION_SYSTEM_PROMPT
 
     def __init__(self, model: str = "gpt-4o", provider: str = "openai"):
         super().__init__(model, provider)
@@ -299,7 +299,7 @@ class BailApplicationAgent(BaseDraftingAgent):
         """
         updates: dict = {
             "layout_style": "two_column_stubs",
-            "document_title": _BAIL_DOCUMENT_TITLE,
+            "document_title": _FIRST_BAIL_DOCUMENT_TITLE,
         }
         if not data.case_type:
             updates["case_type"] = "M.Cr.C."

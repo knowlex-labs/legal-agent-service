@@ -8,7 +8,8 @@ from legal_agent.agents.drafts.custom.agent import CustomDraftingAgent
 from legal_agent.agents.drafts.custom.service import TemplateService
 from legal_agent.agents.drafts.anticipatory_bail_agent import AnticipatoryBailAgent
 from legal_agent.agents.drafts.application_agent import ApplicationAgent
-from legal_agent.agents.drafts.bail_agent import BailApplicationAgent
+from legal_agent.agents.drafts.first_bail_agent import FirstBailApplicationAgent
+from legal_agent.agents.drafts.second_bail_agent import SecondBailApplicationAgent
 from legal_agent.agents.drafts.base import BaseDraftingAgent, DraftingDependencies
 from legal_agent.agents.drafts.cheque_bounce_notice_agent import ChequeBounceNoticeAgent
 from legal_agent.agents.drafts.consumer_complaint_agent import ConsumerComplaintAgent
@@ -150,7 +151,8 @@ class DraftService:
             DocumentType.PETITION: CourtFilingAgent,
             DocumentType.AFFIDAVIT: CourtFilingAgent,
             DocumentType.APPLICATION: CourtFilingAgent,
-            DocumentType.BAIL_APPLICATION: BailApplicationAgent,
+            DocumentType.BAIL_APPLICATION: FirstBailApplicationAgent,
+            DocumentType.SECOND_BAIL_APPLICATION: SecondBailApplicationAgent,
             DocumentType.CRIMINAL_APPEAL: CriminalAppealAgent,
             DocumentType.SLP: SLPAgent,
             DocumentType.QUASHING_PETITION: QuashingPetitionAgent,

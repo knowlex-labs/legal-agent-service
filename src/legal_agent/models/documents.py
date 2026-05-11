@@ -81,6 +81,7 @@ class DocumentType(str, Enum):
     AFFIDAVIT = "affidavit"
     APPLICATION = "application"
     BAIL_APPLICATION = "bail_application"
+    SECOND_BAIL_APPLICATION = "second_bail_application"
     CRIMINAL_APPEAL = "criminal_appeal"
     PATENT = "patent"
     APPLICATION_DRAFT = "application_draft"

@@ -2,7 +2,8 @@
 
 from legal_agent.agents.drafts.anticipatory_bail_agent import AnticipatoryBailAgent
 from legal_agent.agents.drafts.application_agent import ApplicationAgent
-from legal_agent.agents.drafts.bail_agent import BailApplicationAgent
+from legal_agent.agents.drafts.first_bail_agent import FirstBailApplicationAgent
+from legal_agent.agents.drafts.second_bail_agent import SecondBailApplicationAgent
 from legal_agent.agents.drafts.base import BaseDraftingAgent, DraftingDependencies
 from legal_agent.agents.drafts.consumer_complaint_agent import ConsumerComplaintAgent
 from legal_agent.agents.drafts.contract_agent import ContractAgent
@@ -23,7 +24,8 @@ __all__ = [
     "ContractAgent",
     "NoticeAgent",
     "CourtFilingAgent",
-    "BailApplicationAgent",
+    "FirstBailApplicationAgent",
+    "SecondBailApplicationAgent",
     "CriminalAppealAgent",
     "SLPAgent",
     "QuashingPetitionAgent",
