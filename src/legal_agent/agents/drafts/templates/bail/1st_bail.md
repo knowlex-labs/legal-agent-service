@@ -1,52 +1,48 @@
 <!--
 STRUCTURAL REFERENCE for a "First Bail Application under Section 483 of B.N.S.S, 2023"
-filed before a High Court in India - modelled on the MP Rules 2008, Chapter X, Rule 25 form.
+filed before a High Court in India - MP Rules 2008, Chapter X, Rule 25 form.
 
 How to use this reference:
-1. DO NOT copy the file contents verbatim. Every `[Bracketed]` slot is a substitution
-   point - fill it with values from the user's STRUCTURED INPUT and REFERENCE
-   DOCUMENTS. Empty data in TABLE CELLS goes into the cell as the word "Nil"
-   (capital N) inside `<strong>Nil</strong>`, never as a blank or `[NOT PROVIDED]`.
-2. The cause title block (court banner, M.Cr.C. case number, two-column party stubs,
-   `--Versus--`, the underlined `First Application under Section 483 of B.N.S.S, 2023`
-   sub-title, and the `(Applicant is in Jail)` annotation when applicable) is PREPENDED
-   by the system renderer. DO NOT emit any of those elements.
-3. After the cause title, the body opens with Table A, the DECLARATION block,
-   Table B, and Table C (the framing/declarative tables). THEN the body opener
-   "The applicant most respectfully submits as under:-" appears, followed by
-   numbered paragraphs 1 through 8 in the exact order shown below.
-4. Every body `<p>` carries `style="padding:0 3.5rem;"`. Every table cell uses
-   `<td>` (NEVER `<th>` or `<thead>`) with the styles shown - the editor's
-   default thead theming adds an unwanted background tint, which is why we
-   skip thead entirely and bold header cells via `<strong>` inside `<td>`.
-5. Use `<strong>` for emphasis inside `<p>`/`<td>` - NEVER markdown `**bold**`
-   (markdown emphasis is not parsed inside HTML).
+1. Substitute `[Bracketed]` slots with values from STRUCTURED INPUT and
+   REFERENCE DOCUMENTS. Empty TABLE CELLS go as `<strong>Nil</strong>`.
+2. The cause title (banner, M.Cr.C. number, two-column party stubs, --Versus--,
+   underlined sub-title, and `(Applicant is in Jail)` annotation) is PREPENDED
+   by the system renderer. DO NOT emit any of those elements. Start at the
+   first framing table.
+3. Emit every table as `<table class="court-form">` with `<tbody>` and bare
+   `<td>` cells - NO inline `style=` on tables or cells. The visual styling
+   (1px black borders, white background, 6/10 padding) is applied by the
+   editor's stylesheet and the export pipeline.
+4. Body `<p>` blocks carry `style="padding:0 3.5rem;"`. Sub-numbered paragraphs
+   (Facts 5.1/5.2, Grounds internal 1-7) carry the deeper inset
+   `style="padding:0 3.5rem 0 5.5rem;"`.
+5. Use `<strong>` (NOT markdown `**`) for emphasis inside `<p>` and `<td>`.
 -->
 
-<table style="width:100%;border-collapse:collapse;margin:0.5rem 0;background:#ffffff;">
+<table class="court-form">
 <tbody>
 <tr>
-<td rowspan="2" style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Whether any bail application is pending before or already disposed of by (if yes, give particulars)</strong></td>
-<td colspan="3" style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;text-align:center;"><strong>Particulars of bail application</strong></td>
+<td rowspan="2"><strong>Whether any bail application is pending before or already disposed of by (if yes, give particulars)</strong></td>
+<td colspan="3" style="text-align:center;"><strong>Particulars of bail application</strong></td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Number</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Date of order</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Result</strong></td>
+<td><strong>Number</strong></td>
+<td><strong>Date of order</strong></td>
+<td><strong>Result</strong></td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Hon'ble Supreme Court of India</td>
-<td colspan="3" style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">No.</td>
+<td>Hon'ble Supreme Court of India</td>
+<td colspan="3">No.</td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Hon'ble High Court(s)</td>
-<td colspan="3" style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">No.</td>
+<td>Hon'ble High Court(s)</td>
+<td colspan="3">No.</td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Court(s) subordinate to High Court(s)</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">[B.A. Number/Year or "Nil"]</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">[DD/MM/YYYY or "Nil"]</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">[Allowed / Dismissed / Withdrawn / Pending or "Nil"]</td>
+<td>Court(s) subordinate to High Court(s)</td>
+<td>[B.A. Number/Year or "Nil"]</td>
+<td>[DD/MM/YYYY or "Nil"]</td>
+<td>[Allowed / Dismissed / Withdrawn / Pending or "Nil"]</td>
 </tr>
 </tbody>
 </table>
@@ -57,46 +53,46 @@ How to use this reference:
 
 <p style="padding:0 3.5rem;">Particulars of the Crime : Particulars of the impugned order</p>
 
-<table style="width:100%;border-collapse:collapse;margin:0.5rem 0;background:#ffffff;">
+<table class="court-form">
 <tbody>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Particulars of the Crime</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Particulars of the impugned order</strong></td>
+<td><strong>Particulars of the Crime</strong></td>
+<td><strong>Particulars of the impugned order</strong></td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Crime No. [Crime No.]/[Year]<br>Police Station - [Police Station], District [District] ([State Abbrev.])</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Bail Application No. [B.A. No.]/[Year]</td>
+<td>Crime No. [Crime No.]/[Year]<br>Police Station - [Police Station], District [District] ([State Abbrev.])</td>
+<td>Bail Application No. [B.A. No.]/[Year]</td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Offence U/s. [Sections] of [BNS / Special Act]</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Designation of the Court: [Court Designation, e.g., IInd Additional Sessions Judge, GanjBasoda, District Vidisha (M.P.)]</td>
+<td>Offence U/s. [Sections] of [BNS / Special Act]</td>
+<td>Designation of the Court: [Court Designation, e.g., IInd Additional Sessions Judge, GanjBasoda, District Vidisha (M.P.)]</td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Date of arrest: [DD/MM/YYYY]</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Date of Order: [DD/MM/YYYY]</td>
+<td>Date of arrest: [DD/MM/YYYY]</td>
+<td>Date of Order: [DD/MM/YYYY]</td>
 </tr>
 </tbody>
 </table>
 
 <p style="text-align:center;margin:0.75rem 0 0.25rem;"><strong>Particulars of accused criminal history</strong></p>
 
-<table style="width:100%;border-collapse:collapse;margin:0.5rem 0;background:#ffffff;">
+<table class="court-form">
 <tbody>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>S.N</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>FIR No.</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Sections</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Police Station</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>District</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Status Pending/convicted/acquitted</strong></td>
+<td><strong>S.N</strong></td>
+<td><strong>FIR No.</strong></td>
+<td><strong>Sections</strong></td>
+<td><strong>Police Station</strong></td>
+<td><strong>District</strong></td>
+<td><strong>Status Pending/convicted/acquitted</strong></td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
 </tr>
 </tbody>
 </table>
@@ -107,55 +103,55 @@ How to use this reference:
 
 <p style="text-align:center;margin:0.75rem 0 0.25rem;"><strong>Particulars of Earlier Application(s)</strong></p>
 
-<table style="width:100%;border-collapse:collapse;margin:0.5rem 0;background:#ffffff;">
+<table class="court-form">
 <tbody>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Serial Number</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Date of application, if known</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Institution Number</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Date of order</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Name of the Judge</strong></td>
+<td><strong>Serial Number</strong></td>
+<td><strong>Date of application, if known</strong></td>
+<td><strong>Institution Number</strong></td>
+<td><strong>Date of order</strong></td>
+<td><strong>Name of the Judge</strong></td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
 </tr>
 </tbody>
 </table>
 
 <p style="text-align:center;margin:0.75rem 0 0.25rem;"><strong>Particulars of Earlier Identical/Similar Matters</strong></p>
 
-<table style="width:100%;border-collapse:collapse;margin:0.5rem 0;background:#ffffff;">
+<table class="court-form">
 <tbody>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>S. No.</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Crime No.</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Police Station with District</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Offence U/S.</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Status of Arrest</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Particulars of Bail Order with case number</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Particulars of any Order with case number</strong></td>
+<td><strong>S. No.</strong></td>
+<td><strong>Crime No.</strong></td>
+<td><strong>Police Station with District</strong></td>
+<td><strong>Offence U/S.</strong></td>
+<td><strong>Status of Arrest</strong></td>
+<td><strong>Particulars of Bail Order with case number</strong></td>
+<td><strong>Particulars of any Order with case number</strong></td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">(1)</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">(2)</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">(3)</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">(4)</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">(5)</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">(6)</td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">(7)</td>
+<td>(1)</td>
+<td>(2)</td>
+<td>(3)</td>
+<td>(4)</td>
+<td>(5)</td>
+<td>(6)</td>
+<td>(7)</td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
 </tr>
 </tbody>
 </table>
@@ -170,23 +166,23 @@ How to use this reference:
 
 <p style="text-align:center;margin:0.25rem 0;"><strong>Annexure-A/1</strong> (In subsequent bail application)</p>
 
-<table style="width:100%;border-collapse:collapse;margin:0.5rem 0;background:#ffffff;">
+<table class="court-form">
 <tbody>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Name of the accused</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Crime number of cross case</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Date of application, if known</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Institution Number</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Date of order</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Name of the Judge</strong></td>
+<td><strong>Name of the accused</strong></td>
+<td><strong>Crime number of cross case</strong></td>
+<td><strong>Date of application, if known</strong></td>
+<td><strong>Institution Number</strong></td>
+<td><strong>Date of order</strong></td>
+<td><strong>Name of the Judge</strong></td>
 </tr>
 <tr>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
-<td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
+<td><strong>Nil</strong></td>
 </tr>
 </tbody>
 </table>

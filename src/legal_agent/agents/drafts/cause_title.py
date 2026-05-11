@@ -6,7 +6,7 @@ from datetime import date
 from typing import Literal
 
 from langchain.chat_models import init_chat_model
-from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
@@ -192,6 +192,7 @@ async def extract_cause_title(
     today: str,
     provider: str,
 ) -> CauseTitleData:
+    from legal_agent.agents.drafts.base import _build_cached_system_message
     from legal_agent.services.content_preprocessor import pick_fast_chat_model
 
     model_name, lc_provider = pick_fast_chat_model(provider)
@@ -208,7 +209,7 @@ async def extract_cause_title(
     )
 
     messages = [
-        SystemMessage(content=_EXTRACT_SYSTEM_PROMPT),
+        _build_cached_system_message(_EXTRACT_SYSTEM_PROMPT, lc_provider),
         HumanMessage(content=user_prompt),
     ]
     result = await llm.ainvoke(messages)

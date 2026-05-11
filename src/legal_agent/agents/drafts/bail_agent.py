@@ -156,38 +156,40 @@ sub-section (e.g., `<strong>5. Facts of the case:</strong>`,
 Do NOT emit `---` horizontal rules anywhere in the document.
 ===== END BODY STRUCTURE =====
 
-===== TABLE FORMAT - PLAIN BLACK BORDERS, NO BACKGROUNDS =====
-Every table uses `<td>` cells ONLY - NEVER `<thead>` or `<th>`. The editor's
-default theming tints `<thead>`/`<th>` cells with a light gray/blue
-background, which we do not want; bypassing thead avoids the issue. Header
-cells are emitted as `<td><strong>Header</strong></td>` with the SAME styling
-as data cells, just bolded. EVERY cell carries an explicit
-`background:#ffffff;` in its inline style to defeat any residual editor
-defaults.
+===== TABLE FORMAT - USE THE `.court-form` CLASS, NO INLINE STYLES =====
+Every table is emitted as:
 
-Pattern:
-
-  <table style="width:100%;border-collapse:collapse;margin:0.5rem 0;background:#ffffff;">
+  <table class="court-form">
   <tbody>
   <tr>
-  <td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Header 1</strong></td>
-  <td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;"><strong>Header 2</strong></td>
+  <td><strong>Header 1</strong></td>
+  <td><strong>Header 2</strong></td>
   </tr>
   <tr>
-  <td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Cell or Nil</td>
-  <td style="border:1px solid #000;padding:6px 10px;vertical-align:top;background:#ffffff;">Cell or Nil</td>
+  <td>Cell value</td>
+  <td><strong>Nil</strong></td>
   </tr>
   </tbody>
   </table>
 
-Use 1px BLACK borders (`#000`) - the court-form look is plain black. Do NOT
-use markdown pipe tables (`| col | col |` with `|---|` separators) - they do
-not survive edit-save cleanly. Do NOT use `<thead>` or `<th>` - they pick up
-the editor's default background tint. ALL cells use `<td>` with explicit
-`background:#ffffff;` inline.
+The visual styling (1px black borders, white background, 6/10 padding) lives
+in the editor's stylesheet and the PDF/DOCX export pipeline as
+`.legal-document table.court-form` and matching Tailwind selectors. Do NOT
+emit inline `style=` on `<table>` or `<td>` for court-form tables - it
+duplicates the CSS and wastes output tokens.
 
-When data is absent, write `<strong>Nil</strong>` (capital N) in each cell -
-NEVER omit the row, never emit `[--]`, never leave the cell empty.
+Cell rules:
+- Use `<td>` only - NEVER `<thead>` or `<th>` (they pick up the editor's
+  default background tint).
+- Header cells: `<td><strong>Header</strong></td>` (bold via `<strong>`).
+- `colspan` / `rowspan` attributes are permitted when the form needs them
+  (e.g., Table A has a `rowspan="2"` on the question column and `colspan="3"`
+  on the "Particulars of bail application" header).
+- When data is absent, write `<strong>Nil</strong>` (capital N) in each
+  cell - NEVER omit the row, never emit `[--]`, never leave the cell empty.
+
+Do NOT use markdown pipe tables (`| col | col |` with `|---|` separators) -
+they do not survive edit-save cleanly.
 ===== END TABLE FORMAT =====
 
 ===== PRAYER + SIGNATURE BLOCK =====
@@ -222,9 +224,10 @@ line below the advocate's name - per Indian convention.
    every numbering convention shown there must appear in your output. Do not
    drop tables; fill empty cells with `Nil`.
 
-3. **Tables use `<td>` cells only, no `<thead>`/`<th>`.** 1px BLACK borders
-   (`border:1px solid #000;padding:6px 10px;`) with explicit
-   `background:#ffffff;` on every cell. Never any other color.
+3. **Tables use `<table class="court-form">`** with `<tbody>` and bare
+   `<td>` cells - NEVER `<thead>` or `<th>`, NEVER inline `style=` on the
+   table or its cells. Styling is applied by the editor's stylesheet and
+   the export pipeline.
 
 4. **PRAYER is centered + bold, NOT underlined.**
 
