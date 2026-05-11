@@ -15,9 +15,13 @@ logger = logging.getLogger(__name__)
 SENTINEL_START = "<!-- cause-title:start -->"
 SENTINEL_END = "<!-- cause-title:end -->"
 
-# Markdown ref-link comment - renders as nothing but starts with `[` not `<`,
-# so the FE's already-HTML check doesn't short-circuit and skip markdown.
-LEADING_MARKER = "[//]: # (cause-title-prepended)"
+# Hidden marker that lets `prepend_cause_title_to_draft` detect drafts that
+# already carry a system-rendered cause title and skip re-prepending. Was
+# originally `[//]: # (cause-title-prepended)` (markdown ref-link comment),
+# but that form leaks as literal text in editors / viewers that don't run
+# the markdown parser first. HTML-comment form is hidden in both HTML-only
+# and markdown rendering modes.
+LEADING_MARKER = "<!-- cause-title-prepended -->"
 
 RoleLabel = Literal[
     "Plaintiff", "Defendant", "Petitioner", "Respondent", "Applicant", "Appellant"

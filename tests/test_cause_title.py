@@ -269,14 +269,18 @@ def test_prepend_preserves_clean_body_with_no_leading_cause_title():
     assert out.index(SENTINEL_END) < out.index("## 1. BRIEF FACTS")
 
 
-def test_prepend_output_first_char_is_not_angle_bracket():
+def test_prepend_output_starts_with_hidden_marker():
+    """The LEADING_MARKER is an HTML comment so it is hidden in both HTML-only
+    and markdown rendering modes (the earlier markdown ref-link form
+    `[//]: # (...)` leaked as literal text in editors that didn't run the
+    markdown parser first)."""
     data = _pune_stay_app_data()
     body = "## 1. BRIEF FACTS\n\n1.1 The plaintiff submits…"
 
     out = prepend_cause_title_to_draft(body, data)
 
-    assert out.lstrip()[0] != "<"
-    assert out.lstrip().startswith("[")
+    assert out.lstrip().startswith(LEADING_MARKER)
+    assert LEADING_MARKER.startswith("<!--") and LEADING_MARKER.endswith("-->")
 
 
 def test_prepend_idempotent_when_body_already_has_marker():
