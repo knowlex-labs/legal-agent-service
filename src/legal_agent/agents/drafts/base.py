@@ -196,6 +196,18 @@ class BaseDraftingAgent:
         """True iff this draft's cause title is rendered deterministically (not by the LLM)."""
         return False
 
+    def _post_process_cause_title(
+        self, data: CauseTitleData, deps: DraftingDependencies
+    ) -> CauseTitleData:
+        """Hook for agents to mutate the extracted cause-title data before render.
+
+        Default is identity. Subclasses override to pin filing-specific fields
+        (e.g., `layout_style`, `document_title`) that should not be left to the
+        extractor's discretion - bail applications, for instance, force the
+        two-column-stubs layout and a fixed Section-483-BNSS title.
+        """
+        return data
+
     def _build_graph(
         self,
         tools: list,
@@ -292,6 +304,20 @@ class BaseDraftingAgent:
 
             if isinstance(cause_title_data, BaseException):
                 cause_title_data = None
+
+            if (
+                isinstance(cause_title_data, CauseTitleData)
+                and deps is not None
+            ):
+                try:
+                    cause_title_data = self._post_process_cause_title(
+                        cause_title_data, deps
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[draft] Cause-title post-processing failed "
+                        f"({type(exc).__name__}: {exc}); using extractor output as-is"
+                    )
 
             # Override the draft field with the raw, unmodified markdown.
             # Fallback to structured output's draft if the raw message is unusable.

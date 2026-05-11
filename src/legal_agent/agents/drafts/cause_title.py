@@ -19,7 +19,9 @@ SENTINEL_END = "<!-- cause-title:end -->"
 # so the FE's already-HTML check doesn't short-circuit and skip markdown.
 LEADING_MARKER = "[//]: # (cause-title-prepended)"
 
-RoleLabel = Literal["Plaintiff", "Defendant", "Petitioner", "Respondent", "Applicant"]
+RoleLabel = Literal[
+    "Plaintiff", "Defendant", "Petitioner", "Respondent", "Applicant", "Appellant"
+]
 
 
 class Party(BaseModel):
@@ -92,6 +94,27 @@ class CauseTitleData(BaseModel):
             "Test 12') - it is for reference only."
         ),
     )
+    applicant_in_jail: bool = Field(
+        False,
+        description=(
+            "True when the applicant is currently in custody / jail / judicial "
+            "remand at the time of filing. Set True when input mentions a date "
+            "of arrest with no subsequent release, current custody, jail, "
+            'remand, or "in Jail". Otherwise False.'
+        ),
+    )
+    layout_style: Literal["stacked", "two_column_stubs"] = Field(
+        "stacked",
+        description=(
+            "Cause-title layout flavour. `stacked` = default vertical layout used "
+            "by most civil / writ filings (party blocks stacked, role tag "
+            "right-aligned next to mobile). `two_column_stubs` = MP-HC-style bail "
+            "layout (left column shows the role stub like `Applicant:`, right "
+            "column shows the party block, with `--Versus--` centered between). "
+            "Callers (specific agents) may override this after extraction; the "
+            "LLM should default to `stacked`."
+        ),
+    )
 
 
 _EXTRACT_SYSTEM_PROMPT = """You read Indian legal filings and form input \
@@ -108,6 +131,7 @@ ground-truth intent for THIS filing.
 when the reference shows a parent caption:
    - Reference shows "Plaintiff / Defendant" (civil suit) → use those.
    - Reference shows "Petitioner / Respondent" (writ / statutory petition) → use those.
+   - Reference shows "Appellant / Respondent" (criminal appeal / SLP) → use those.
    - Reference is silent on roles → default to "Applicant / Respondent".
 4. Order parties: plaintiff/petitioner/applicant side first, defendant/respondent side second.
 5. For multiple parties of the same role, set `ordinal` to 1, 2, 3, … in source order.
@@ -129,6 +153,16 @@ when the reference shows a parent caption:
    input and reference are silent on the specific statute, fall back to a \
    neutral title such as "INTERIM APPLICATION" or "APPLICATION ON BEHALF OF \
    THE [Role]".
+11. `applicant_in_jail`: True when the input indicates the applicant is \
+   CURRENTLY in custody at the time of filing - signals include phrases like \
+   "in jail", "in custody", "judicial remand", "in J.C.", "(Applicant in \
+   Jail)", or a date of arrest with no mention of subsequent release / \
+   interim protection. False when the applicant is on interim protection, \
+   anticipatory bail, or has not yet been arrested. Default False when \
+   uncertain.
+12. `layout_style`: leave as the default `"stacked"`. The caller may override \
+   this after extraction for filing types that require a different layout - \
+   do not set it yourself.
 """
 
 
@@ -269,10 +303,15 @@ def _render_party_block(party: Party, *, ordinal_label: bool) -> list[str]:
     return out
 
 
-_FIRST_SIDE_ROLES: tuple[RoleLabel, ...] = ("Plaintiff", "Petitioner", "Applicant")
+_FIRST_SIDE_ROLES: tuple[RoleLabel, ...] = (
+    "Plaintiff", "Petitioner", "Applicant", "Appellant"
+)
 
 
 def render_cause_title_html(data: CauseTitleData) -> str:
+    if data.layout_style == "two_column_stubs":
+        return _render_two_column_cause_title(data)
+
     court_name = data.court_name or _placeholder("Court Name")
     court_seat = data.court_seat or _placeholder("Court Location")
     case_type = data.case_type or _placeholder("Case Type")
@@ -314,6 +353,117 @@ def render_cause_title_html(data: CauseTitleData) -> str:
 
     for party in second_side:
         lines.extend(_render_party_block(party, ordinal_label=second_multi))
+
+    lines.append(
+        f'<p style="text-align:center;{_P_STYLE}"><strong><u>{document_title}</u></strong></p>'
+    )
+    lines.append(SENTINEL_END)
+    return "\n".join(lines)
+
+
+def _render_party_block_two_column(party: Party) -> list[str]:
+    """Two-column variant: emit the party block WITHOUT the role/mobile bottom row.
+
+    The role label sits in the left-column stub of the surrounding table, so we
+    drop the mobile+role inline row that the stacked layout uses. Mobile is
+    folded into the address block when present.
+    """
+    out: list[str] = []
+    out.append(_render_name_line(party))
+    if party.description:
+        out.append(f'<p style="{_P_STYLE}">{party.description}</p>')
+    age_line = _render_age_occ_line(party)
+    if age_line:
+        out.append(age_line)
+    out.extend(_render_address_lines(party))
+    if party.mobile:
+        out.append(f'<p style="{_P_STYLE}">Mob.no. {party.mobile}</p>')
+    return out
+
+
+def _render_two_column_cause_title(data: CauseTitleData) -> str:
+    """MP-HC-style bail cause-title: `(Applicant is in Jail)` annotation above
+    the banner, two-column body with role stubs on the left, party block on the
+    right, and `--Versus--` centered between the two rows.
+    """
+    court_name = data.court_name or _placeholder("Court Name")
+    court_seat = data.court_seat
+    case_type = data.case_type or "M.Cr.C."
+    case_number = data.case_number or "______"
+    case_year = data.case_year or str(date.today().year)
+    document_title = data.document_title or _placeholder("Document Title")
+
+    first_side = [p for p in data.parties if p.role in _FIRST_SIDE_ROLES]
+    second_side = [p for p in data.parties if p.role not in _FIRST_SIDE_ROLES]
+    if not first_side and not second_side:
+        first_side = [Party(role="Applicant")]
+        second_side = [Party(role="Respondent")]
+
+    first_role_label = first_side[0].role if first_side else "Applicant"
+    second_role_label = second_side[0].role if second_side else "Respondent"
+
+    lines: list[str] = [SENTINEL_START]
+
+    if data.applicant_in_jail:
+        lines.append(
+            f'<p style="text-align:center;{_P_STYLE}">(Applicant is in Jail)</p>'
+        )
+
+    lines.append(
+        f'<p style="text-align:center;{_P_STYLE}text-transform:uppercase;"><strong><u>IN THE HIGH COURT OF {court_name}</u></strong></p>'
+    )
+    seat_lower = (court_seat or "").strip().lower()
+    if seat_lower and seat_lower not in (data.court_name or "").lower():
+        lines.append(
+            f'<p style="text-align:center;{_P_STYLE}text-transform:uppercase;"><strong>BENCH AT {court_seat}</strong></p>'
+        )
+    lines.append(
+        f'<p style="text-align:center;{_P_STYLE}"><strong>{case_type} No. {case_number} / {case_year}</strong></p>'
+    )
+
+    # Two-column borderless table: left stub, right party block.
+    lines.append(
+        '<table class="cause-title-two-col" style="width:100%;border-collapse:collapse;border:0;margin:0.5rem 0;">'
+    )
+    lines.append("<tbody>")
+
+    first_party_block = []
+    for p in first_side:
+        first_party_block.extend(_render_party_block_two_column(p))
+    lines.append("<tr>")
+    lines.append(
+        f'<td style="border:0;padding:0.25rem 0.5rem;vertical-align:top;width:22%;"><strong>{first_role_label}:</strong></td>'
+    )
+    lines.append(
+        '<td style="border:0;padding:0.25rem 0.5rem;vertical-align:top;">'
+        + "".join(first_party_block)
+        + "</td>"
+    )
+    lines.append("</tr>")
+
+    lines.append("<tr>")
+    lines.append('<td style="border:0;padding:0;"></td>')
+    lines.append(
+        '<td style="border:0;padding:0.25rem 0.5rem;text-align:center;"><em>--Versus--</em></td>'
+    )
+    lines.append("</tr>")
+
+    second_party_block = []
+    for p in second_side:
+        second_party_block.extend(_render_party_block_two_column(p))
+    lines.append("<tr>")
+    lines.append(
+        f'<td style="border:0;padding:0.25rem 0.5rem;vertical-align:top;width:22%;"><strong>{second_role_label}:</strong></td>'
+    )
+    lines.append(
+        '<td style="border:0;padding:0.25rem 0.5rem;vertical-align:top;">'
+        + "".join(second_party_block)
+        + "</td>"
+    )
+    lines.append("</tr>")
+
+    lines.append("</tbody>")
+    lines.append("</table>")
 
     lines.append(
         f'<p style="text-align:center;{_P_STYLE}"><strong><u>{document_title}</u></strong></p>'
