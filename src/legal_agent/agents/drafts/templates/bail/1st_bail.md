@@ -22,33 +22,24 @@ How to use this reference:
 <table class="court-form">
 <colgroup>
 <col style="width:46%;" />
-<col style="width:18%;" />
-<col style="width:18%;" />
-<col style="width:18%;" />
+<col style="width:54%;" />
 </colgroup>
 <tbody>
 <tr>
-<td rowspan="2"><strong>Whether any bail application is pending before or already disposed of by (if yes, give particulars)</strong></td>
-<td colspan="3" style="text-align:center;"><strong>Particulars of bail application</strong></td>
-</tr>
-<tr>
-<td><strong>Number</strong></td>
-<td><strong>Date of order</strong></td>
-<td><strong>Result</strong></td>
+<td><strong>Whether any bail application is pending before or already disposed of by (if yes, give particulars)</strong></td>
+<td><strong>Particulars of bail application</strong><br><strong>Number &nbsp; &nbsp; Date of order &nbsp; &nbsp; Result</strong></td>
 </tr>
 <tr>
 <td>Hon'ble Supreme Court of India</td>
-<td colspan="3">No.</td>
+<td>No.</td>
 </tr>
 <tr>
 <td>Hon'ble High Court(s)</td>
-<td colspan="3">No.</td>
+<td>No.</td>
 </tr>
 <tr>
 <td>Court(s) subordinate to High Court(s)</td>
-<td>[compact B.A. number — e.g. "126/26 BA", NOT "B.A. No. 126/2026"]</td>
-<td>[DD/MM/YYYY — no spaces, single line]</td>
-<td>[Allowed / Dismissed / Withdrawn / Pending]</td>
+<td>[compact B.A. number — e.g. "126/26 BA", NOT "B.A. No. 126/2026"] &nbsp; &nbsp; [DD/MM/YYYY — no spaces, single line] &nbsp; &nbsp; [Allowed / Dismissed / Withdrawn / Pending]</td>
 </tr>
 </tbody>
 </table>
