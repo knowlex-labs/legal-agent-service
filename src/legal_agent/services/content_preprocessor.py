@@ -176,7 +176,7 @@ def assemble_config_text(config: DraftConfig, document_type: str) -> str:
     }
     notice_types = {"legal_notice", "demand_notice"}
     bail_criminal_types = {
-        "bail_application", "criminal_appeal",
+        "bail_application", "second_bail_application", "criminal_appeal",
         "anticipatory_bail", "slp",
     }
 
@@ -422,7 +422,8 @@ async def enhance_content(
         "application": "Court Application",
         "contract": "Contract / Agreement",
         "agreement": "Agreement",
-        "bail_application": "Bail Application (Criminal)",
+        "bail_application": "1st Bail Application (Criminal)",
+        "second_bail_application": "2nd Bail Application (Criminal)",
         "criminal_appeal": "Criminal Appeal",
         "slp": "Special Leave Petition (SLP)",
         "quashing_petition": "Petition for Quashing of FIR / Proceedings",
