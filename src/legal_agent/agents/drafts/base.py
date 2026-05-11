@@ -133,6 +133,33 @@ _PROVIDER_MAX_TOKENS: dict[str, int] = {
 }
 
 
+def _build_cached_system_message(content: str, provider: str) -> SystemMessage:
+    """Build the system message, attaching Anthropic prompt-cache headers
+    when the provider is Anthropic.
+
+    The 5-min ephemeral cache offers ~90% off on cached read input tokens.
+    The drafting system prompt + template_reference + few-shot examples are
+    byte-identical across drafts of a given document type, so wrapping the
+    system content in a `cache_control` block lets back-to-back drafts in
+    the same 5-minute window share that prefix at the cheap rate.
+
+    For non-Anthropic providers we emit a plain string SystemMessage - the
+    list-of-content-blocks form isn't supported uniformly across OpenAI /
+    Google clients via LangChain's `init_chat_model`.
+    """
+    if provider == "anthropic":
+        return SystemMessage(
+            content=[
+                {
+                    "type": "text",
+                    "text": content,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ]
+        )
+    return SystemMessage(content=content)
+
+
 class DraftAgentState(TypedDict):
     """State for the drafting agent graph."""
 
@@ -196,6 +223,18 @@ class BaseDraftingAgent:
         """True iff this draft's cause title is rendered deterministically (not by the LLM)."""
         return False
 
+    def _post_process_cause_title(
+        self, data: CauseTitleData, deps: DraftingDependencies
+    ) -> CauseTitleData:
+        """Hook for agents to mutate the extracted cause-title data before render.
+
+        Default is identity. Subclasses override to pin filing-specific fields
+        (e.g., `layout_style`, `document_title`) that should not be left to the
+        extractor's discretion - bail applications, for instance, force the
+        two-column-stubs layout and a fixed Section-483-BNSS title.
+        """
+        return data
+
     def _build_graph(
         self,
         tools: list,
@@ -217,7 +256,11 @@ class BaseDraftingAgent:
             max_tokens=_meta_max_tokens,
         ).with_structured_output(GeneratedDocument)
         effective_system_prompt = system_prompt if system_prompt is not None else self.system_prompt
-        system_msg = SystemMessage(content=effective_system_prompt)
+        # Two messages because the main drafter and the metadata extractor
+        # may use different providers; each gets a cache_control block iff
+        # ITS provider is Anthropic (no-op otherwise).
+        system_msg = _build_cached_system_message(effective_system_prompt, self.provider)
+        meta_system_msg = _build_cached_system_message(effective_system_prompt, _meta_provider)
 
         async def agent_node(state: DraftAgentState):
             response = await llm_with_tools.ainvoke([system_msg] + state["messages"])
@@ -243,7 +286,7 @@ class BaseDraftingAgent:
                 "'Cause Title', 'Facts', 'Grounds', 'Prayer', 'Verification' - "
                 "whatever appears in the actual document. Do NOT invent generic names."
             )
-            msgs = [system_msg] + state["messages"] + [HumanMessage(content=extraction_prompt)]
+            msgs = [meta_system_msg] + state["messages"] + [HumanMessage(content=extraction_prompt)]
 
             should_render_cause_title = bool(
                 deps is not None and self._renders_cause_title(deps)
@@ -292,6 +335,20 @@ class BaseDraftingAgent:
 
             if isinstance(cause_title_data, BaseException):
                 cause_title_data = None
+
+            if (
+                isinstance(cause_title_data, CauseTitleData)
+                and deps is not None
+            ):
+                try:
+                    cause_title_data = self._post_process_cause_title(
+                        cause_title_data, deps
+                    )
+                except Exception as exc:
+                    logger.warning(
+                        f"[draft] Cause-title post-processing failed "
+                        f"({type(exc).__name__}: {exc}); using extractor output as-is"
+                    )
 
             # Override the draft field with the raw, unmodified markdown.
             # Fallback to structured output's draft if the raw message is unusable.
