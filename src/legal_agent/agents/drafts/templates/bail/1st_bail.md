@@ -20,6 +20,12 @@ How to use this reference:
 -->
 
 <table class="court-form">
+<colgroup>
+<col style="width:46%;" />
+<col style="width:18%;" />
+<col style="width:18%;" />
+<col style="width:18%;" />
+</colgroup>
 <tbody>
 <tr>
 <td rowspan="2"><strong>Whether any bail application is pending before or already disposed of by (if yes, give particulars)</strong></td>
@@ -40,9 +46,9 @@ How to use this reference:
 </tr>
 <tr>
 <td>Court(s) subordinate to High Court(s)</td>
-<td>[B.A. Number/Year or "Nil"]</td>
-<td>[DD/MM/YYYY or "Nil"]</td>
-<td>[Allowed / Dismissed / Withdrawn / Pending or "Nil"]</td>
+<td>[compact B.A. number — e.g. "126/26 BA", NOT "B.A. No. 126/2026"]</td>
+<td>[DD/MM/YYYY — no spaces, single line]</td>
+<td>[Allowed / Dismissed / Withdrawn / Pending]</td>
 </tr>
 </tbody>
 </table>
