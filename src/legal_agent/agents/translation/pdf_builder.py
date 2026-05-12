@@ -142,6 +142,67 @@ def _markdown_to_pdf_playwright(md_text: str, target_language: str | None = None
     return pdf_bytes
 
 
+def _html_to_pdf_playwright(html_str: str) -> bytes:
+    """Render pre-built positioned HTML to PDF via headless Chromium.
+
+    No extra margins are added — the PyMuPDF HTML already encodes page dimensions
+    and absolute positions, so Playwright just needs to render what's there.
+    """
+    import asyncio
+
+    async def _render() -> bytes:
+        from playwright.async_api import async_playwright
+        async with async_playwright() as p:
+            browser = await p.chromium.launch()
+            try:
+                page = await browser.new_page()
+                await page.set_content(html_str, wait_until="networkidle")
+                return await page.pdf(
+                    format="A4",
+                    print_background=True,
+                    margin={"top": "0", "bottom": "0", "left": "0", "right": "0"},
+                )
+            finally:
+                await browser.close()
+
+    loop = asyncio.ProactorEventLoop() if hasattr(asyncio, "ProactorEventLoop") else asyncio.new_event_loop()
+    try:
+        pdf_bytes = loop.run_until_complete(_render())
+    finally:
+        loop.close()
+
+    logger.info(f"Generated PDF via Playwright-HTML ({len(pdf_bytes)} bytes)")
+    return pdf_bytes
+
+
+def html_to_pdf(
+    html_str: str,
+    target_language: str | None = None,
+    profile: "DocProfile | None" = None,
+) -> bytes:
+    """Render pre-built translated HTML to PDF.
+
+    Playwright primary — handles CSS position:absolute that PyMuPDF HTML uses
+    to preserve the original document layout. WeasyPrint fallback for environments
+    without Chromium (layout quality will be degraded for positioned content).
+    """
+    try:
+        return _html_to_pdf_playwright(html_str)
+    except Exception as exc:
+        logger.warning(f"Playwright HTML rendering failed ({exc}), trying WeasyPrint")
+
+    try:
+        import weasyprint
+        pdf_bytes = weasyprint.HTML(string=html_str).write_pdf()
+        logger.info(f"Generated PDF via WeasyPrint-HTML ({len(pdf_bytes)} bytes)")
+        return pdf_bytes
+    except Exception as exc:
+        raise RuntimeError(
+            "All PDF renderers failed for translated HTML. "
+            "Ensure Playwright Chromium is installed: playwright install chromium"
+        ) from exc
+
+
 # ── fpdf2 fallback ──────────────────────────────────────────────────────────
 
 _FONT_CANDIDATES = [

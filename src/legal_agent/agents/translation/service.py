@@ -7,7 +7,12 @@ from legal_agent.agents.translation.doc_profiles import (
     classify_document,
     resolve_profile,
 )
-from legal_agent.agents.translation.pdf_builder import markdown_to_pdf
+from legal_agent.agents.translation.html_builder import wrap_translated_html
+from legal_agent.agents.translation.layout_pdf_translator import (
+    is_layout_translation_viable,
+    translate_pdf_layout,
+)
+from legal_agent.agents.translation.pdf_builder import html_to_pdf, markdown_to_pdf
 from legal_agent.agents.translation.render_guard import (
     has_critical,
     summarize,
@@ -17,14 +22,20 @@ from legal_agent.agents.translation.structure_aware_extractor import (
     LedgerEntry,
     enhance_with_llm_structure,
     extract_for_translation,
+    extract_html_pages,
+    extract_page_texts,
 )
 from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
+from legal_agent.config import get_settings
 from legal_agent.models.documents import DocumentType
 from legal_agent.models.requests import CreateTranslationJobRequest
 from legal_agent.models.responses import JobStatus, JobType
 from legal_agent.services.job_manager import ErrorStage, JobManager, StagedError
-from legal_agent.agents.translation.generator import TranslationGenerator
+from legal_agent.agents.translation.generator import (
+    TranslationGenerator,
+    _resolve_model,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -88,7 +99,7 @@ class TranslationService:
         logger.debug(f"[{job_id}] Starting translation execution")
 
         try:
-            source_text, ledger = await self._resolve_source_text(request, user_id)
+            source_text, ledger, page_texts, page_htmls, source_pdf_bytes = await self._resolve_source_text(request, user_id)
         except StagedError:
             raise  # already tagged by _resolve_source_text
         except Exception as exc:
@@ -110,38 +121,90 @@ class TranslationService:
             layout_family=profile.layout_family,
         )
 
-        # Optional LLM structure pass — court_filing family + short docs only.
-        try:
-            source_text, structure_ledger = await enhance_with_llm_structure(
-                source_text, document_type
-            )
-        except Exception as exc:
-            raise StagedError(ErrorStage.STRUCTURE, exc) from exc
-        if structure_ledger:
-            ledger.extend(structure_ledger)
-
-        try:
-            translated_md = await self._generator.generate(
-                source_text=source_text,
-                target_language=request.target_language,
-                source_language=request.source_language,
-                model=request.model,
-                profile=profile,
-            )
-        except Exception as exc:
-            raise StagedError(ErrorStage.TRANSLATION, exc) from exc
-
         lang_slug = request.target_language.value
         folder = request.case_folder_id or _case_folder_from_file_id(request.file_id)
         original_name = _strip_extension(request.file_name)
-        out_name = f"{original_name} - ({lang_slug}).pdf" if original_name else f"{lang_slug}-translation.pdf"
+        lang_suffix = lang_slug.replace("_", " ").replace("-", " ").title().replace(" ", "_")
+        out_name = f"{original_name}_{lang_suffix}.pdf" if original_name else f"{lang_suffix}_translation.pdf"
 
-        try:
-            pdf_bytes = await asyncio.to_thread(
-                markdown_to_pdf, translated_md, lang_slug, profile
-            )
-        except Exception as exc:
-            raise StagedError(ErrorStage.PDF_RENDER, exc) from exc
+        # ── Layout-preserving path ──────────────────────────────────────────
+        # When the source is a born-digital PDF AND the Sarvam translate API
+        # is configured, we extract text blocks with their bounding boxes,
+        # translate the plain text only, then reinsert into the original
+        # geometry. This preserves margins, columns, alignment, drawings,
+        # and embedded images. Falls back to the generator path on any
+        # error so we never fail a job that the markdown path could handle.
+        pdf_bytes: bytes | None = None
+        translation_mode = "markdown"
+        if (
+            source_pdf_bytes
+            and self._should_try_layout_mode(request)
+            and is_layout_translation_viable(source_pdf_bytes)
+        ):
+            settings = get_settings()
+            if settings.sarvam_api_key:
+                try:
+                    logger.info(f"[{job_id}] Using layout-preserving translation path")
+                    pdf_bytes = await translate_pdf_layout(
+                        source_pdf_bytes,
+                        request.target_language,
+                        request.source_language,
+                        settings.sarvam_api_key,
+                    )
+                    translation_mode = "layout_preserved"
+                except Exception as exc:
+                    logger.warning(
+                        f"[{job_id}] Layout-preserving translation failed "
+                        f"({exc}); falling back to markdown path"
+                    )
+                    pdf_bytes = None
+
+        # ── Markdown fallback path ──────────────────────────────────────────
+        if pdf_bytes is None:
+            # Optional LLM structure pass — court_filing family + short docs only.
+            try:
+                source_text, structure_ledger = await enhance_with_llm_structure(
+                    source_text, document_type
+                )
+            except Exception as exc:
+                raise StagedError(ErrorStage.STRUCTURE, exc) from exc
+            if structure_ledger:
+                # LLM rewrote the text — page boundaries from extraction are now stale.
+                page_texts = []
+                page_htmls = []
+                ledger.extend(structure_ledger)
+
+            try:
+                translated = await self._generator.generate(
+                    source_text=source_text,
+                    target_language=request.target_language,
+                    source_language=request.source_language,
+                    model=request.model,
+                    profile=profile,
+                    page_texts=page_texts or None,
+                    page_htmls=page_htmls or None,
+                )
+            except Exception as exc:
+                raise StagedError(ErrorStage.TRANSLATION, exc) from exc
+
+            # HTML path (legacy): generator returns positioned HTML — render via Playwright.
+            # Markdown path: render via WeasyPrint/Playwright/fpdf2.
+            is_html = page_htmls and translated.lstrip().startswith("<")
+            try:
+                if is_html:
+                    full_html = wrap_translated_html(translated, lang_slug, profile)
+                    pdf_bytes = await asyncio.to_thread(html_to_pdf, full_html)
+                else:
+                    pdf_bytes = await asyncio.to_thread(
+                        markdown_to_pdf, translated, lang_slug, profile
+                    )
+            except Exception as exc:
+                raise StagedError(ErrorStage.PDF_RENDER, exc) from exc
+
+        await self._job_manager.update_job_metadata(
+            job_id,
+            translation_mode=translation_mode,
+        )
 
         # Render guard — catch tofu, ledger drops, page-count surprises.
         try:
@@ -151,6 +214,7 @@ class TranslationService:
                 lang_slug,
                 len(source_text),
                 ledger,
+                translation_mode,
             )
         except Exception as exc:
             raise StagedError(ErrorStage.RENDER_GUARD, exc) from exc
@@ -191,17 +255,34 @@ class TranslationService:
             indexing_status="pending",
         )
 
+    def _should_try_layout_mode(self, request: CreateTranslationJobRequest) -> bool:
+        """Layout-preserving mode runs through Sarvam Translate (plain-text API).
+
+        Returns False when the caller explicitly requested an LLM model
+        (gemini/gpt/claude) — those go through prompt-engineering markdown paths
+        which already have their own layout heuristics via doc profiles.
+        """
+        model = request.model or get_settings().translation_llm_model
+        try:
+            _, provider = _resolve_model(model)
+        except Exception:
+            return False
+        return provider == "sarvam"
+
     async def _resolve_source_text(
         self, request: CreateTranslationJobRequest, user_id: str
-    ) -> tuple[str, list[LedgerEntry]]:
-        """Get source document text + ledger from content or by decrypting an S3 file.
+    ) -> tuple[str, list[LedgerEntry], list[str], list[str], bytes | None]:
+        """Get source document text, ledger, per-page texts, per-page HTML, and raw PDF bytes.
 
-        Stage-tags errors so the job manager produces `[STAGE] reason` output.
-        Ledger is empty for raw `content` payloads and for the conservative
-        extraction path; only the optional LLM structure pass populates it.
+        Returns (text, ledger, page_texts, page_htmls, pdf_bytes).
+        - page_texts: per-page markdown (used for page-aware chunking in LLM providers)
+        - page_htmls: per-page positioned HTML (legacy; no longer used for translation)
+        - pdf_bytes: raw decrypted PDF bytes — fuel for the layout-preserving path.
+        All artifacts are empty/None for inline content. Ledger is empty here; the
+        optional LLM structure pass populates it.
         """
         if request.content and request.content.strip():
-            return request.content, []
+            return request.content, [], [], [], None
 
         if request.file_id:
             if not self._decryption:
@@ -228,8 +309,17 @@ class TranslationService:
             except Exception as exc:
                 stage = ErrorStage.OCR if "ocr" in str(exc).lower() or "gemini" in str(exc).lower() or "sarvam" in str(exc).lower() else ErrorStage.EXTRACTION
                 raise StagedError(stage, exc) from exc
-            logger.info(f"Extracted {len(text)} chars from {filename}")
-            return text, ledger
+            page_texts, page_htmls = await asyncio.gather(
+                asyncio.to_thread(extract_page_texts, plaintext),
+                asyncio.to_thread(extract_html_pages, plaintext),
+            )
+            pdf_bytes = plaintext if plaintext[:4] == b"%PDF" else None
+            logger.info(
+                f"Extracted {len(text)} chars from {filename} "
+                f"({len(page_texts)} markdown pages, {len(page_htmls)} HTML pages, "
+                f"layout_source={'pdf' if pdf_bytes else 'non-pdf'})"
+            )
+            return text, ledger, page_texts, page_htmls, pdf_bytes
 
         raise ValueError("Either content or file_id must be provided")
 

@@ -1,24 +1,23 @@
 """Structure-aware text extraction for the translation pipeline.
 
-The drafts service still uses `extract_text_from_bytes` (font-size heuristics + bold
-detection) — fine when the agent re-writes the document. Translation must NOT invent
-structure: every spurious `**bold**` from PyMuPDF dict-mode shows up in the rendered
-PDF as inline emphasis on Section refs, FIR numbers, and English citations.
+Extraction layers (tried in order):
 
-This module replaces that path with two layers:
+1. **pymupdf4llm** (`_markdown_extract`) — primary path. Uses pymupdf4llm.to_markdown()
+   which detects headings from font-size ratios, bold/italic from font flags, and
+   multi-column layouts. Returns proper markdown with `# heading`, `**bold**`, `*italic*`.
 
-1. **Conservative emitter** (`_conservative_extract`) — PyMuPDF `get_text("text")`
-   only. Paragraph breaks survive; tables come from `page.find_tables()`. Numbered
-   lists are detected by regex on the resulting plain text. NO heading guesses, NO
-   bold spans.
+2. **Conservative emitter** (`_conservative_extract`) — fallback. PyMuPDF
+   `get_text("text")` only. Paragraph breaks survive; tables come from
+   `page.find_tables()`. NO heading guesses, NO bold spans.
 
-2. **Optional LLM structure pass** (`enhance_with_llm_structure`, Step 6) — fires
-   only for the `court_filing` family on short documents. Adds H1 cause-title and
-   H2 section headers (FACTS/GROUNDS/PRAYER) plus a do-not-translate ledger of
-   citations / dates / names. Validated to be a substring-preserving rewrite.
+3. **OCR fallbacks** — Vision OCR (Gemini), then pytesseract for scanned PDFs.
 
-The result `(markdown, ledger)` is consumed by `service.py` and threaded into the
-generator's prompt + the render guard's preservation check.
+4. **Optional LLM structure pass** (`enhance_with_llm_structure`) — fires only for
+   the `court_filing` family on short documents WITHOUT existing headings. Adds
+   H1 cause-title and H2 section headers plus a do-not-translate ledger. Skipped
+   when pymupdf4llm already produced headings.
+
+The result `(markdown, ledger)` is consumed by `service.py`.
 """
 
 from __future__ import annotations
@@ -103,6 +102,84 @@ def _conservative_extract(data: bytes) -> str:
     # paragraph breaks intact.
     result = re.sub(r"\n{3,}", "\n\n", result)
     return result
+
+
+def _markdown_extract_pages(data: bytes) -> list[str]:
+    """pymupdf4llm per-page extraction — headings from font sizes, bold/italic
+    from font flags, multi-column layout detection. Returns one markdown string
+    per page.
+    """
+    import fitz
+    import pymupdf4llm
+
+    doc = fitz.open(stream=data, filetype="pdf")
+    if doc.page_count == 0:
+        doc.close()
+        return []
+    chunks = pymupdf4llm.to_markdown(doc, page_chunks=True, show_progress=False)
+    doc.close()
+    pages: list[str] = []
+    for chunk in chunks:
+        md = chunk.get("text", "").rstrip()
+        md = re.sub(r"\n{3,}", "\n\n", md).strip()
+        if md:
+            pages.append(md)
+    return pages
+
+
+def _markdown_extract(data: bytes) -> str:
+    """Full-document markdown via _markdown_extract_pages."""
+    pages = _markdown_extract_pages(data)
+    result = "\n\n".join(pages)
+    return re.sub(r"\n{3,}", "\n\n", result).strip()
+
+
+def extract_page_texts(data: bytes) -> list[str]:
+    """Return per-page rich markdown from PyMuPDF. Used for parallel chunking.
+    Returns [] on failure or if data is not a PDF.
+    """
+    if not _is_pdf(data):
+        return []
+    try:
+        pages = _markdown_extract_pages(data)
+        if pages:
+            return pages
+    except Exception:
+        pass
+    # Fallback: conservative plain-text pages for chunking boundaries.
+    try:
+        import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        pages = [cast(str, page.get_text("text")).rstrip() for page in doc]
+        doc.close()
+        return [p for p in pages if p.strip()]
+    except Exception:
+        return []
+
+
+def extract_html_pages(data: bytes) -> list[str]:
+    """Return per-page HTML from PyMuPDF preserving absolute-positioned layout.
+    Each element is the full HTML document for one page; the caller strips the
+    outer wrapper and injects its own CSS before rendering.
+    Returns [] on failure or non-PDF input.
+    """
+    if not _is_pdf(data):
+        return []
+    try:
+        import fitz
+        doc = fitz.open(stream=data, filetype="pdf")
+        pages = []
+        for page in doc:
+            html = page.get_text("html")
+            # Remove white-space:pre so Indic translated text can reflow when
+            # it's longer than the original English (Devanagari words are often shorter
+            # than Latin but sentence-level wrapping still needs to work).
+            html = html.replace("white-space:pre;", "")
+            pages.append(html)
+        doc.close()
+        return pages
+    except Exception:
+        return []
 
 
 def _extract_tables_markdown(page) -> str:
@@ -228,6 +305,7 @@ def extract_for_translation(
 
     if _is_pdf(data):
         for label, fn in (
+            ("markdown PyMuPDF", lambda: _markdown_extract(data)),
             ("conservative PyMuPDF", lambda: _conservative_extract(data)),
             ("flat PyMuPDF", lambda: _extract_flat_with_fitz(data)),
             ("pdfplumber", lambda: _extract_with_pdfplumber(data)),
@@ -288,6 +366,11 @@ async def enhance_with_llm_structure(
     translation pipeline.
     """
     if not document_type or len(text) > _LLM_STRUCTURE_MAX_CHARS:
+        return text, []
+
+    # Rich extraction already produced headings — running the LLM structure pass
+    # would be redundant and risks flattening what PyMuPDF markdown detected.
+    if re.search(r'^#{1,3}\s', text, re.MULTILINE):
         return text, []
 
     # Late import to avoid a top-level cycle (doc_profiles imports DocumentType).

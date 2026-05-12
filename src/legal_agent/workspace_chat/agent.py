@@ -220,7 +220,7 @@ class WorkspaceChatAgent:
         - web_search=True,  no files  → legal_web_search only (SYSTEM_PROMPT)
         - web_search=True,  files      → RAG + legal_web_search (SYSTEM_PROMPT)
         """
-        model_id = model or get_settings().chat_llm_default_model
+        model_id = model or get_settings().chat_llm_model
         if not file_ids:
             return self._get_base_graph(model_id, web_search=web_search)
 
@@ -275,7 +275,7 @@ class WorkspaceChatAgent:
         # Web-search-only queries (file_ids=[], web_search=True) fall through
         # to the verify pipeline below.
         if not file_ids and not web_search:
-            model_id = model or get_settings().chat_llm_default_model
+            model_id = model or get_settings().chat_llm_model
             base_graph = self._get_base_graph(model_id, web_search=False)
             config = {"configurable": {"thread_id": session_id}}
 
@@ -365,7 +365,7 @@ class WorkspaceChatAgent:
             logger.exception("[workspace_chat] aget_state failed; skipping session_title")
             is_first_message = False
         if is_first_message and message and message.strip():
-            resolved_model = model or get_settings().chat_llm_default_model
+            resolved_model = model or get_settings().chat_llm_model
             title_task = asyncio.create_task(
                 generate_session_title(message, model=resolved_model)
             )
@@ -497,7 +497,7 @@ class WorkspaceChatAgent:
         actually saw (not the draft).
         """
         settings = get_settings()
-        model_id = model or settings.chat_llm_default_model
+        model_id = model or settings.chat_llm_model
         llm = self._get_llm(model_id)
         config = {"configurable": {"thread_id": session_id}}
 
@@ -834,7 +834,7 @@ class WorkspaceChatAgent:
     async def get_history(self, session_id: str) -> list[dict]:
         """Return conversation history as structured turns."""
         # Use any cached LLM (or default) — the LLM is never called, only the checkpointer is read
-        model_id = next(iter(self._llms), None) or get_settings().chat_llm_default_model
+        model_id = next(iter(self._llms), None) or get_settings().chat_llm_model
         graph = self._get_base_graph(model_id)
         state = await graph.aget_state({"configurable": {"thread_id": session_id}})
         if not state or not state.values:

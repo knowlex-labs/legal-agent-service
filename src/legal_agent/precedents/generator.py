@@ -47,7 +47,7 @@ class PrecedentGenerator:
         model: str,
     ) -> str:
         settings = get_settings()
-        model_id = model if model else settings.chat_llm_default_model
+        model_id = model if model else settings.chat_llm_model
         langchain_provider = settings.get_langchain_provider_for_model(model_id)
         llm = init_chat_model(model_id, model_provider=langchain_provider)
 

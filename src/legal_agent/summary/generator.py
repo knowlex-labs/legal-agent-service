@@ -103,7 +103,7 @@ class SummaryGenerator:
         logger.info(f"[DEBUG] Generator received file_ids: {file_ids}")
         """Fetch document context from RAG, assemble with drafts/highlights, call LLM."""
         settings = get_settings()
-        model_id = model if model else settings.chat_llm_default_model
+        model_id = model if model else settings.chat_llm_model
         langchain_provider = settings.get_langchain_provider_for_model(model_id)
 
         # Step 1: Retrieve document context from RAG engine

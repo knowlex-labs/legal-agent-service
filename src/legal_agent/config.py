@@ -72,8 +72,13 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     legal_db_url: str | None = None
 
-    # Chat LLM default (frontend sends model ID directly)
-    chat_llm_default_model: str = "gemini-2.5-flash"
+    # Chat LLM default (frontend sends model ID directly; env var: CHAT_LLM_MODEL)
+    chat_llm_model: str = "gemini-2.5-flash"
+
+    # Translation LLM default (env var: TRANSLATION_LLM_MODEL)
+    # Accepts the same aliases as CreateTranslationJobRequest.model: sarvam, gemini, claude, openai,
+    # or a full model name (e.g. sarvam-30b).
+    translation_llm_model: str = "sarvam"
 
     # Web search — Firecrawl is primary (scrapes full article text), Serper is fallback.
     # Both restricted to the 3 trusted Indian legal sources below (no Indian Kanoon).

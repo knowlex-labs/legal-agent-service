@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from typing import TYPE_CHECKING
@@ -27,6 +28,10 @@ _PROVIDER_MAX_TOKENS: dict[str, int] = {
 
 # Approximate chars per chunk for splitting long documents.
 _CHUNK_MAX_CHARS = 12000
+# Sarvam has a tighter effective context window; ~2 legal pages keeps input+output within budget.
+_SARVAM_CHUNK_MAX_CHARS = 6000
+# Chars of previous chunk's source text included as non-output context in each subsequent chunk.
+_CONTEXT_TAIL_CHARS = 500
 
 # Simple aliases the frontend can send instead of full model names.
 # The "sarvam" alias resolves at call time from settings.sarvam_chat_model so
@@ -51,6 +56,289 @@ _LATIN_MAXIMS = (
     "ratio decidendi, stare decisis, de novo, ex parte, ad interim, "
     "mens rea, actus reus, bona fide, mala fide, sub judice, in limine"
 )
+
+# ── Sarvam dedicated translate API ───────────────────────────────────────────
+
+_SARVAM_TRANSLATE_URL = "https://api.sarvam.ai/translate"
+_SARVAM_TRANSLATE_MAX_CHARS = 1800  # under 2000-char limit of sarvam-translate:v1
+
+_SARVAM_LANG_CODES: dict[str, str] = {
+    "english": "en-IN", "hindi": "hi-IN", "bengali": "bn-IN", "telugu": "te-IN",
+    "marathi": "mr-IN", "tamil": "ta-IN", "urdu": "ur-IN", "gujarati": "gu-IN",
+    "kannada": "kn-IN", "malayalam": "ml-IN", "odia": "or-IN", "punjabi": "pa-IN",
+    "assamese": "as-IN", "maithili": "mai-IN", "santali": "sat-IN", "kashmiri": "ks-IN",
+    "nepali": "ne-IN", "sindhi": "sd-IN", "dogri": "doi-IN", "konkani": "kok-IN",
+    "manipuri": "mni-IN", "bodo": "brx-IN", "sanskrit": "sa-IN",
+}
+
+
+def _md_to_tagged(text: str) -> str:
+    """Replace **bold** → <b>bold</b>, *italic* → <i>italic</i>. Bold first to avoid partial match."""
+    text = re.sub(r'\*\*(.+?)\*\*', r'<b>\1</b>', text, flags=re.DOTALL)
+    text = re.sub(r'(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)', r'<i>\1</i>', text, flags=re.DOTALL)
+    # Strip any ** or * that weren't part of a matched span. Unmatched markers pass
+    # through Sarvam unchanged; mistune then treats the first one as an unclosed
+    # bold/italic tag and renders everything after it in bold/italic.
+    text = re.sub(r'\*{2,}', '', text)
+    text = re.sub(r'(?<!\*)\*(?!\*)', '', text)
+    return text
+
+
+def _tagged_to_md(text: str) -> str:
+    """Restore <b>...</b> → **...** and <i>...</i> → *...*."""
+    text = re.sub(r'<b>(.*?)</b>', r'**\1**', text, flags=re.DOTALL | re.IGNORECASE)
+    text = re.sub(r'<i>(.*?)</i>', r'*\1*', text, flags=re.DOTALL | re.IGNORECASE)
+    return text
+
+
+_SARVAM_DICT_WRAPPER_RE = re.compile(
+    # Sarvam occasionally emits its JSON-schema reply object as a literal Python
+    # dict, e.g.:
+    #   {'description': '...', 'title': 'Female', 'type': 'string', 'content': '<translation>'}
+    # We extract the actual translation from the 'content' key. The pattern
+    # tolerates double or single quotes around the key, escaped quotes inside
+    # the value, and an optional trailing brace.
+    r"""\{\s*(?:['"]description['"]\s*:\s*['"][^'"]*['"]\s*,\s*)?"""
+    r"""(?:['"]title['"]\s*:\s*['"][^'"]*['"]\s*,\s*)?"""
+    r"""(?:['"]type['"]\s*:\s*['"][^'"]*['"]\s*,\s*)?"""
+    r"""['"]content['"]\s*:\s*['"](?P<content>.*?)['"]\s*\}""",
+    re.DOTALL,
+)
+
+
+def _unwrap_sarvam_dict_response(text: str) -> str:
+    """If Sarvam returned its schema reply as a dict literal, pull out `content`."""
+    if "'content':" not in text and '"content":' not in text:
+        return text
+    match = _SARVAM_DICT_WRAPPER_RE.search(text)
+    if not match:
+        return text
+    extracted = match.group("content")
+    # Replace the matched dict with the unescaped content value so any
+    # surrounding context (rare) is preserved.
+    unescaped = extracted.replace("\\'", "'").replace('\\"', '"').replace("\\n", "\n")
+    return text[: match.start()] + unescaped + text[match.end() :]
+
+
+def _clean_sarvam_translate_output(text: str) -> str:
+    """Clean wrapper artifacts Sarvam sometimes returns around plain text chunks."""
+    text = _clean_output(text)
+    text = text.replace("\x00", "")
+    # Sarvam occasionally returns its full schema-style response as a Python dict
+    # literal (`{'description': '...', 'content': '<translation>'}`). Extract the
+    # `content` value so users don't see the metadata in the rendered PDF.
+    text = _unwrap_sarvam_dict_response(text)
+    # The Translate API examples are plain-text only, but it may still wrap output in
+    # markdown fences when the input came from markdown/PDF extraction. Those fences
+    # render as literal code blocks in the final PDF, so strip standalone fence lines.
+    text = re.sub(r"(?m)^\s*```[\w-]*\s*$", "", text)
+    return text.strip()
+
+
+def _split_for_sarvam(text: str, max_chars: int = _SARVAM_TRANSLATE_MAX_CHARS) -> list[str]:
+    """Split plain text at paragraph / word boundaries into chunks ≤ max_chars."""
+    paragraphs = text.split("\n\n")
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for para in paragraphs:
+        if len(para) > max_chars:
+            if current:
+                chunks.append("\n\n".join(current))
+                current = []
+                current_len = 0
+            chunks.extend(_split_long_plain_text(para, max_chars))
+            continue
+        if current and current_len + len(para) + 2 > max_chars:
+            chunks.append("\n\n".join(current))
+            current = [para]
+            current_len = len(para)
+        else:
+            current.append(para)
+            current_len += len(para) + 2
+    if current:
+        chunks.append("\n\n".join(current))
+    return [chunk for chunk in chunks if chunk.strip()] or ([text] if text.strip() else [])
+
+
+def _split_long_plain_text(text: str, max_chars: int = _SARVAM_TRANSLATE_MAX_CHARS) -> list[str]:
+    """Split one oversized paragraph without exceeding Sarvam's 2000-char hard limit."""
+    words = text.split()
+    chunks: list[str] = []
+    current = ""
+    for word in words:
+        if len(word) > max_chars:
+            if current:
+                chunks.append(current)
+                current = ""
+            chunks.extend(word[i:i + max_chars] for i in range(0, len(word), max_chars))
+            continue
+        next_text = f"{current} {word}".strip()
+        if len(next_text) > max_chars and current:
+            chunks.append(current)
+            current = word
+        else:
+            current = next_text
+    if current:
+        chunks.append(current)
+    return chunks
+
+
+async def _call_sarvam_translate(
+    text: str, source_code: str, target_code: str, api_key: str,
+) -> str:
+    # Sarvam rejects empty input with a 400; skip rather than fail the whole job.
+    if not text or not text.strip():
+        return text
+    import httpx
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.post(
+            _SARVAM_TRANSLATE_URL,
+            headers={"api-subscription-key": api_key, "Content-Type": "application/json"},
+            json={
+                "input": text,
+                "source_language_code": source_code,
+                "target_language_code": target_code,
+                "model": "sarvam-translate:v1",
+                "mode": "formal",
+                "enable_preprocessing": False,
+                "numerals_format": "international",
+            },
+        )
+        if not resp.is_success:
+            logger.error(
+                f"[sarvam-translate] {resp.status_code} (chars={len(text)}): "
+                f"{resp.text[:500]} | input_preview={text[:200]!r}"
+            )
+            resp.raise_for_status()
+        # Always run the dict-wrapper unwrap + null-char scrub here so every
+        # caller (markdown pipeline AND the layout-PDF block translator) gets a
+        # clean string. Markdown-fence stripping stays in the higher-level
+        # `_clean_sarvam_translate_output` since it only matters for the
+        # markdown render path.
+        translated = resp.json()["translated_text"]
+        return _unwrap_sarvam_dict_response(translated).replace("\x00", "")
+
+
+async def _translate_with_sarvam_api(
+    source_text: str,
+    target_language: TranslationLanguage,
+    source_language: TranslationLanguage | None,
+    api_key: str,
+) -> str:
+    """Translate via Sarvam's dedicated translate API with markdown preservation.
+
+    Converts **bold** and *italic* markers to HTML-tag placeholders before sending
+    to the translate API (which is trained on web/HTML content and preserves these
+    tags). Heading prefixes (##) and bullets (- ) are plain ASCII that pass through
+    unchanged. Chunks are translated in parallel via asyncio.gather.
+    """
+    target_code = _SARVAM_LANG_CODES.get(target_language.value, "hi-IN")
+    # sarvam-translate:v1 does not support "auto"; default to en-IN for source
+    source_code = _SARVAM_LANG_CODES.get(source_language.value, "en-IN") if source_language else "en-IN"
+
+    # pymupdf4llm wraps some spans (table cells, special text) in [[...]].
+    # Strip double-bracket notation — it has no markdown/render meaning.
+    source_text = re.sub(r'\[\[', '', source_text)
+    source_text = re.sub(r'\]\]', '', source_text)
+
+    tagged = _md_to_tagged(source_text)
+    chunks = _split_for_sarvam(tagged)
+    logger.debug(f"[sarvam-translate] {len(chunks)} chunk(s) for {len(source_text)} chars")
+
+    translated_chunks: list[str] = await asyncio.gather(*[
+        _call_sarvam_translate(chunk, source_code, target_code, api_key)
+        for chunk in chunks
+    ])
+
+    result = _clean_sarvam_translate_output(_tagged_to_md("\n\n".join(translated_chunks)))
+    # Strip any <b>/<i> tags Sarvam didn't preserve symmetrically (unpaired leftovers).
+    result = re.sub(r'</?[bi]>', '', result, flags=re.IGNORECASE)
+    return result
+
+
+def _chunk_html_blocks(html: str, max_chars: int = 1500) -> list[str]:
+    """Split PyMuPDF absolute-positioned HTML at </div> boundaries into chunks ≤ max_chars.
+
+    PyMuPDF get_text("html") produces <div>/<span> layout — no <p> tags — so we
+    split on </div> closings, which are the natural element boundaries. A hard guard
+    then sub-splits any chunk still over Sarvam's 2000-char limit on whitespace.
+    Empty / whitespace-only chunks are filtered out (Sarvam returns 400 on empty input).
+    """
+    blocks = re.split(r'(?<=</div>)', html)
+    chunks: list[str] = []
+    current = ""
+    for block in blocks:
+        if len(current) + len(block) > max_chars and current:
+            chunks.append(current)
+            current = block
+        else:
+            current += block
+    if current:
+        chunks.append(current)
+
+    # Hard guard: sub-split any chunk still over Sarvam's 2000-char limit on whitespace.
+    safe: list[str] = []
+    for chunk in chunks:
+        if len(chunk) <= 1900:
+            safe.append(chunk)
+        else:
+            words = chunk.split()
+            part = ""
+            for word in words:
+                if len(part) + len(word) + 1 > 1500 and part:
+                    safe.append(part)
+                    part = word
+                else:
+                    part = (part + " " + word).strip()
+            if part:
+                safe.append(part)
+
+    # Drop empty / whitespace-only chunks — Sarvam rejects them with a 400.
+    safe = [c for c in safe if c.strip()]
+    if not safe:
+        return [html] if html.strip() else []
+    return safe
+
+
+async def _translate_page_html(
+    page_html: str, source_code: str, target_code: str, api_key: str
+) -> str:
+    """Translate one page's HTML content, preserving layout structure."""
+    # Extract the <body> content from PyMuPDF's full HTML document wrapper
+    body_match = re.search(r'<body>(.*?)</body>', page_html, re.DOTALL | re.IGNORECASE)
+    content = body_match.group(1).strip() if body_match else page_html
+
+    # Strip [[...]] artifacts from pymupdf4llm
+    content = re.sub(r'\[\[|\]\]', '', content)
+    # Remove font-family from inline styles so the Indic @font-face declarations
+    # injected by our CSS can take over. The original PDF fonts are Latin-only
+    # (ArialMT, Helvetica-Bold, etc.) and cannot render Devanagari/Tamil/etc.
+    content = re.sub(r'font-family:[^;]+;?\s*', '', content)
+
+    chunks = _chunk_html_blocks(content)
+    translated = await asyncio.gather(*[
+        _call_sarvam_translate(chunk, source_code, target_code, api_key)
+        for chunk in chunks
+    ])
+    return "".join(translated)
+
+
+async def _translate_html_with_sarvam_api(
+    page_htmls: list[str],
+    target_language: TranslationLanguage,
+    source_language: TranslationLanguage | None,
+    api_key: str,
+) -> str:
+    """Translate PDF pages (as HTML) via Sarvam, preserving absolute-positioned layout."""
+    target_code = _SARVAM_LANG_CODES.get(target_language.value, "hi-IN")
+    source_code = _SARVAM_LANG_CODES.get(source_language.value, "en-IN") if source_language else "en-IN"
+    logger.debug(f"[sarvam-html] translating {len(page_htmls)} page(s)")
+    translated_pages = await asyncio.gather(*[
+        _translate_page_html(page_html, source_code, target_code, api_key)
+        for page_html in page_htmls
+    ])
+    return "\n".join(translated_pages)
 
 
 def _resolve_model(model: str) -> tuple[str, str]:
@@ -206,8 +494,12 @@ TASK: Translate the provided legal document into {target_language.value} ({targe
 
 ═══ FORMATTING ═══
 
-- Preserve all markdown headings (##, ###), numbering, bullet points, paragraph breaks exactly
-- **Bold text** → translate content inside, keep ** markers
+- Preserve all markdown headings (#, ##, ###) — if source has a heading, translation MUST have the same heading at the same level
+- **Bold text** → translate content inside, keep ** markers EXACTLY — do NOT remove or flatten bold
+- *Italic text* → translate content inside, keep * markers EXACTLY
+- Indented sub-bullets (  - ) → preserve exact indentation level
+- Numbering, bullet points, paragraph breaks → preserve exactly
+- Do NOT merge paragraphs or flatten structure — every paragraph break in the source becomes a paragraph break in the output
 - Tables → translate cell content only, keep structure
 - Remove repeated headers, footers, and address blocks from OCR artifacts
 - Keep clause structure and numbering exactly the same
@@ -368,22 +660,94 @@ def _split_into_chunks(text: str, max_chars: int) -> list[str]:
     return chunks
 
 
-def _build_user_message(source_text: str, part_info: str = "") -> str:
-    extra = f"\n{part_info}" if part_info else ""
-    return f"""Translate the following legal document accurately. Preserve all formatting, structure, and citations exactly as specified in your instructions.{extra}
+def _group_pages(page_texts: list[str], max_chars: int) -> list[str]:
+    """Group pages into translation chunks that fit within max_chars.
+    A single page that exceeds max_chars becomes its own chunk."""
+    chunks: list[str] = []
+    current: list[str] = []
+    current_len = 0
+    for page in page_texts:
+        page_len = len(page)
+        if current_len + page_len > max_chars and current:
+            chunks.append("\n\n".join(current))
+            current = [page]
+            current_len = page_len
+        else:
+            current.append(page)
+            current_len += page_len + 2
+    if current:
+        chunks.append("\n\n".join(current))
+    return chunks or ["\n\n".join(page_texts)]
 
-{source_text}"""
+
+def _build_user_message(source_text: str, part_info: str = "", prev_source_tail: str = "") -> str:
+    lines = [
+        "Translate the following legal document accurately. "
+        "Preserve all formatting, structure, and citations exactly as specified in your instructions."
+    ]
+    if part_info:
+        lines.append(part_info)
+    if prev_source_tail:
+        lines.append(
+            "\n[Previous section — already translated. DO NOT include in your output. "
+            "Use only to continue mid-sentence fragments and maintain terminology consistency:]\n"
+            f"---\n{prev_source_tail}\n---"
+        )
+    lines.append(f"\n{source_text}")
+    return "\n".join(lines)
 
 
 class TranslationGenerator:
     """Generates legal document translations via LLM calls.
 
-    Long documents are automatically split into chunks and translated
-    sequentially to avoid hitting output token limits.
+    Long documents are split into page-grouped chunks and translated in parallel.
+    Each chunk (after the first) receives the tail of the previous chunk's source
+    text as non-output context so the model can continue mid-sentence fragments
+    and maintain terminology consistency across chunk boundaries.
     """
 
     def __init__(self) -> None:
         pass
+
+    async def _translate_chunk(
+        self,
+        llm,
+        system_prompt: str,
+        chunk: str,
+        i: int,
+        total: int,
+        prev_source_tail: str = "",
+    ) -> str:
+        part_info = f"This is part {i} of {total}. Translate this part completely." if total > 1 else ""
+        user_message = _build_user_message(chunk, part_info=part_info, prev_source_tail=prev_source_tail)
+
+        response = await llm.ainvoke([
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_message),
+        ])
+        content = response.content
+        if isinstance(content, list):
+            content = "".join(
+                block if isinstance(block, str) else block.get("text", "")
+                for block in content
+            )
+        cleaned = _clean_output(content)
+        logger.info(
+            f"[translate] Chunk {i}/{total}: {len(chunk)} → {len(cleaned)} chars "
+            f"(ratio {len(cleaned) / max(len(chunk), 1):.2f})"
+        )
+        if not cleaned.strip():
+            raise RuntimeError(
+                f"Translation chunk {i}/{total} returned empty output "
+                f"(input was {len(chunk)} chars). Aborting to avoid partial translation. "
+                "Possible causes: model API error, content filter, or <think>-stripping overreach."
+            )
+        if len(cleaned) < len(chunk) * 0.3:
+            logger.warning(
+                f"[translate] Chunk {i}/{total} output is <30% of input "
+                f"({len(cleaned)} vs {len(chunk)}) — possible content loss."
+            )
+        return cleaned
 
     async def generate(
         self,
@@ -392,75 +756,76 @@ class TranslationGenerator:
         source_language: TranslationLanguage | None = None,
         model: str | None = None,
         profile: "DocProfile | None" = None,
+        page_texts: list[str] | None = None,
+        page_htmls: list[str] | None = None,
     ) -> str:
-        """Translate a legal document. Returns translated markdown text.
+        """Translate a legal document. Returns translated markdown or HTML text.
+
+        Sarvam Translate is a plain-text API (per official examples), so the
+        Sarvam path translates markdown/plain text and lets our renderer produce
+        a clean PDF. Sending PyMuPDF absolute-positioned HTML through Translate
+        corrupts attributes/tags and produces broken PDFs.
+
+        `page_texts` is the per-page markdown extraction from PyMuPDF. Used for
+        parallel chunking in the LLM path. Each chunk after the first receives
+        the last _CONTEXT_TAIL_CHARS of the previous chunk's source text as
+        non-output context to handle mid-sentence page breaks.
 
         `profile` carries the doc-type system-prompt extension and glossary
         overlay (consumed in `_build_system_prompt`). None → default behaviour.
         """
-        model = model or "gemini"
+        model = model or get_settings().translation_llm_model
         model, provider = _resolve_model(model)
+
+        if provider == "sarvam":
+            settings = get_settings()
+            if not settings.sarvam_api_key:
+                raise RuntimeError("SARVAM_API_KEY is not configured")
+            result = await _translate_with_sarvam_api(
+                source_text, target_language, source_language, settings.sarvam_api_key
+            )
+            result = _enforce_glossary(result, target_language.value)
+            ratio = len(result) / max(len(source_text), 1)
+            logger.info(
+                f"[translate] Complete (sarvam-api): input={len(source_text)} chars → "
+                f"output={len(result)} chars (ratio {ratio:.2f})"
+            )
+            if ratio < 0.25 or ratio > 3.0:
+                raise RuntimeError(
+                    f"Translation length ratio {ratio:.2f} outside sanity band [0.25, 3.0] "
+                    f"(input={len(source_text)} chars → output={len(result)} chars)."
+                )
+            return result
+
         max_tokens = _PROVIDER_MAX_TOKENS.get(provider, 16384)
 
         llm = _init_llm(model, provider, max_tokens)
         system_prompt = _build_system_prompt(target_language, source_language, profile)
-        # sarvam-m is a hybrid reasoning model — reasoning adds no value for
-        # deterministic translation and burns tokens. /no_think disables it.
-        if provider == "sarvam":
-            system_prompt = "/no_think\n\n" + system_prompt
 
-        chunks = _split_into_chunks(source_text, _CHUNK_MAX_CHARS)
+        chunk_max = _CHUNK_MAX_CHARS
+        if page_texts:
+            chunks = _group_pages(page_texts, chunk_max)
+        else:
+            chunks = _split_into_chunks(source_text, chunk_max)
 
         logger.info(
             f"[translate] {source_language or 'auto'} → {target_language.value} "
             f"| model={model} | input_chars={len(source_text)} | chunks={len(chunks)}"
         )
 
-        translated_parts: list[str] = []
-        for i, chunk in enumerate(chunks, 1):
-            if len(chunks) > 1:
-                user_message = _build_user_message(
-                    chunk,
-                    part_info=f"This is part {i} of {len(chunks)}. Translate this part completely.",
-                )
-            else:
-                user_message = _build_user_message(chunk)
-
-            logger.info(f"[translate] Translating chunk {i}/{len(chunks)} ({len(chunk)} chars)")
-
-            response = await llm.ainvoke([
-                SystemMessage(content=system_prompt),
-                HumanMessage(content=user_message),
-            ])
-
-            content = response.content
-            if isinstance(content, list):
-                content = "".join(
-                    block if isinstance(block, str) else block.get("text", "")
-                    for block in content
-                )
-            cleaned = _clean_output(content)
-            logger.info(
-                f"[translate] Chunk {i}/{len(chunks)} translated: "
-                f"{len(chunk)} → {len(cleaned)} chars "
-                f"(ratio {len(cleaned) / max(len(chunk), 1):.2f})"
+        # Build context tails from source text so all tasks can start in parallel.
+        tasks = [
+            self._translate_chunk(
+                llm,
+                system_prompt,
+                chunk,
+                i + 1,
+                len(chunks),
+                prev_source_tail=chunks[i - 1][-_CONTEXT_TAIL_CHARS:] if i > 0 else "",
             )
-            # Empty chunk → abort instead of quietly assembling a translation
-            # with a hole. An empty response is almost always API failure,
-            # content filter trip, or over-aggressive _clean_output stripping.
-            if not cleaned.strip():
-                raise RuntimeError(
-                    f"Translation chunk {i}/{len(chunks)} returned empty output "
-                    f"(input was {len(chunk)} chars). Aborting to avoid partial translation. "
-                    "Possible causes: model API error, content filter, or <think>-stripping overreach."
-                )
-            if len(cleaned) < len(chunk) * 0.3:
-                logger.warning(
-                    f"[translate] Chunk {i}/{len(chunks)} output is <30% of input "
-                    f"({len(cleaned)} vs {len(chunk)}) — possible content loss; "
-                    "check model output truncation or _clean_output over-stripping."
-                )
-            translated_parts.append(cleaned)
+            for i, chunk in enumerate(chunks)
+        ]
+        translated_parts = list(await asyncio.gather(*tasks))
 
         result = "\n\n".join(translated_parts)
 
@@ -472,13 +837,16 @@ class TranslationGenerator:
             f"[translate] Complete: input={len(source_text)} chars → "
             f"output={len(result)} chars (ratio {ratio:.2f})"
         )
-        # Hard bound on translation length ratio. Outside 0.4–3.0 is almost
+        # Hard bound on translation length ratio. Outside 0.25–3.0 is almost
         # certainly either content loss or runaway generation — fail loudly
         # so the lawyer doesn't silently receive a corrupted document.
-        if ratio < 0.4 or ratio > 3.0:
+        # Lower bound is 0.25: Indic scripts (Hindi, Tamil, etc.) are more compact
+        # than English — Devanagari packs more phonetic content per character, so
+        # English→Hindi ratios of 0.35–0.45 are normal and expected.
+        if ratio < 0.25 or ratio > 3.0:
             raise RuntimeError(
                 f"Translation length ratio {ratio:.2f} is outside the sanity band "
-                f"[0.4, 3.0] (input={len(source_text)} chars → output={len(result)} chars). "
+                f"[0.25, 3.0] (input={len(source_text)} chars → output={len(result)} chars). "
                 "Likely content loss or runaway generation. Retry or check model output."
             )
 

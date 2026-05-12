@@ -100,8 +100,14 @@ def validate_rendered_pdf(
     target_language: str | None,
     source_text_len: int,
     ledger: "list[LedgerEntry] | None" = None,
+    mode: str = "markdown",
 ) -> list[GuardWarning]:
     """Run all post-render checks and return the warning list.
+
+    `mode` is "markdown" (text reflow into a generic legal layout) or
+    "layout_preserved" (original PDF geometry kept; only text replaced).
+    Page-count plausibility is skipped in `layout_preserved` mode because the
+    page count is by construction equal to the source's.
 
     Caller decides what to do with critical warnings — the convention in
     `service.py` is to raise `StagedError(ErrorStage.RENDER_GUARD, ...)`.
@@ -117,8 +123,9 @@ def validate_rendered_pdf(
 
     rendered_text, page_count = _read_pdf(pdf_bytes)
 
-    # 1. Page count plausibility.
-    if source_text_len > 0 and page_count > 0:
+    # 1. Page count plausibility — only meaningful for the markdown path; layout
+    # mode by design keeps the source's page count.
+    if mode != "layout_preserved" and source_text_len > 0 and page_count > 0:
         expected = max(1, source_text_len / 3000)
         ratio = page_count / expected
         if ratio < _PAGE_RATIO_LO or ratio > _PAGE_RATIO_HI:

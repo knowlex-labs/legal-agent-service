@@ -211,12 +211,12 @@ class CreateTranslationJobRequest(BaseModel):
     content: str | None = Field(
         None, description="Raw text content to translate"
     )
-    model: str = Field(
-        "gemini",
+    model: str | None = Field(
+        None,
         description=(
-            "Model alias: 'gemini' (default, gemini-3.1-flash-lite-preview), "
-            "'sarvam' (best for Indic but under evaluation), 'claude', or 'openai'. "
-            "Or a full model name (e.g. 'sarvam-30b', 'gpt-5.4')."
+            "Model alias: 'sarvam', 'gemini', 'claude', or 'openai'. "
+            "Or a full model name (e.g. 'sarvam-30b', 'gpt-5.4'). "
+            "Defaults to TRANSLATION_LLM_MODEL env var (server default: sarvam)."
         ),
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional extra context")

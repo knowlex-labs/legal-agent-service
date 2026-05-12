@@ -36,6 +36,21 @@ def markdown_to_html(
     return _wrap_html(html_body, target_language, profile)
 
 
+def wrap_translated_html(
+    body_html: str,
+    target_language: str | None = None,
+    profile: "DocProfile | None" = None,
+) -> str:
+    """Wrap pre-built translated HTML (from PyMuPDF extraction) with CSS and HTML5 boilerplate.
+
+    Unlike markdown_to_html(), skips markdown conversion — input is the raw positioned
+    HTML produced by the Sarvam HTML translation path. The font-family declarations
+    in the CSS provide Indic script fallbacks since PyMuPDF's original font-family
+    values (ArialMT, Helvetica-Bold, etc.) were stripped during translation preprocessing.
+    """
+    return _wrap_html(body_html, target_language, profile)
+
+
 def _wrap_html(
     body: str,
     target_language: str | None,
