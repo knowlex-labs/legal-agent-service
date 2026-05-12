@@ -26,6 +26,7 @@ import io
 import json
 import logging
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
@@ -101,7 +102,7 @@ def _conservative_extract(data: bytes) -> str:
     # Collapse runs of 3+ blank lines (some PDFs sprinkle them) but keep
     # paragraph breaks intact.
     result = re.sub(r"\n{3,}", "\n\n", result)
-    return result
+    return unicodedata.normalize("NFC", result)
 
 
 def _markdown_extract_pages(data: bytes) -> list[str]:
@@ -131,7 +132,8 @@ def _markdown_extract(data: bytes) -> str:
     """Full-document markdown via _markdown_extract_pages."""
     pages = _markdown_extract_pages(data)
     result = "\n\n".join(pages)
-    return re.sub(r"\n{3,}", "\n\n", result).strip()
+    result = re.sub(r"\n{3,}", "\n\n", result).strip()
+    return unicodedata.normalize("NFC", result)
 
 
 def extract_page_texts(data: bytes) -> list[str]:

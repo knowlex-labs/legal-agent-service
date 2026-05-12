@@ -52,6 +52,10 @@ class Settings(BaseSettings):
     # Sarvam chat/translation model. Options: sarvam-m (24B, default), sarvam-30b, sarvam-105b.
     # Used when a request selects provider "sarvam" for translation or draft chat.
     sarvam_chat_model: str = "sarvam-m"
+    # Sarvam REST translate model. "sarvam-translate:v1" is the formal/legal
+    # translation model with 2000-char input limit. We use formal mode + {{n}}
+    # placeholder masking to preserve English tech/brand terms.
+    sarvam_translate_model: str = "sarvam-translate:v1"
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
     # Content-addressed OCR cache in S3. Same PDF bytes → same cache entry across

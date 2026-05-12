@@ -29,6 +29,26 @@ _SYMBOL_ONLY_RE = re.compile(r"^[\s\W_]+$")
 _MIN_TRANSLATE_CHARS = 2
 _SARVAM_CONCURRENCY = 8
 
+# Private Use Area Unicode ranges where icon fonts (Font Awesome, etc.) live.
+_PRIVATE_USE_RE = re.compile(r"[-\U000F0000-\U000FFFFF]")
+# Short all-lowercase ASCII blobs — typical cmap decoding of icon font glyphs.
+_ICON_BLOB_RE = re.compile(r"^[a-z]{1,4}$")
+
+
+def _is_icon_block(text: str) -> bool:
+    """Return True if this block is likely an icon-font glyph, not real text.
+
+    Icon fonts (Font Awesome, LinkedIn/GitHub SVG icon sets) embed glyphs at
+    either Private Use Area code points or at ASCII positions, so PyMuPDF
+    decodes them as either PUA chars or short lowercase ASCII strings.
+    """
+    stripped = text.strip()
+    if not stripped:
+        return True
+    if _PRIVATE_USE_RE.search(stripped):
+        return True
+    return bool(_ICON_BLOB_RE.fullmatch(stripped))
+
 
 @dataclass
 class _Span:
@@ -57,6 +77,7 @@ class _Block:
     color: int
     align: str = "left"
     translated: str | None = field(default=None)
+    skip: bool = False  # True = icon/glyph block; don't redact or replace
 
 
 def is_layout_translation_viable(pdf_bytes: bytes) -> bool:
@@ -253,9 +274,12 @@ async def _translate_blocks(
     source_code: str,
     target_code: str,
     api_key: str,
+    translate_model: str = "mayura:v1",
 ) -> None:
     from legal_agent.agents.translation.generator import (
         _call_sarvam_translate,
+        _mask_tech_terms,
+        _restore_tech_terms,
         _split_for_sarvam,
     )
 
@@ -263,6 +287,12 @@ async def _translate_blocks(
 
     async def _translate_one(block: _Block) -> None:
         text = block.text
+
+        # Skip icon-font glyph blocks — keep original rendering untouched.
+        if _is_icon_block(text):
+            block.skip = True
+            return
+
         if not text or len(text) < _MIN_TRANSLATE_CHARS:
             block.translated = text
             return
@@ -270,25 +300,31 @@ async def _translate_blocks(
             block.translated = text
             return
 
+        # Formal mode — always mask tech terms so brand names / acronyms aren't
+        # transliterated. {{n}} placeholders are safe (digits + braces, no Latin letters).
+        restore: dict[str, str] = {}
+        text, restore = _mask_tech_terms(text)
+
         async with sem:
             try:
                 chunks = _split_for_sarvam(text)
                 if len(chunks) == 1:
-                    block.translated = await _call_sarvam_translate(
-                        chunks[0], source_code, target_code, api_key
+                    translated = await _call_sarvam_translate(
+                        chunks[0], source_code, target_code, api_key, translate_model
                     )
-                    return
-                translated_chunks = await asyncio.gather(*[
-                    _call_sarvam_translate(chunk, source_code, target_code, api_key)
-                    for chunk in chunks
-                ])
-                block.translated = " ".join(translated_chunks)
+                else:
+                    translated_chunks = await asyncio.gather(*[
+                        _call_sarvam_translate(chunk, source_code, target_code, api_key, translate_model)
+                        for chunk in chunks
+                    ])
+                    translated = " ".join(translated_chunks)
+                block.translated = _restore_tech_terms(translated, restore) if restore else translated
             except Exception as exc:
                 logger.warning(
                     f"[layout] Block translation failed on page {block.page_index + 1} "
-                    f"({len(text)} chars): {exc}"
+                    f"({len(block.text)} chars): {exc}"
                 )
-                block.translated = text
+                block.translated = block.text
 
     await asyncio.gather(*[_translate_one(block) for block in blocks])
 
@@ -303,7 +339,7 @@ body {{
                "Arial Unicode MS", "Helvetica", sans-serif;
   font-size: {size:.2f}pt;
   color: {color};
-  line-height: 1.15;
+  line-height: 1.5;
   text-align: {align};
 }}
 .body {{ font-weight: normal; font-style: normal; }}
@@ -337,7 +373,19 @@ def _md_to_html_inline(text: str) -> str:
     return text
 
 
-def _insert_block_text(page, block: _Block) -> bool:
+def _scale_heading(size: float, median: float) -> float:
+    """Amplify font size for heading blocks to improve visual hierarchy.
+
+    Body text (≤1.1× median) is kept as-is. Heading blocks are scaled up so
+    the contrast between headings and body matches a cleanly rebuilt document
+    (e.g. name 14.3pt → 19pt, section 12pt → 13.5pt at median=11pt).
+    """
+    if size <= median * 1.1:
+        return size
+    return median + (size - median) * 2.5
+
+
+def _insert_block_text(page, block: _Block, scaled_size: float | None = None) -> bool:
     text = (block.translated or "").strip()
     if not text:
         return True
@@ -347,17 +395,23 @@ def _insert_block_text(page, block: _Block) -> bool:
     except Exception:
         return False
 
+    render_size = scaled_size if scaled_size is not None else block.size
     css = _BLOCK_CSS_TEMPLATE.format(
-        size=block.size,
+        size=render_size,
         color=_color_int_to_css(block.color),
         align=block.align,
     )
     html_body = f'<div class="body">{_md_to_html_inline(text)}</div>'
 
     rect = fitz.Rect(*block.bbox)
-    # 2pt flat pad prevents Devanagari descenders from clipping without
-    # creating visible gaps between blocks (old 25%-of-font-size was too much).
-    rect = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y1 + 2.0)
+    # Expand rect height proportionally when font size is scaled up, so
+    # Devanagari heading text doesn't clip. 3pt flat pad for descenders.
+    if scaled_size and scaled_size > block.size:
+        scale = scaled_size / block.size
+        new_height = (rect.y1 - rect.y0) * scale
+        rect = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y0 + new_height + 3.0)
+    else:
+        rect = fitz.Rect(rect.x0, rect.y0, rect.x1, rect.y1 + 3.0)
 
     try:
         page.insert_htmlbox(rect, html_body, css=css)
@@ -393,9 +447,16 @@ def _render_translated_pdf(doc, blocks: list[_Block]) -> bytes:
 
     for page_index, page_blocks in by_page.items():
         page = doc[page_index]
-        _redact_blocks(page, page_blocks)
-        for block in page_blocks:
-            _insert_block_text(page, block)
+        # Compute median font size as proxy for body text, used for heading scaling.
+        sizes = [b.size for b in page_blocks if not b.skip and b.size > 0]
+        median = sorted(sizes)[len(sizes) // 2] if sizes else 11.0
+
+        # Only redact blocks we're replacing (skip=True means keep original glyph).
+        translatable = [b for b in page_blocks if not b.skip]
+        _redact_blocks(page, translatable)
+        for block in translatable:
+            scaled = _scale_heading(block.size, median)
+            _insert_block_text(page, block, scaled_size=scaled)
 
     # Subset embedded fonts to only the glyphs actually used, then save with
     # garbage=4 so duplicate font streams from per-block insert_htmlbox calls
@@ -416,6 +477,7 @@ async def translate_pdf_layout(
     target_language: "TranslationLanguage",
     source_language: "TranslationLanguage | None",
     api_key: str,
+    translate_model: str = "mayura:v1",
 ) -> bytes:
     """Translate a born-digital PDF while preserving layout.
 
@@ -439,10 +501,11 @@ async def translate_pdf_layout(
 
         logger.info(
             f"[layout] Translating {len(blocks)} blocks across "
-            f"{doc.page_count} page(s) to {target_language.value}"
+            f"{doc.page_count} page(s) to {target_language.value} "
+            f"(model={translate_model})"
         )
 
-        await _translate_blocks(blocks, source_code, target_code, api_key)
+        await _translate_blocks(blocks, source_code, target_code, api_key, translate_model)
 
         pdf_out = await asyncio.to_thread(_render_translated_pdf, doc, blocks)
     finally:

@@ -57,6 +57,81 @@ _LATIN_MAXIMS = (
     "mens rea, actus reus, bona fide, mala fide, sub judice, in limine"
 )
 
+# ── Technical term preservation ───────────────────────────────────────────────
+# Masked to __T0__ placeholders before Sarvam Translate sees the text, then
+# restored verbatim after. Prevents transliteration of brand names, programming
+# languages, and abbreviations. ALL_CAPS acronyms are caught by the regex pattern.
+
+_PRESERVE_TERMS: list[str] = sorted([
+    # Multi-word first (must match before single-word substrings)
+    "Google ADK", "Play Store", "App Store",
+    # Tech brand names / frameworks
+    "SmartFoxServer", "WebSockets", "WebSocket",
+    "PostgreSQL", "Elasticsearch", "LlamaIndex", "PromptQL",
+    "MongoDB", "LeetCode", "LinkedIn", "OpenAI", "GitHub", "GitLab",
+    "Snapser", "Knative", "Kafka", "Jenkins", "Docker", "Kubernetes",
+    "Qdrant", "Neo4j", "Redis", "Unity", "Gemini", "Claude", "Mem0",
+    "Python", "Java", "Kotlin", "Swift", "Android",
+    "Firecrawl", "Camoufox", "ClinicalOps",
+], key=len, reverse=True)
+
+_TECH_TERM_RE = re.compile(
+    r"(?<!\w)(?:"
+    + "|".join(re.escape(t) for t in _PRESERVE_TERMS)
+    + r"|C#"                                      # C# — # is not \w
+    + r"|[A-Z][A-Z0-9]{1,}(?:[-/][A-Z0-9]+)*"   # ALL_CAPS: API, REST, CI/CD, LLM
+    + r")(?!\w)",
+    re.UNICODE,
+)
+
+
+def _mask_tech_terms(text: str) -> tuple[str, dict[str, str]]:
+    """Replace tech/acronym tokens with {{n}} placeholders before Sarvam.
+
+    Placeholders use curly braces + digits ONLY — no Latin letters that Sarvam
+    could transliterate to Devanagari (e.g. T → ट). Returns (masked_text, restore_map).
+    """
+    restore: dict[str, str] = {}
+    counter = 0
+
+    def _replace(m: re.Match) -> str:
+        nonlocal counter
+        ph = "{{" + str(counter) + "}}"
+        restore[ph] = m.group(0)
+        counter += 1
+        return ph
+
+    return _TECH_TERM_RE.sub(_replace, text), restore
+
+
+def _restore_tech_terms(text: str, restore: dict[str, str]) -> str:
+    for ph, original in restore.items():
+        text = text.replace(ph, original)
+    return text
+
+
+def _clean_md_artifacts(text: str) -> str:
+    """Fix pymupdf4llm extraction artifacts before translation.
+
+    pymupdf4llm can produce: **[word]** (hyperlink brackets inside bold),
+    _◦_ (bullet chars wrapped as italic), and **word1** **word2** (consecutive
+    bold spans per-word for the same phrase). These confuse Sarvam and produce
+    fragmented or garbled output.
+    """
+    # [text](url) → text
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    # **[word]** → **word**
+    text = re.sub(r"\*\*\[([^\]]+)\]\*\*", r"**\1**", text)
+    # _◦_ / _•_ → ◦  (bullet/special chars should not be italic)
+    text = re.sub(r"_([◦•·∙])_", r"\1", text)
+    # **word1** **word2** → **word1 word2**  (merge consecutive bold spans)
+    for _ in range(8):
+        prev = text
+        text = re.sub(r"\*\*([^*\n]+)\*\* \*\*([^*\n]+)\*\*", r"**\1 \2**", text)
+        if text == prev:
+            break
+    return text
+
 # ── Sarvam dedicated translate API ───────────────────────────────────────────
 
 _SARVAM_TRANSLATE_URL = "https://api.sarvam.ai/translate"
@@ -185,25 +260,32 @@ def _split_long_plain_text(text: str, max_chars: int = _SARVAM_TRANSLATE_MAX_CHA
 
 
 async def _call_sarvam_translate(
-    text: str, source_code: str, target_code: str, api_key: str,
+    text: str,
+    source_code: str,
+    target_code: str,
+    api_key: str,
+    model: str = "sarvam-translate:v1",
 ) -> str:
     # Sarvam rejects empty input with a 400; skip rather than fail the whole job.
     if not text or not text.strip():
         return text
     import httpx
+
+    body: dict = {
+        "input": text,
+        "source_language_code": source_code,
+        "target_language_code": target_code,
+        "model": model,
+        "mode": "formal",
+        "enable_preprocessing": True,
+        "numerals_format": "international",
+    }
+
     async with httpx.AsyncClient(timeout=60) as client:
         resp = await client.post(
             _SARVAM_TRANSLATE_URL,
             headers={"api-subscription-key": api_key, "Content-Type": "application/json"},
-            json={
-                "input": text,
-                "source_language_code": source_code,
-                "target_language_code": target_code,
-                "model": "sarvam-translate:v1",
-                "mode": "formal",
-                "enable_preprocessing": False,
-                "numerals_format": "international",
-            },
+            json=body,
         )
         if not resp.is_success:
             logger.error(
@@ -233,6 +315,9 @@ async def _translate_with_sarvam_api(
     tags). Heading prefixes (##) and bullets (- ) are plain ASCII that pass through
     unchanged. Chunks are translated in parallel via asyncio.gather.
     """
+    settings = get_settings()
+    translate_model = settings.sarvam_translate_model
+
     target_code = _SARVAM_LANG_CODES.get(target_language.value, "hi-IN")
     # sarvam-translate:v1 does not support "auto"; default to en-IN for source
     source_code = _SARVAM_LANG_CODES.get(source_language.value, "en-IN") if source_language else "en-IN"
@@ -242,18 +327,31 @@ async def _translate_with_sarvam_api(
     source_text = re.sub(r'\[\[', '', source_text)
     source_text = re.sub(r'\]\]', '', source_text)
 
+    # Fix pymupdf4llm artifacts (fragmented bold, hyperlink brackets, _◦_).
+    source_text = _clean_md_artifacts(source_text)
+
+    # Formal mode translates everything — mask tech terms so brand names / acronyms
+    # aren't transliterated. {{n}} placeholders survive Sarvam (digits + braces only).
+    _restore: dict[str, str] = {}
+    source_text, _restore = _mask_tech_terms(source_text)
+
     tagged = _md_to_tagged(source_text)
     chunks = _split_for_sarvam(tagged)
-    logger.debug(f"[sarvam-translate] {len(chunks)} chunk(s) for {len(source_text)} chars")
+    logger.debug(
+        f"[sarvam-translate] model={translate_model} "
+        f"{len(chunks)} chunk(s) for {len(source_text)} chars"
+    )
 
     translated_chunks: list[str] = await asyncio.gather(*[
-        _call_sarvam_translate(chunk, source_code, target_code, api_key)
+        _call_sarvam_translate(chunk, source_code, target_code, api_key, translate_model)
         for chunk in chunks
     ])
 
     result = _clean_sarvam_translate_output(_tagged_to_md("\n\n".join(translated_chunks)))
     # Strip any <b>/<i> tags Sarvam didn't preserve symmetrically (unpaired leftovers).
     result = re.sub(r'</?[bi]>', '', result, flags=re.IGNORECASE)
+    if _restore:
+        result = _restore_tech_terms(result, _restore)
     return result
 
 
@@ -801,6 +899,13 @@ class TranslationGenerator:
 
         llm = _init_llm(model, provider, max_tokens)
         system_prompt = _build_system_prompt(target_language, source_language, profile)
+
+        # Clean pymupdf4llm artifacts before the LLM sees fragmented bold/brackets.
+        # (The system prompt already instructs the LLM to preserve tech terms, so
+        # no placeholder masking needed here.)
+        source_text = _clean_md_artifacts(source_text)
+        if page_texts:
+            page_texts = [_clean_md_artifacts(p) for p in page_texts]
 
         chunk_max = _CHUNK_MAX_CHARS
         if page_texts:
