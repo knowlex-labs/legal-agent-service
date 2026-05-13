@@ -143,28 +143,22 @@ async def translate_pdf_via_html(
         return restore(cleaned, sentinels)
 
     async def _translate_spans(spans: list[Span]) -> list[Span]:
-        """Translate spans as a joined unit; redistribute text by char-ratio."""
+        """Translate spans as one unit; return a single Span with dominant formatting.
+
+        Never redistributes translated text back across multiple spans — doing so splits
+        Devanagari conjunct clusters across element boundaries, which breaks shaping in
+        Chromium (conjuncts like फ्ट appear as "फ्ट" visually spaced apart).
+        """
         if not spans:
             return spans
         joined = "".join(s.text for s in spans)
         if not _needs_translation(joined):
             return spans
         translated = await _translate_text(joined)
-        if len(spans) == 1:
-            return [Span(text=translated, bold=spans[0].bold, italic=spans[0].italic)]
-        # Redistribute by original char-ratio
-        total_orig = len(joined) or 1
-        total_trans = len(translated)
-        result: list[Span] = []
-        pos = 0
-        for i, span in enumerate(spans):
-            if i == len(spans) - 1:
-                result.append(Span(text=translated[pos:], bold=span.bold, italic=span.italic))
-            else:
-                share = round(len(span.text) / total_orig * total_trans)
-                result.append(Span(text=translated[pos:pos + share], bold=span.bold, italic=span.italic))
-                pos += share
-        return result
+        total = len(joined) or 1
+        bold = sum(len(s.text) for s in spans if s.bold) / total > 0.5
+        italic = sum(len(s.text) for s in spans if s.italic) / total > 0.5
+        return [Span(text=translated, bold=bold, italic=italic)]
 
     # 1. Extract IR
     ir_doc = await asyncio.to_thread(extract_document, source_bytes)

@@ -28,6 +28,15 @@ DEFAULT_GLOSSARY_PATH = Path(__file__).parent / "glossary_en_hi.yaml"
 # Sarvam could transliterate, no Unicode math brackets that Sarvam normalises to `[`.
 # Pattern [__NNNN__] is distinct from real text (legal citations use [2024], not [__2024__]).
 _SENTINEL_RE = re.compile(r"\[__\d{4}__\]")
+_SENTINEL_FUZZY_RE = re.compile(r"\[__(\d+)__\]")
+
+_METRIC_RE = re.compile(
+    r"(?:"
+    r"\$[\d,.]+[KMBkm+%]?\+?"        # $40K+, $1.2M, $500
+    r"|[\d,.]+[KMBkm]\+?(?=\s|$)"    # 40K+, 1.2M (bare)
+    r"|\b\d+(?:\.\d+)?%\b"           # 42%, 99.9%
+    r")"
+)
 
 # Private-use-area glyphs (Font Awesome icons in extracted PDFs). Drop before
 # translation so the engine doesn't hallucinate around garbage codepoints.
@@ -113,6 +122,14 @@ def freeze(
     sub-word match steals them.
     """
     sentinels: dict[str, str] = {}
+
+    # Freeze currency/metric patterns verbatim before glossary terms so Sarvam never sees them.
+    # Process right-to-left so string positions stay valid after each substitution.
+    for match in reversed(list(_METRIC_RE.finditer(text))):
+        sid = f"[__{len(sentinels):04d}__]"
+        sentinels[sid] = match.group(0)
+        text = text[: match.start()] + sid + text[match.end() :]
+
     for term in glossary.terms():
         pattern = re.compile(_escape_term(term))
 
@@ -128,12 +145,27 @@ def freeze(
 
 
 def restore(translated: str, sentinels: dict[str, str]) -> str:
-    """Replace sentinels with their glossary targets. NFC-normalises the result."""
+    """Replace sentinels with their glossary targets. NFC-normalises the result.
+
+    Uses fuzzy digit matching so Sarvam's occasional digit-padding (e.g. [__0003__] →
+    [__00003__]) is still resolved. Unresolvable sentinels are stripped with a warning.
+    """
+    by_idx: dict[int, str] = {}
     for sid, target in sentinels.items():
-        translated = translated.replace(sid, target)
-    leftover = _SENTINEL_RE.findall(translated)
+        m = _SENTINEL_FUZZY_RE.fullmatch(sid)
+        if m:
+            by_idx[int(m.group(1))] = target
+
+    def _repl(m: re.Match) -> str:
+        return by_idx.get(int(m.group(1)), m.group(0))
+
+    translated = _SENTINEL_FUZZY_RE.sub(_repl, translated)
+
+    leftover = _SENTINEL_FUZZY_RE.findall(translated)
     if leftover:
-        logger.warning("Sentinels survived translation: %s", leftover)
+        logger.warning("Stripping %d unresolved sentinels: %s", len(leftover), leftover)
+        translated = _SENTINEL_FUZZY_RE.sub("", translated)
+
     return unicodedata.normalize("NFC", translated)
 
 

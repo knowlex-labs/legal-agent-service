@@ -300,8 +300,21 @@ def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock]:
                 r_spans, _ = _merge_spans(right)
                 result.append(RowBlock(left=l_spans, right=r_spans))
                 continue
+            # Multiple items on the same visual row but not a two-column split (e.g. three
+            # inline social links) — merge into one block so they render on a single line.
+            spans, max_sz = _merge_spans(text_items)
+            merged = _Item(
+                x0=min(it.x0 for it in text_items),
+                y0=min(it.y0 for it in text_items),
+                x1=max(it.x1 for it in text_items),
+                y1=max(it.y1 for it in text_items),
+                spans=spans,
+                max_size=max_sz,
+            )
+            result.append(_classify(merged, m_left, m_right, median_size))
+            continue
 
-        # Single item or no clear split — classify each
+        # Single item
         for it in text_items:
             result.append(_classify(it, m_left, m_right, median_size))
 

@@ -115,12 +115,12 @@ def render_to_html(doc: Document, lang: str) -> str:
     direction = "rtl" if lang_lower in _RTL_LANGS else "ltr"
 
     css = f"""
-@page {{ size: A4; margin: 1.8cm 1.6cm; }}
+@page {{ size: A4; margin: 1.5cm 1.4cm; }}
 * {{ box-sizing: border-box; }}
 body {{
   font-family: {noto};
   font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
-  line-height: 1.55;
+  line-height: 1.45;
   color: #111;
   direction: {direction};
 }}
@@ -128,11 +128,11 @@ h1 {{ font-size: 22pt; font-weight: 700; margin: 0 0 4pt; }}
 h2 {{
   font-size: 12pt; font-weight: 700;
   text-transform: uppercase; letter-spacing: 0.5pt;
-  border-bottom: 1px solid #999; margin: 14pt 0 6pt;
+  border-bottom: 1px solid #999; margin: 10pt 0 4pt;
 }}
 h1.center, h2.center {{ text-align: center; border-bottom: 0; }}
 h1.right,  h2.right  {{ text-align: right; }}
-p {{ margin: 3pt 0; }}
+p {{ margin: 2pt 0; }}
 p.center {{ text-align: center; }}
 p.right  {{ text-align: right; }}
 .row {{
@@ -144,18 +144,13 @@ p.right  {{ text-align: right; }}
 }}
 .col-left  {{ flex: 1 1 auto; }}
 .col-right {{ flex: 0 0 auto; white-space: nowrap; text-align: right; }}
-ul {{ padding-left: 1.4em; margin: 4pt 0 8pt 0; }}
-li {{ margin-bottom: 5pt; line-height: 1.6; }}
+ul {{ padding-left: 1.4em; margin: 2pt 0 6pt 0; }}
+li {{ margin-bottom: 3pt; line-height: 1.5; }}
 """
 
-    page_divs = []
-    for i, page in enumerate(doc.pages):
-        page_html = _render_page(page)
-        # page-break between pages (last page has no break)
-        pb = "" if i == len(doc.pages) - 1 else ' style="page-break-after:always"'
-        page_divs.append(f'<div{pb}>\n{page_html}</div>')
-
-    body = "\n".join(page_divs)
+    # No forced page-breaks — let Playwright paginate naturally by content height.
+    # Forcing breaks at source-page boundaries leaves blank space when Hindi text is shorter.
+    body = "\n".join(_render_page(page) for page in doc.pages)
     return (
         f'<!DOCTYPE html>\n<html lang="{lang_code}" dir="{direction}">\n'
         f'<head>\n<meta charset="utf-8"/>\n<style>{css}</style>\n</head>\n'
