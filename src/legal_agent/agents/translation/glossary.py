@@ -38,6 +38,12 @@ _METRIC_RE = re.compile(
     r")"
 )
 
+# Reference numbers / structured IDs that must pass through translation verbatim.
+# Examples: F.NO-DGGI/INT/INTL/524/2025/905, DIN-202603DEE5000000EECC, DRC-22, GST/PMT-09.
+# Requires a leading uppercase letter and at least one separator-joined segment so we
+# don't catch bare acronyms (handled via glossary) or plain numbers (handled by metric).
+_ID_RE = re.compile(r"\b[A-Z][A-Z0-9]*(?:[.\-/][A-Z0-9]+)+\b")
+
 # Private-use-area glyphs (Font Awesome icons in extracted PDFs). Drop before
 # translation so the engine doesn't hallucinate around garbage codepoints.
 # Covers BMP PUA (U+E000–U+F8FF) and Supplementary PUA-A/B.
@@ -126,6 +132,13 @@ def freeze(
     # Freeze currency/metric patterns verbatim before glossary terms so Sarvam never sees them.
     # Process right-to-left so string positions stay valid after each substitution.
     for match in reversed(list(_METRIC_RE.finditer(text))):
+        sid = f"[__{len(sentinels):04d}__]"
+        sentinels[sid] = match.group(0)
+        text = text[: match.start()] + sid + text[match.end() :]
+
+    # Freeze structured reference IDs (F.NO-..., DIN-..., DRC-22, etc.) so Sarvam
+    # doesn't transliterate them character-by-character into Devanagari syllables.
+    for match in reversed(list(_ID_RE.finditer(text))):
         sid = f"[__{len(sentinels):04d}__]"
         sentinels[sid] = match.group(0)
         text = text[: match.start()] + sid + text[match.end() :]

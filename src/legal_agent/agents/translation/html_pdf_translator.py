@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -20,18 +21,65 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-_SKIP_RE = __import__("re").compile(r'^[\d\s.,/%$€₹+\-–—:;()\[\]@#&*|•·∙○◦■□▪▫]+$')
-_EMAIL_RE = __import__("re").compile(r'^\S+@\S+\.\S+$')
-_URL_RE = __import__("re").compile(r'^https?://', __import__("re").IGNORECASE)
+_SKIP_RE = re.compile(r'^[\d\s.,/%$€₹+\-–—:;()\[\]@#&*|•·∙○◦■□▪▫]+$')
+_EMAIL_RE = re.compile(r'^\S+@\S+\.\S+$')
+_URL_RE = re.compile(r'^https?://', re.IGNORECASE)
+
+# Sarvam REST translate caps input at 2000 chars/request. Margin for glossary
+# sentinel expansion / NFC differences.
+_SARVAM_MAX_CHARS = 1800
+
+_SARVAM_SPLIT_RE = re.compile(r"(\n+|(?<=[.!?।])\s+)")
+
+# Form-field dotted lines, signature underscores, and other OCR-extracted noise
+# tend to produce runs of the same non-alphanum char hundreds of chars long
+# (e.g. "Date: ......................"). Sarvam Translate rejects these with
+# "Input contains excessively repeated characters." Cap any run at 5 occurrences.
+_REPEAT_RUN_RE = re.compile(r"([^\w\s])\1{5,}")
+
+
+def _collapse_repeated_chars(text: str) -> str:
+    return _REPEAT_RUN_RE.sub(lambda m: m.group(1) * 5, text)
 
 
 def _needs_translation(text: str) -> bool:
-    t = text.strip()
+    # Evaluate after collapsing repeated noise (dotted underlines, signature
+    # bars) so "Date: ..............." still translates "Date:" and a pure-dots
+    # row gets filtered.
+    t = _collapse_repeated_chars(text.strip())
     if not t or len(t) <= 2:
         return False
     if _EMAIL_RE.match(t) or _URL_RE.match(t) or _SKIP_RE.match(t):
         return False
+    alnum = sum(1 for c in t if c.isalnum())
+    if alnum < 3:
+        return False
     return True
+
+
+def _chunk_for_sarvam(text: str, limit: int = _SARVAM_MAX_CHARS) -> list[str]:
+    """Split text into ≤limit chunks on paragraph/sentence boundaries, lossless concat."""
+    if len(text) <= limit:
+        return [text]
+    chunks: list[str] = []
+    buf = ""
+    for part in _SARVAM_SPLIT_RE.split(text):
+        if not part:
+            continue
+        if len(buf) + len(part) <= limit:
+            buf += part
+            continue
+        if buf:
+            chunks.append(buf)
+            buf = ""
+        if len(part) <= limit:
+            buf = part
+        else:
+            for i in range(0, len(part), limit):
+                chunks.append(part[i:i + limit])
+    if buf:
+        chunks.append(buf)
+    return chunks
 
 
 def _dump(debug_dir: str | None, job_id: str, name: str, content: str | bytes) -> None:
@@ -52,8 +100,7 @@ def _dump(debug_dir: str | None, job_id: str, name: str, content: str | bytes) -
 
 
 def render_html_to_pdf_bytes(html_document: str, pdf_options: dict | None = None) -> bytes:
-    """Render HTML to PDF via Playwright Chromium."""
-    import asyncio as _asyncio
+    """Render HTML to PDF via Playwright Chromium. Invoked from a worker thread."""
 
     async def _render() -> bytes:
         from playwright.async_api import async_playwright
@@ -74,11 +121,7 @@ def render_html_to_pdf_bytes(html_document: str, pdf_options: dict | None = None
             finally:
                 await browser.close()
 
-    loop = _asyncio.ProactorEventLoop() if hasattr(_asyncio, "ProactorEventLoop") else _asyncio.new_event_loop()
-    try:
-        return loop.run_until_complete(_render())
-    finally:
-        loop.close()
+    return asyncio.run(_render())
 
 
 async def translate_pdf_via_html(
@@ -91,6 +134,10 @@ async def translate_pdf_via_html(
     """Translate a PDF using the IR pipeline.
 
     Returns (pdf_bytes, metadata_dict).
+
+    Image-only PDFs (every page has < 50 native text chars) are routed to the
+    bbox-overlay translator so seals/stamps/letterhead pixels survive. PDFs
+    with any native text continue through the PyMuPDF dict → flow-HTML path.
     """
     from legal_agent.agents.translation.glossary import (
         DocState,
@@ -103,12 +150,25 @@ async def translate_pdf_via_html(
     from legal_agent.agents.translation.layout_extract import extract_document
     from legal_agent.agents.translation.layout_ir import RowBlock, Span, TextBlock
     from legal_agent.agents.translation.layout_render import render_to_html
+    from legal_agent.agents.translation.overlay_translator import (
+        is_image_only_pdf,
+        translate_pdf_via_overlay,
+    )
     from legal_agent.agents.translation.sarvam_translate import (
         SARVAM_LANG_CODES,
         call_sarvam_translate,
         clean_sarvam_translate_output,
     )
     from legal_agent.config import get_settings
+
+    if is_image_only_pdf(source_bytes):
+        logger.info("[%s] image-only PDF → overlay translator", job_id)
+        pdf_bytes, meta = await translate_pdf_via_overlay(
+            source_bytes, filename, request, job_id, debug_dir
+        )
+        _dump(debug_dir, job_id, "5_rendered", pdf_bytes)
+        meta.setdefault("translation_pipeline", "gemini_bbox_overlay_sarvam_pymupdf")
+        return pdf_bytes, meta
 
     settings = get_settings()
     lang = request.target_language.value
@@ -129,17 +189,26 @@ async def translate_pdf_via_html(
     state_lock = asyncio.Lock()
     is_hindi_target = target_code.startswith("hi")
 
+    async def _translate_chunk(frozen: str) -> str:
+        async with sem:
+            raw = await call_sarvam_translate(frozen, source_code, target_code, api_key, tm)
+        return clean_sarvam_translate_output(raw) or frozen
+
     async def _translate_text(text: str) -> str:
         if not text.strip():
             return text
-        prepared = strip_pua(text.strip())
+        prepared = _collapse_repeated_chars(strip_pua(text.strip()))
         if is_hindi_target:
             prepared = localize_units(prepared)
         async with state_lock:
             frozen, sentinels = freeze(prepared, doc_state, glossary)
-        async with sem:
-            raw = await call_sarvam_translate(frozen, source_code, target_code, api_key, tm)
-        cleaned = clean_sarvam_translate_output(raw) or frozen
+        chunks = _chunk_for_sarvam(frozen)
+        if len(chunks) == 1:
+            cleaned = await _translate_chunk(chunks[0])
+        else:
+            logger.info("[sarvam-translate] splitting %d chars into %d chunks", len(frozen), len(chunks))
+            translated_chunks = await asyncio.gather(*(_translate_chunk(c) for c in chunks))
+            cleaned = "".join(translated_chunks)
         return restore(cleaned, sentinels)
 
     async def _translate_spans(spans: list[Span]) -> list[Span]:
@@ -161,7 +230,7 @@ async def translate_pdf_via_html(
         return [Span(text=translated, bold=bold, italic=italic)]
 
     # 1. Extract IR
-    ir_doc = await asyncio.to_thread(extract_document, source_bytes)
+    ir_doc = await asyncio.to_thread(extract_document, source_bytes, ocr_language=source_code)
     if not ir_doc.pages:
         raise RuntimeError("extract_document returned no pages — PDF may be image-only, encrypted, or invalid")
 

@@ -99,9 +99,17 @@ def _extract_with_pdfplumber(data: bytes) -> str:
     return "\n".join(parts).strip()
 
 
-def _ocr_pdf_vision(data: bytes) -> str:
+def _ocr_pdf_vision(data: bytes, *, language: str | None = None, output_format: str = "markdown") -> str:
+    """OCR a PDF via the configured Vision provider (Sarvam Vision by default).
+
+    The translation IR pipeline overrides `output_format="html"` so structure
+    (headings, paragraphs, lists, tables) and image regions are exposed as
+    discrete tags — letting the caller drop image descriptions cleanly instead
+    of regex-filtering Sarvam meta-commentary. Other callers (markdown fallback
+    chain in extract_for_translation) keep the markdown default.
+    """
     from legal_agent.utils.ocr import ocr_pdf
-    return ocr_pdf(data, output_format="markdown")
+    return ocr_pdf(data, output_format=output_format, language=language)  # type: ignore[arg-type]
 
 
 def _ocr_pdf_tesseract(data: bytes) -> str:

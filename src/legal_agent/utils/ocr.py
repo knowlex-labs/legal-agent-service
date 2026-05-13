@@ -60,12 +60,22 @@ def _get_cache_s3_client():
 _FORMAT_EXT = {"markdown": "md", "plain": "txt", "html": "html"}
 
 
-def _cache_key(content_bytes: bytes, provider: str, output_format: str) -> tuple[str, str]:
-    """Return (sha256_hex, full_s3_key) for a given input + config."""
+def _cache_key(
+    content_bytes: bytes,
+    provider: str,
+    output_format: str,
+    language: str | None = None,
+) -> tuple[str, str]:
+    """Return (sha256_hex, full_s3_key) for a given input + config.
+
+    `language` only varies the key for backends whose output depends on the hint
+    (Sarvam); callers pass None for backends that ignore it.
+    """
     sha = hashlib.sha256(content_bytes).hexdigest()
     settings = get_settings()
     ext = _FORMAT_EXT.get(output_format, "md")
-    key = f"{settings.ocr_cache_prefix}/{provider}/{output_format}/{sha}.{ext}"
+    lang_seg = f"/{language}" if language else ""
+    key = f"{settings.ocr_cache_prefix}/{provider}/{output_format}{lang_seg}/{sha}.{ext}"
     return sha, key
 
 
@@ -169,20 +179,24 @@ def ocr_pdf(
     pdf_data: bytes,
     output_format: OutputFormat = "markdown",
     provider: Provider | None = None,
+    language: str | None = None,
 ) -> str:
     """OCR a PDF using the configured backend, with a content-hashed S3 cache.
 
-    The cache is keyed by sha256(pdf_data) + provider + output_format, so the
-    same PDF bytes served to a second translation (or RAG index, or draft
-    context) skip OCR entirely.
+    The cache is keyed by sha256(pdf_data) + provider + output_format (+ language
+    for Sarvam), so the same PDF bytes served to a second translation (or RAG
+    index, or draft context) skip OCR entirely.
 
     Args:
         pdf_data: Raw PDF bytes.
-        output_format: "markdown" or "plain".
+        output_format: "markdown", "plain", or "html".
         provider: Force a specific backend. If None, uses settings.ocr_provider.
+        language: Sarvam-only BCP-47 language hint (e.g. "hi-IN"). Falls back to
+            settings.sarvam_ocr_language.
     """
     backend = provider or get_settings().ocr_provider
-    sha, key = _cache_key(pdf_data, backend, output_format)
+    cache_lang = language if backend == "sarvam" else None
+    sha, key = _cache_key(pdf_data, backend, output_format, cache_lang)
     sha_short = f"{backend}/{output_format}/{sha[:12]}"
 
     cached = _cache_lookup(key, sha_short)
@@ -190,13 +204,7 @@ def ocr_pdf(
         return cached
 
     if backend == "sarvam":
-        if output_format == "html":
-            # Sarvam Document Intelligence emits markdown only; render that to
-            # HTML so the Tiptap editor can ingest tables/lists/headings.
-            md = ocr_pdf_with_sarvam(pdf_data, "markdown")
-            text = _markdown_to_html(md)
-        else:
-            text = ocr_pdf_with_sarvam(pdf_data, output_format)
+        text = ocr_pdf_with_sarvam(pdf_data, output_format, language=language)
     elif backend == "mistral":
         text = ocr_pdf_with_mistral(pdf_data, output_format)
     else:
@@ -561,21 +569,23 @@ def ocr_image_with_mistral(
 def ocr_pdf_with_sarvam(
     pdf_data: bytes,
     output_format: OutputFormat = "markdown",
+    language: str | None = None,
 ) -> str:
-    """OCR a PDF using Sarvam Document Intelligence.
+    """OCR a PDF using Sarvam Document Intelligence (Sarvam Vision VLM).
 
     The API caps input at 10 pages per job, so longer PDFs are split into
     chunks and processed concurrently (bounded by `sarvam_ocr_concurrency`).
 
-    `output_format` controls the return shape but Sarvam only emits markdown;
-    for "plain" we return the markdown as-is (downstream RAG chunking tolerates
-    markdown structure fine).
+    `output_format` is honored natively: "html" requests HTML from Sarvam,
+    "markdown"/"plain" requests markdown. `language` overrides the configured
+    `sarvam_ocr_language` env default.
     """
     chunks = _chunk_pdf_by_pages(pdf_data, _SARVAM_MAX_PAGES_PER_JOB)
     total_pages = sum(c["page_count"] for c in chunks)
     logger.info(
         f"[sarvam-ocr] {total_pages} pages → {len(chunks)} chunks "
-        f"(concurrency={get_settings().sarvam_ocr_concurrency})"
+        f"(concurrency={get_settings().sarvam_ocr_concurrency}, "
+        f"format={output_format}, language={language or get_settings().sarvam_ocr_language})"
     )
 
     settings = get_settings()
@@ -583,7 +593,9 @@ def ocr_pdf_with_sarvam(
     def _run_indexed(idx_and_chunk: tuple[int, dict]) -> tuple[int, str]:
         idx, c = idx_and_chunk
         try:
-            text = _run_sarvam_pdf_job(c["bytes"], c["page_count"])
+            text = _run_sarvam_pdf_job(
+                c["bytes"], c["page_count"], output_format=output_format, language=language,
+            )
         except Exception as exc:
             raise RuntimeError(
                 f"Sarvam OCR failed on chunk {idx + 1}/{len(chunks)} "
@@ -646,16 +658,37 @@ def _chunk_pdf_by_pages(pdf_data: bytes, max_pages: int) -> list[dict]:
     return chunks
 
 
-def _run_sarvam_pdf_job(pdf_bytes: bytes, page_count: int) -> str:
-    return _run_sarvam_job(pdf_bytes, ".pdf", page_hint=page_count)
+def _run_sarvam_pdf_job(
+    pdf_bytes: bytes,
+    page_count: int,
+    output_format: OutputFormat = "markdown",
+    language: str | None = None,
+) -> str:
+    return _run_sarvam_job(
+        pdf_bytes, ".pdf", page_hint=page_count,
+        output_format=output_format, language=language,
+    )
 
 
-def _run_sarvam_job(file_bytes: bytes, file_ext: str, page_hint: int) -> str:
-    """Run a single Sarvam Document Intelligence job and return extracted markdown.
+# Sarvam Document Intelligence expects "md" or "html"; our internal vocabulary is
+# "markdown"/"plain"/"html". Map to what the API accepts ("plain" → md, then
+# strip structure on the consumer side if needed).
+_SARVAM_DI_FORMAT = {"markdown": "md", "plain": "md", "html": "html"}
+_SARVAM_DI_EXT = {"md": ".md", "html": ".html"}
+
+
+def _run_sarvam_job(
+    file_bytes: bytes,
+    file_ext: str,
+    page_hint: int,
+    output_format: OutputFormat = "markdown",
+    language: str | None = None,
+) -> str:
+    """Run a single Sarvam Document Intelligence job and return extracted text.
 
     Writes the input to a temp file (SDK accepts a file path), creates a job,
     uploads, waits for completion, downloads the output ZIP, and extracts the
-    markdown contents.
+    contents matching the requested output format.
     """
     from sarvamai import SarvamAI  # type: ignore
 
@@ -667,6 +700,9 @@ def _run_sarvam_job(file_bytes: bytes, file_ext: str, page_hint: int) -> str:
         )
 
     client = SarvamAI(api_subscription_key=settings.sarvam_api_key)
+    di_format = _SARVAM_DI_FORMAT.get(output_format, "md")
+    di_ext = _SARVAM_DI_EXT[di_format]
+    lang = language or settings.sarvam_ocr_language
 
     with tempfile.TemporaryDirectory() as tmpdir:
         tmp = Path(tmpdir)
@@ -675,29 +711,29 @@ def _run_sarvam_job(file_bytes: bytes, file_ext: str, page_hint: int) -> str:
         in_path.write_bytes(file_bytes)
 
         job = client.document_intelligence.create_job(
-            language=settings.sarvam_ocr_language,
-            output_format="md",
+            language=lang,
+            output_format=di_format,
         )
         job.upload_file(str(in_path))
         job.start()
         job.wait_until_complete()
         job.download_output(str(out_path))
 
-        text = _extract_markdown_from_zip(out_path)
+        text = _extract_text_from_zip(out_path, di_ext)
         logger.info(f"[sarvam-ocr] Job complete: {page_hint} pages → {len(text)} chars")
         return text
 
 
-def _extract_markdown_from_zip(zip_path: Path) -> str:
-    """Read all .md files from a Sarvam output ZIP and concatenate them in sorted order."""
+def _extract_text_from_zip(zip_path: Path, ext: str) -> str:
+    """Read all files with `ext` from a Sarvam output ZIP and concatenate them."""
     parts: list[str] = []
     with zipfile.ZipFile(zip_path) as zf:
-        md_names = sorted(n for n in zf.namelist() if n.lower().endswith(".md"))
-        if not md_names:
+        names = sorted(n for n in zf.namelist() if n.lower().endswith(ext))
+        if not names:
             raise RuntimeError(
-                f"Sarvam output ZIP contained no .md files (entries: {zf.namelist()})"
+                f"Sarvam output ZIP contained no {ext} files (entries: {zf.namelist()})"
             )
-        for name in md_names:
+        for name in names:
             with zf.open(name) as f:
                 parts.append(f.read().decode("utf-8", errors="replace"))
     return "\n\n".join(parts).strip()

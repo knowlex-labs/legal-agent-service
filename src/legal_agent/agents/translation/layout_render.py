@@ -114,7 +114,65 @@ def render_to_html(doc: Document, lang: str) -> str:
     noto = _noto_family(lang_lower)
     direction = "rtl" if lang_lower in _RTL_LANGS else "ltr"
 
+    # @font-face declarations: ensure the family names referenced below resolve to a
+    # shaping-capable font even when the host hasn't installed the Noto package.
+    # local() walks platform-native aliases first; the file:// URLs are the in-container
+    # (Debian fonts-noto-*) fallback. Browsers skip URL sources whose path doesn't exist.
+    font_faces = """
+@font-face {
+  font-family: 'Noto Sans Devanagari';
+  src: local('Noto Sans Devanagari'), local('Devanagari MT'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans Bengali';
+  src: local('Noto Sans Bengali'), local('Bangla MN'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansBengali-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans Tamil';
+  src: local('Noto Sans Tamil'), local('Tamil MN'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansTamil-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans Telugu';
+  src: local('Noto Sans Telugu'), local('Telugu MN'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansTelugu-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans Kannada';
+  src: local('Noto Sans Kannada'), local('Kannada MN'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansKannada-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans Malayalam';
+  src: local('Noto Sans Malayalam'), local('Malayalam MN'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansMalayalam-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans Gujarati';
+  src: local('Noto Sans Gujarati'), local('Gujarati MT'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansGujarati-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans Gurmukhi';
+  src: local('Noto Sans Gurmukhi'), local('Gurmukhi MN'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansGurmukhi-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Sans Oriya';
+  src: local('Noto Sans Oriya'), local('Oriya MN'), local('Nirmala UI'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSansOriya-Regular.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Nastaliq Urdu';
+  src: local('Noto Nastaliq Urdu'), local('Geeza Pro'),
+       url('file:///usr/share/fonts/truetype/noto/NotoNastaliqUrdu-Regular.ttf') format('truetype');
+}
+"""
+
     css = f"""
+{font_faces}
 @page {{ size: A4; margin: 1.5cm 1.4cm; }}
 * {{ box-sizing: border-box; }}
 body {{
@@ -123,6 +181,7 @@ body {{
   line-height: 1.45;
   color: #111;
   direction: {direction};
+  text-rendering: optimizeLegibility;
 }}
 h1 {{ font-size: 22pt; font-weight: 700; margin: 0 0 4pt; }}
 h2 {{

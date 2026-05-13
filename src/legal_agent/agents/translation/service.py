@@ -130,14 +130,14 @@ class TranslationService:
         lang_suffix = lang_slug.replace("_", " ").replace("-", " ").title().replace(" ", "_")
         out_name = f"{original_name}_{lang_suffix}.pdf" if original_name else f"{lang_suffix}_translation.pdf"
 
-        await self._job_manager.update_job_metadata(
-            job_id,
-            translation_pipeline="pymupdf_html_sarvam_playwright",
-            extraction_route="pymupdf_html",
-            translation_backend="sarvam_rest",
-            detected_document_type=request.document_type.value if request.document_type else None,
+        meta = {
+            "translation_pipeline": "pymupdf_html_sarvam_playwright",
+            "extraction_route": "pymupdf_html",
+            "translation_backend": "sarvam_rest",
+            "detected_document_type": request.document_type.value if request.document_type else None,
             **html_meta,
-        )
+        }
+        await self._job_manager.update_job_metadata(job_id, **meta)
 
         s3_path = f"{folder}/translations/{out_name}"
         try:

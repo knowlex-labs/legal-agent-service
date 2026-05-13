@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import unicodedata
 
 from legal_agent.config import get_settings
 
@@ -62,10 +63,10 @@ def clean_output(text: str) -> str:
 
 def clean_sarvam_translate_output(text: str) -> str:
     text = clean_output(text)
-    text = text.replace("\x00", "")
+    text = text.replace("\x00", "").replace("​", "")
     text = _unwrap_sarvam_dict_response(text)
     text = re.sub(r"(?m)^\s*```[\w-]*\s*$", "", text)
-    return text.strip()
+    return unicodedata.normalize("NFC", text.strip())
 
 
 def _retry_wait_seconds(status_code: int, attempt: int, base_delay: float, retry_after_header: str | None) -> float:
