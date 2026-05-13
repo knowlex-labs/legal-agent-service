@@ -42,13 +42,12 @@ def _noto_family(lang: str) -> str:
     if lang in _RTL_LANGS:
         return "'Noto Nastaliq Urdu', 'Noto Kufi Arabic', sans-serif"
     if lang in _DEVANAGARI_LANGS:
-        # Mangal (GoI/CBIC de facto, Windows-only) → Lohit Devanagari (Linux substitute,
-        # shipped in container) → Shobhika (serif, also in container) → Noto fallbacks.
-        # Lohit/Mangal render lighter than Noto Sans, matching the visual weight of
-        # CBIC/government PDFs.
+        # Noto Sans Devanagari first — matches the weight/quality the overlay translator
+        # already uses and what the user expects. Mangal/Lohit kept as fallbacks for
+        # containers where Noto isn't installed.
         return (
-            "'Mangal', 'Lohit Devanagari', 'Shobhika', 'Sahadeva', "
-            "'Nirmala UI', 'Noto Sans Devanagari', 'Noto Serif Devanagari', sans-serif"
+            "'Noto Sans Devanagari', 'Mangal', 'Lohit Devanagari', 'Shobhika', 'Sahadeva', "
+            "'Nirmala UI', 'Noto Serif Devanagari', sans-serif"
         )
     return "'Noto Sans', sans-serif"
 
