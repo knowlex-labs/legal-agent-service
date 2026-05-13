@@ -166,7 +166,6 @@ async def translate_pdf_via_html(
         pdf_bytes, meta = await translate_pdf_via_overlay(
             source_bytes, filename, request, job_id, debug_dir
         )
-        _dump(debug_dir, job_id, "5_rendered", pdf_bytes)
         meta.setdefault("translation_pipeline", "gemini_bbox_overlay_sarvam_pymupdf")
         return pdf_bytes, meta
 
@@ -303,7 +302,6 @@ async def translate_pdf_via_html(
 
     # 5. Render to PDF
     pdf_bytes = await asyncio.to_thread(render_html_to_pdf_bytes, final_html)
-    _dump(debug_dir, job_id, "5_rendered", pdf_bytes)
 
     return pdf_bytes, {
         "pages": len(ir_doc.pages),

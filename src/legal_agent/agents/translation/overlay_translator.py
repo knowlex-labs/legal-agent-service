@@ -51,6 +51,9 @@ _BBOX_PROMPT = (
     "with a single bbox spanning all those lines. Do not emit one item per line. "
     "A new item starts at a clear paragraph break (blank line, indent change, numbered marker like \"2.\", \"(a)\", "
     "different alignment, or visibly different font weight/size).\n"
+    "- NEVER merge lines in different scripts (Latin/Devanagari/Arabic) into one item. "
+    "Bilingual letterheads with stacked English + Hindi titles must produce SEPARATE items per script, "
+    "each with its own bbox.\n"
     "- Set bold=true for visually heavier strokes (titles, section headings, emphasised terms).\n"
     "- Set size=\"large\" for titles/headings noticeably bigger than body text; \"small\" for footnotes; "
     "otherwise \"normal\".\n"
@@ -58,7 +61,15 @@ _BBOX_PROMPT = (
     "\"justify\" for any body paragraph spanning more than one line whose lines reach both "
     "left and right margins (formal letters, legal clauses — default for multi-line body text), "
     "\"left\" only for single-line items or short flush-left headers.\n"
-    "- Skip seals, stamps, logos, signatures, photographs, graphical icons — do NOT describe them.\n"
+    "- INCLUDE every line of printed/typed text exhaustively: page headers and footers, "
+    "page numbers, file numbers, DIN/CBIC IDs, dates, address blocks, subject lines, "
+    "numbered clauses, the TYPED NAME / DESIGNATION / OFFICE LINE that appears beneath a "
+    "handwritten signature (e.g. \"Shankar Padhan / Addl. Asst. Director / DGGI Bhubaneswar\"), "
+    "the closing salutation (\"Your faithfully,\", \"Sincerely,\"), and any \"Copy to:\" / "
+    "endorsement lines at the bottom of the page. NONE of these may be skipped.\n"
+    "- ONLY skip purely decorative non-text regions: round official seals, inked rubber stamps, "
+    "logos, photographs, decorative icons, AND the handwritten signature scribble itself "
+    "(the inked stroke — but NOT the typed name printed below it).\n"
     "- Preserve numbers, dates, IDs, citations verbatim.\n"
     "- Preserve original script — do not translate.\n"
     "- No commentary, no markdown fences. Output a valid JSON array only."
@@ -68,6 +79,33 @@ _PLACEHOLDER_RE = re.compile(
     r"^\s*\[\s*(stamp|seal|image|logo|handwritten|figure|photo|picture|graphic|sign|emblem|signature)\b",
     re.IGNORECASE,
 )
+
+# Unicode script ranges per Sarvam language-code prefix. Used to short-circuit
+# translation when a region is already in the target script (e.g. Hindi source
+# with Hindi target → Sarvam returns 400 "Source and target must differ").
+_SCRIPT_RANGES: dict[str, tuple[int, int]] = {
+    "hi": (0x0900, 0x097F), "mr": (0x0900, 0x097F),
+    "ne": (0x0900, 0x097F), "sa": (0x0900, 0x097F),
+    "bn": (0x0980, 0x09FF), "as": (0x0980, 0x09FF),
+    "te": (0x0C00, 0x0C7F), "ta": (0x0B80, 0x0BFF),
+    "kn": (0x0C80, 0x0CFF), "ml": (0x0D00, 0x0D7F),
+    "gu": (0x0A80, 0x0AFF), "pa": (0x0A00, 0x0A7F),
+    "or": (0x0B00, 0x0B7F), "ur": (0x0600, 0x06FF),
+    "en": (0x0041, 0x007A),
+}
+
+
+def _already_in_target_script(text: str, target_code: str) -> bool:
+    prefix = target_code.split("-", 1)[0]
+    rng = _SCRIPT_RANGES.get(prefix)
+    if not rng:
+        return False
+    lo, hi = rng
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 3:
+        return False
+    in_range = sum(1 for c in letters if lo <= ord(c) <= hi)
+    return in_range / len(letters) > 0.6
 
 
 def is_image_only_pdf(data: bytes, min_chars_per_page: int = 50) -> bool:
@@ -249,13 +287,22 @@ async def translate_pdf_via_overlay(
     async def _translate(text: str) -> str:
         if not text.strip():
             return text
+        if _already_in_target_script(text, target_code):
+            return text
         prepared = strip_pua(text.strip())
         if is_devanagari:
             prepared = localize_units(prepared)
         async with state_lock:
             frozen, sentinels = freeze(prepared, doc_state, glossary)
-        async with sem:
-            raw = await call_sarvam_translate(frozen, source_code, target_code, api_key, tm)
+        try:
+            async with sem:
+                raw = await call_sarvam_translate(frozen, source_code, target_code, api_key, tm)
+        except Exception as exc:
+            msg = str(exc)
+            if "must be different" in msg or "400" in msg:
+                logger.info("[overlay] sarvam declined (likely same-script as target) — keeping original: %r", text[:60])
+                return text
+            raise
         cleaned = clean_sarvam_translate_output(raw) or frozen
         return restore(cleaned, sentinels)
 
@@ -279,6 +326,27 @@ async def translate_pdf_via_overlay(
             page_items[idx] = items
             logger.info("[%s] overlay OCR page %d/%d: %d regions", job_id, idx + 1, page_count, len(items))
 
+    for pi, items in enumerate(page_items):
+        if not items:
+            continue
+        max_coord = max(max(it["box"]) for it in items)
+        if max_coord <= 1000.0:
+            continue
+        raster_w = page_sizes[pi][0] * _RASTER_SCALE
+        raster_h = page_sizes[pi][1] * _RASTER_SCALE
+        logger.info(
+            "[%s] page %d: bboxes look pixel-scaled (max=%.0f) — renormalising via raster %0.fx%0.f",
+            job_id, pi + 1, max_coord, raster_w, raster_h,
+        )
+        for it in items:
+            ymin, xmin, ymax, xmax = it["box"]
+            it["box"] = [
+                ymin / raster_h * 1000.0,
+                xmin / raster_w * 1000.0,
+                ymax / raster_h * 1000.0,
+                xmax / raster_w * 1000.0,
+            ]
+
     flat_tasks: list[asyncio.Task] = []
     flat_index: list[tuple[int, int]] = []
     for pi, items in enumerate(page_items):
@@ -290,16 +358,20 @@ async def translate_pdf_via_overlay(
         page_items[pi][bi]["translated"] = t
 
     family = "Noto Sans Devanagari, Noto Sans, sans-serif" if is_devanagari else "Noto Sans, sans-serif"
+    _PAD_X = 6.0
+    _PAD_Y = 4.0
     for i in range(page_count):
         page = src[i]
         w, h = page_sizes[i]
         for item in page_items[i]:
             ymin, xmin, ymax, xmax = item["box"]
-            rect = fitz.Rect(
-                xmin / 1000.0 * w, ymin / 1000.0 * h,
-                xmax / 1000.0 * w, ymax / 1000.0 * h,
+            x0, y0 = xmin / 1000.0 * w, ymin / 1000.0 * h
+            x1, y1 = xmax / 1000.0 * w, ymax / 1000.0 * h
+            redact = fitz.Rect(
+                max(0.0, x0 - _PAD_X), max(0.0, y0 - _PAD_Y),
+                min(w, x1 + _PAD_X), min(h, y1 + _PAD_Y),
             )
-            page.add_redact_annot(rect, fill=(1, 1, 1))
+            page.add_redact_annot(redact, fill=(1, 1, 1))
         try:
             page.apply_redactions(images=getattr(fitz, "PDF_REDACT_IMAGE_NONE", 0))
         except TypeError:
@@ -314,7 +386,7 @@ async def translate_pdf_via_overlay(
             text = item.get("translated") or item["text"]
             weight = "700" if item.get("bold") else "400"
             style = "italic" if item.get("italic") else "normal"
-            size_em = {"large": "1.25em", "small": "0.85em"}.get(item.get("size", "normal"), "1em")
+            size_em = {"large": "1.45em", "small": "1em"}.get(item.get("size", "normal"), "1.15em")
             css = (
                 f"* {{font-family:{family};"
                 f"text-align:{item.get('align', 'left')};"

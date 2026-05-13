@@ -15,6 +15,22 @@ from legal_agent.services.job_manager import ErrorStage, JobManager, StagedError
 
 logger = logging.getLogger(__name__)
 
+_IMAGE_EXTS: dict[str, str] = {
+    "png": "png", "jpg": "jpeg", "jpeg": "jpeg",
+    "tif": "tiff", "tiff": "tiff",
+    "webp": "webp", "bmp": "bmp", "gif": "gif",
+}
+
+
+def _image_bytes_to_pdf(image_bytes: bytes, ext: str) -> bytes:
+    import fitz
+    ft = _IMAGE_EXTS[ext.lower()]
+    img_doc = fitz.open(stream=image_bytes, filetype=ft)
+    try:
+        return img_doc.convert_to_pdf()
+    finally:
+        img_doc.close()
+
 
 def _dump_debug(debug_dir: str | None, job_id: str, name: str, content: str | bytes) -> None:
     if not debug_dir:
@@ -96,10 +112,19 @@ class TranslationService:
         except Exception as exc:
             raise StagedError(ErrorStage.EXTRACTION, exc) from exc
 
-        if not filename.lower().endswith(".pdf"):
+        fl = filename.lower()
+        ext = fl.rsplit(".", 1)[-1] if "." in fl else ""
+        if ext in _IMAGE_EXTS:
+            try:
+                source_bytes = await asyncio.to_thread(_image_bytes_to_pdf, source_bytes, ext)
+            except Exception as exc:
+                raise StagedError(ErrorStage.EXTRACTION, exc) from exc
+            filename = filename.rsplit(".", 1)[0] + ".pdf"
+            logger.info("[%s] converted %s image → PDF (%d bytes)", job_id, ext, len(source_bytes))
+        elif ext != "pdf":
             raise StagedError(
                 ErrorStage.EXTRACTION,
-                RuntimeError(f"Only PDF files are supported, got: {filename}"),
+                RuntimeError(f"Unsupported file type: {filename} (supported: pdf, {', '.join(_IMAGE_EXTS)})"),
             )
 
         await self._execute_html_translation(
