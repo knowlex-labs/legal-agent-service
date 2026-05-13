@@ -43,6 +43,28 @@ def _collapse_repeated_chars(text: str) -> str:
     return _REPEAT_RUN_RE.sub(lambda m: m.group(1) * 5, text)
 
 
+def _is_image_only_pdf(data: bytes, min_chars_per_page: int = 50) -> bool:
+    """True iff every page has < min_chars_per_page native text characters."""
+    import fitz
+
+    doc = fitz.open(stream=data, filetype="pdf")
+    try:
+        for page in doc:
+            d = page.get_text("dict", sort=True)
+            n = sum(
+                len(s.get("text", ""))
+                for b in d.get("blocks", [])
+                if b.get("type") == 0
+                for ln in b.get("lines", [])
+                for s in ln.get("spans", [])
+            )
+            if n >= min_chars_per_page:
+                return False
+        return True
+    finally:
+        doc.close()
+
+
 def _needs_translation(text: str) -> bool:
     # Evaluate after collapsing repeated noise (dotted underlines, signature
     # bars) so "Date: ..............." still translates "Date:" and a pure-dots
@@ -148,25 +170,23 @@ async def translate_pdf_via_html(
 
     Returns (pdf_bytes, metadata_dict).
 
-    Image-only PDFs (every page has < 50 native text chars) are routed through
-    a single vision-LLM call per page that emits target-language HTML preserving
-    the 2D layout. PDFs with native text continue through the PyMuPDF dict →
-    flow-HTML path.
+    Image-only PDFs (every page has < 50 native text chars) are translated via
+    the vision-LLM reconstruction path (Claude vision → translated HTML → PDF).
+    PDFs with native text use PyMuPDF IR → flow-HTML path.
     """
     from legal_agent.agents.translation.layout_extract import extract_document
     from legal_agent.agents.translation.layout_render import render_to_html
-    from legal_agent.agents.translation.overlay_translator import (
-        is_image_only_pdf,
-    )
     from legal_agent.agents.translation.sarvam_translate import SARVAM_LANG_CODES
 
-    if is_image_only_pdf(source_bytes):
+    if _is_image_only_pdf(source_bytes):
         from legal_agent.agents.translation.vision_translator import (
             translate_scanned_pdf_via_vision,
         )
-        return await translate_scanned_pdf_via_vision(
+        pdf_v, meta_v = await translate_scanned_pdf_via_vision(
             source_bytes, request, job_id, debug_dir
         )
+        meta_v["scanned_translation_mode"] = "vision_reconstruct"
+        return pdf_v, meta_v
 
     lang = request.target_language.value
     target_code = SARVAM_LANG_CODES.get(lang, "hi-IN")

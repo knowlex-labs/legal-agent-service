@@ -163,7 +163,7 @@ class TranslationService:
         out_name = f"{original_name}_{lang_suffix}.pdf" if original_name else f"{lang_suffix}_translation.pdf"
 
         meta = {
-            "extraction_route": "pymupdf_html",
+            "extraction_route": html_meta.get("translation_pipeline", "pymupdf_html"),
             "detected_document_type": request.document_type.value if request.document_type else None,
             **html_meta,
         }

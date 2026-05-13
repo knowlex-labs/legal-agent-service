@@ -43,6 +43,8 @@ PROMPT_VERSION_STRUCTURED = "vision-translate-v4-structured-layout"
 _MAX_ANTHROPIC_IMAGE_BASE64_BYTES = 4_900_000
 _RASTER_DPI_STEPS = (200, 180, 160, 140, 120, 100)
 _JPEG_QUALITY_STEPS = (88, 80, 72, 64, 56)
+_VISION_RETRY_MAX_ATTEMPTS = 4
+_VISION_RETRY_BASE_SECONDS = 1.5
 
 _SECTION_RE = re.compile(r"<section\b[^>]*>.*?</section>", re.IGNORECASE | re.DOTALL)
 
@@ -253,6 +255,7 @@ async def translate_scanned_pdf_via_vision(
         "ocr_backend": "claude_vision",
         "vision_cache_hits": cache_hits,
         "translation_pipeline": "vision_llm_per_page_claude",
+        "scanned_translation_mode": "vision_reconstruct",
         "vision_structured_layout": structured,
         "vision_translation_prompt_version": prompt_ver,
         "vision_fidelity_aggregate": fidelity_agg,
@@ -491,7 +494,7 @@ async def _call_vision_model(
     model: str,
     structured_layout: bool,
 ) -> str:
-    """Invoke the vision LLM via LangChain. Returns raw text response."""
+    """Invoke the vision LLM via LangChain with transient-error retries."""
     from langchain.chat_models import init_chat_model
     from langchain_core.messages import HumanMessage
 
@@ -513,15 +516,32 @@ async def _call_vision_model(
         max_tokens=8192,
         temperature=0.0,
     )
-    response = await llm.ainvoke([
-        HumanMessage(content=[
-            {"type": "text", "text": prompt},
-            {
-                "type": "image_url",
-                "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
-            },
-        ])
-    ])
+    for attempt in range(1, _VISION_RETRY_MAX_ATTEMPTS + 1):
+        try:
+            response = await llm.ainvoke([
+                HumanMessage(content=[
+                    {"type": "text", "text": prompt},
+                    {
+                        "type": "image_url",
+                        "image_url": {"url": f"data:image/jpeg;base64,{b64}"},
+                    },
+                ])
+            ])
+            break
+        except Exception as exc:
+            retryable = _is_retryable_vision_error(exc)
+            if (not retryable) or attempt >= _VISION_RETRY_MAX_ATTEMPTS:
+                raise
+            delay = _VISION_RETRY_BASE_SECONDS * (2 ** (attempt - 1))
+            logger.warning(
+                "[vision] transient provider error on attempt %d/%d (%s); retrying in %.1fs",
+                attempt,
+                _VISION_RETRY_MAX_ATTEMPTS,
+                type(exc).__name__,
+                delay,
+            )
+            await asyncio.sleep(delay)
+
     content = response.content
     if isinstance(content, list):
         return "".join(
@@ -530,6 +550,26 @@ async def _call_vision_model(
             if isinstance(part, dict) and part.get("type") == "text"
         )
     return str(content)
+
+
+def _is_retryable_vision_error(exc: Exception) -> bool:
+    """Best-effort transient classification across Anthropic/LangChain wrappers."""
+    name = type(exc).__name__.lower()
+    msg = str(exc).lower()
+    return any(token in name or token in msg for token in (
+        "internalservererror",
+        "api_error",
+        "internal server error",
+        "rate",
+        "timeout",
+        "connection",
+        "overloaded",
+        "temporar",
+        "503",
+        "502",
+        "500",
+        "529",
+    ))
 
 
 def _normalize_section_html(raw: str, page_no: int) -> str:
