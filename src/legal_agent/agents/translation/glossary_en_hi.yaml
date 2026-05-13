@@ -1,0 +1,191 @@
+# Protected technical terms for English → Hindi translation.
+#
+# Each entry:
+#   "<English term>":
+#     hi:             Default Hindi form. For acronyms/brands we usually keep Latin.
+#     first_mention:  (Optional) Bilingual form used on first occurrence in the document.
+#                     Subsequent occurrences fall back to `hi`.
+#
+# Longest-match-first applies at lookup time so "Spring Boot" is detected before "Spring",
+# "CI/CD" before "API", etc. Term keys are matched case-sensitively with word boundaries.
+
+# ─────────────── Programming languages ───────────────
+"Java":          { hi: "Java",        first_mention: "जावा (Java)" }
+"Python":        { hi: "Python",      first_mention: "पायथन (Python)" }
+"TypeScript":    { hi: "TypeScript",  first_mention: "टाइपस्क्रिप्ट (TypeScript)" }
+"JavaScript":    { hi: "JavaScript",  first_mention: "जावास्क्रिप्ट (JavaScript)" }
+"C++":           { hi: "C++" }
+"C#":            { hi: "C#" }
+"Go":            { hi: "Go" }
+"Rust":          { hi: "Rust" }
+"Kotlin":        { hi: "Kotlin" }
+"Swift":         { hi: "Swift" }
+"Bash":          { hi: "Bash" }
+"SQL":           { hi: "SQL" }
+"XML":           { hi: "XML" }
+"JSON":          { hi: "JSON" }
+"YAML":          { hi: "YAML" }
+"HTML":          { hi: "HTML" }
+"CSS":           { hi: "CSS" }
+
+# ─────────────── Frameworks ───────────────
+"Spring Boot":   { hi: "Spring Boot", first_mention: "स्प्रिंग बूट (Spring Boot)" }
+"Spring":        { hi: "Spring" }
+"FastAPI":       { hi: "FastAPI" }
+"Node.js":       { hi: "Node.js" }
+"Express":       { hi: "Express" }
+"Django":        { hi: "Django" }
+"Flask":         { hi: "Flask" }
+"React":         { hi: "React" }
+"Next.js":       { hi: "Next.js" }
+"Vue":           { hi: "Vue" }
+"Angular":       { hi: "Angular" }
+"Unity":         { hi: "Unity",       first_mention: "यूनिटी (Unity)" }
+"Unreal":        { hi: "Unreal" }
+"LangGraph":     { hi: "LangGraph" }
+"LangChain":     { hi: "LangChain" }
+"LlamaIndex":    { hi: "LlamaIndex" }
+
+# ─────────────── Cloud / Infra / DevOps ───────────────
+"AWS":           { hi: "AWS" }
+"GCP":           { hi: "GCP" }
+"Azure":         { hi: "Azure" }
+"Docker":        { hi: "Docker" }
+"Kubernetes":    { hi: "Kubernetes", first_mention: "कुबेरनेट्स (Kubernetes)" }
+"Knative":       { hi: "Knative",    first_mention: "केनेव (Knative)" }
+"Kafka":         { hi: "Kafka" }
+"RabbitMQ":      { hi: "RabbitMQ" }
+"Redis":         { hi: "Redis" }
+"Jenkins":       { hi: "Jenkins" }
+"GitHub":        { hi: "GitHub" }
+"GitLab":        { hi: "GitLab" }
+"Git":           { hi: "Git" }
+"CI/CD":         { hi: "CI/CD" }
+"Terraform":     { hi: "Terraform" }
+"Helm":          { hi: "Helm" }
+"Nginx":         { hi: "Nginx" }
+"Linux":         { hi: "Linux" }
+
+# ─────────────── Databases ───────────────
+"PostgreSQL":    { hi: "PostgreSQL" }
+"MongoDB":       { hi: "MongoDB" }
+"MySQL":         { hi: "MySQL" }
+"Elasticsearch": { hi: "Elasticsearch" }
+"Qdrant":        { hi: "Qdrant" }
+"Neo4j":         { hi: "Neo4j" }
+"DynamoDB":      { hi: "DynamoDB" }
+"Cassandra":     { hi: "Cassandra" }
+"SQLite":        { hi: "SQLite" }
+"pgvector":      { hi: "pgvector" }
+
+# ─────────────── AI / ML / agents ───────────────
+"LLM":           { hi: "LLM",  first_mention: "एलएलएम (LLM)" }
+"RAG":           { hi: "RAG",  first_mention: "आरएजी (RAG)" }
+"MCP":           { hi: "MCP" }
+"ADK":           { hi: "ADK" }
+"PromptQL":      { hi: "PromptQL" }
+"OpenAI":        { hi: "OpenAI" }
+"Anthropic":     { hi: "Anthropic" }
+"Claude":        { hi: "Claude" }
+"Gemini":        { hi: "Gemini" }
+"GPT":           { hi: "GPT" }
+"Mem0":          { hi: "Mem0" }
+"HuggingFace":   { hi: "HuggingFace" }
+"Sarvam":        { hi: "Sarvam" }
+
+# ─────────────── Acronyms / SE concepts ───────────────
+"API":           { hi: "API",  first_mention: "एपीआई (API)" }
+"REST":          { hi: "REST" }
+"gRPC":          { hi: "gRPC" }
+"GraphQL":       { hi: "GraphQL" }
+"WebSocket":     { hi: "WebSocket" }
+"WebSockets":    { hi: "WebSockets" }
+"HTTP":          { hi: "HTTP" }
+"HTTPS":         { hi: "HTTPS" }
+"TCP":           { hi: "TCP" }
+"UDP":           { hi: "UDP" }
+"JWT":           { hi: "JWT" }
+"OAuth":         { hi: "OAuth" }
+"SSO":           { hi: "SSO" }
+"SDK":           { hi: "SDK" }
+"OCR":           { hi: "OCR" }
+"NLP":           { hi: "NLP" }
+"ML":            { hi: "ML" }
+"AI":            { hi: "AI",   first_mention: "एआई (AI)" }
+"POC":           { hi: "POC" }
+"MVP":           { hi: "MVP" }
+"DAU":           { hi: "DAU" }
+"MAU":           { hi: "MAU" }
+"CCU":           { hi: "CCU" }
+"CGPA":          { hi: "CGPA" }
+"AIR":           { hi: "AIR" }
+"JEE":           { hi: "JEE" }
+"IIT":           { hi: "IIT" }
+"5G":            { hi: "5G" }
+"4G":            { hi: "4G" }
+"RPA":           { hi: "RPA" }
+"HR":            { hi: "HR" }
+
+# ─────────────── Companies / products / brand-names ───────────────
+# These look like English words and WILL be mistranslated without protection.
+"Football World":   { hi: "Football World", first_mention: "फुटबॉल वर्ल्ड (Football World)" }
+"Play Store":       { hi: "Play Store" }
+"App Store":        { hi: "App Store" }
+"Snapser":          { hi: "Snapser" }
+"SmartFoxServer":   { hi: "SmartFoxServer" }
+"Axiom":            { hi: "Axiom" }
+"Clang":            { hi: "Clang" }
+"Raga AI":          { hi: "Raga AI",     first_mention: "रागा एआई (Raga AI)" }
+"GigaFun Studios":  { hi: "GigaFun Studios", first_mention: "गीगाफन स्टूडियोज़ (GigaFun Studios)" }
+"GigaFun":          { hi: "GigaFun" }
+"Audify":           { hi: "Audify",      first_mention: "ऑडिफाई (Audify)" }
+"Qualcomm":         { hi: "Qualcomm",    first_mention: "क्वालकॉम (Qualcomm)" }
+"Knowlex":          { hi: "Knowlex",     first_mention: "नोलेक्स (Knowlex)" }
+"Parkho AI":        { hi: "Parkho AI",   first_mention: "पारखो एआई (Parkho AI)" }
+"Parkho":           { hi: "Parkho" }
+"Gohibe":           { hi: "Gohibe",      first_mention: "गोहिबे (Gohibe)" }
+"UKG":              { hi: "UKG" }
+"ClinicalOps":      { hi: "ClinicalOps" }
+"LinkedIn":         { hi: "LinkedIn" }
+"LeetCode":         { hi: "LeetCode" }
+"Google ADK":       { hi: "Google ADK",  first_mention: "गूगल एडीके (Google ADK)" }
+"Google":           { hi: "Google" }
+
+# ─────────────── Legal / court (for legal-doc pipeline) ───────────────
+# Translations match conventional Hindi legal vocabulary.
+"Supreme Court":        { hi: "सर्वोच्च न्यायालय" }
+"High Court":           { hi: "उच्च न्यायालय" }
+"affidavit":            { hi: "हलफनामा" }
+"petitioner":           { hi: "याचिकाकर्ता" }
+"respondent":           { hi: "प्रतिवादी" }
+"counsel":              { hi: "अधिवक्ता" }
+"hereby":               { hi: "एतद्द्वारा" }
+"plaintiff":            { hi: "वादी" }
+"defendant":            { hi: "प्रतिवादी" }
+
+# ─────────────── GST / tax / enforcement register (CBIC / DGGI / Rajbhasha) ───────────────
+# Longest-match-first means multi-word entries (e.g. "fake ITC") win over "fake".
+# Rationale per source (CBIC circulars, GoI Legal Glossary, Rajbhasha saral-shabdavali):
+#   - "fake" in fraud sense → फर्जी (forged/fraudulent), NOT नकली (counterfeit object).
+#   - "tangible material/evidence" → मूर्त साक्ष्य (evidentiary), NOT सामग्री (raw materials).
+#   - "financial trail" → लेन-देन की कड़ी (chain of transactions), NOT पगडंडी (footpath).
+#   - "Plot No."/"नं." → प्लॉट संख्या (full form for formal notices).
+"fake ITC":                { hi: "फर्जी आईटीसी", first_mention: "फर्जी आईटीसी (fake ITC)" }
+"ITC":                     { hi: "आईटीसी", first_mention: "आईटीसी (ITC)" }
+"fake invoice":            { hi: "फर्जी चालान" }
+"fake":                    { hi: "फर्जी" }
+"tangible material":       { hi: "मूर्त साक्ष्य" }
+"tangible evidence":       { hi: "मूर्त साक्ष्य" }
+"financial trail":         { hi: "लेन-देन की कड़ी" }
+"financial trail analysis": { hi: "लेन-देन की कड़ी का विश्लेषण" }
+"syndicate":               { hi: "रैकेट" }
+"provisional attachment":  { hi: "अस्थायी संलग्नक" }
+"bank account":            { hi: "बैंक खाता" }
+"show cause":              { hi: "कारण बताओ" }
+"Plot No.":                { hi: "प्लॉट संख्या" }
+"Plot No":                 { hi: "प्लॉट संख्या" }
+"Sector":                  { hi: "सेक्टर" }
+"Saheed Nagar":            { hi: "शहीद नगर" }
+"DGGI":                    { hi: "डीजीजीआई", first_mention: "डीजीजीआई (DGGI)" }
+"CGST":                    { hi: "सीजीएसटी", first_mention: "सीजीएसटी (CGST)" }
+"GST":                     { hi: "जीएसटी" }

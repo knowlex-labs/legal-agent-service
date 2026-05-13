@@ -244,7 +244,7 @@ class BaseDraftingAgent:
     ):
         """Build a LangGraph workflow for drafting."""
         max_tokens = _PROVIDER_MAX_TOKENS.get(self.provider, 8192)
-        llm = init_chat_model(self.model_name, model_provider=self.provider, max_tokens=max_tokens)
+        llm = init_chat_model(self.model_name, model_provider=self.provider, max_tokens=max_tokens, temperature=0.1)
         llm_with_tools = llm.bind_tools(tools) if tools else llm
         from legal_agent.config import get_settings
         _settings = get_settings()
@@ -254,6 +254,7 @@ class BaseDraftingAgent:
             _settings.metadata_extraction_model,
             model_provider=_meta_provider,
             max_tokens=_meta_max_tokens,
+            temperature=0.1,
         ).with_structured_output(GeneratedDocument)
         effective_system_prompt = system_prompt if system_prompt is not None else self.system_prompt
         # Two messages because the main drafter and the metadata extractor

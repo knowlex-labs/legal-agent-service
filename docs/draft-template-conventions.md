@@ -316,8 +316,8 @@ The `.legal-document` rules and the TipTap class list are kept in sync. Baseline
 
 ## 9. PDF export
 
-Service: `legal-agent-service` via WeasyPrint (`agents/translation/pdf_builder.py`).
-Stylesheets: `agents/translation/styles/{default,letter,contract,court_filing}.css`.
+Service: `legal-agent-service` renders translation PDFs with Playwright/Chromium (`html_reconstructor.render_html_to_pdf_bytes`).
+Shared stylesheets: `agents/translation/styles/{default,letter,contract,court_filing}.css` (via `html_builder.wrap_translated_html`).
 
 **No page numbers.** All four stylesheets had `@page { @bottom-center { content: counter(page); } }` — removed. The `@page` size/margin block is preserved.
 
@@ -412,7 +412,7 @@ When creating `MyNewAgent`:
 | `src/legal_agent/agents/drafts/court_filing_agent.py` | `INTERIM_APPLICATION_SYSTEM_PROMPT` — the gold-standard body prompt to mirror |
 | `src/legal_agent/agents/drafts/base.py` | `BaseDraftingAgent`, `DraftingDependencies`, `BASE_SYSTEM_PROMPT` (drafting principles + format rules) |
 | `src/legal_agent/services/draft_service.py` | Orchestration: routes document type → agent, builds `DraftingDependencies`, calls `agent.draft()` |
-| `src/legal_agent/agents/translation/styles/court_filing.css` | WeasyPrint stylesheet for court filings (PDF export) |
+| `src/legal_agent/agents/translation/styles/court_filing.css` | Shared stylesheet for court filings (draft/translation PDF styling) |
 | `knowlex-platform-ui/packages/web/src/index.css` | `.legal-document` rules — kept in sync with TipTap |
 | `knowlex-platform-ui/packages/web/src/components/editor/document-editor.tsx` | TipTap editor — source of truth for editor CSS baseline |
 
@@ -426,7 +426,7 @@ When creating `MyNewAgent`:
 - **Don't use `---` horizontal rules anywhere.** Section breaks come from the centered headings (PRAYER / VERIFICATION) alone.
 - **Don't rewrite signature blocks as plain paragraphs.** They must be borderless HTML tables — emit verbatim from the template. The 3-col / 2-col layout is intentional.
 - **Don't change `.legal-document` CSS without updating the TipTap class list (and vice versa).** They render the same content; drift will show up as visual inconsistency between `/drafting` and `/documents`.
-- **Don't add page numbers to PDFs.** WeasyPrint stylesheets are stripped of `@bottom-center { content: counter(page); }` deliberately.
+- **Don't add page numbers to PDFs.** PDF styles omit `@bottom-center { content: counter(page); }` deliberately.
 
 ---
 

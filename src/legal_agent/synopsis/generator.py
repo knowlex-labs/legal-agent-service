@@ -118,7 +118,7 @@ class SynopsisGenerator:
     ) -> str:
         """Fetch document context from RAG, call LLM to produce a synopsis."""
         settings = get_settings()
-        model_id = model if model else settings.chat_llm_default_model
+        model_id = model if model else settings.chat_llm_model
         langchain_provider = settings.get_langchain_provider_for_model(model_id)
 
         document_context = ""

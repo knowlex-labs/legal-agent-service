@@ -3,7 +3,7 @@ name = "legal-agent-service"
 version = "0.1.0"
 description = "Legal drafting agent service for Indian legal firms"
 readme = "README.md"
-requires-python = ">=3.11"
+requires-python = ">=3.11,<3.14"
 dependencies = [
     # anyio (via FastAPI) imports typing_extensions; pin explicitly so uv resolves it reliably.
     "typing-extensions>=4.10.0",
@@ -18,7 +18,7 @@ dependencies = [
     "langchain-google-genai>=2.1.0",
     "google-genai>=1.0.0",
     "sarvamai>=0.1.0",
-    "mistralai>=1.0.0",
+    "mistralai>=1.0.0",  # pinned to v2.4.5 via [tool.uv.sources] — PyPI quarantined 2.4.6 (supply chain attack)
     "firecrawl-py>=2.0.0",
     "langgraph>=0.2.0",
     "httpx>=0.26.0",
@@ -37,6 +37,7 @@ dependencies = [
     # rag-engine dependencies
     "qdrant-client>=1.7.0",
     "PyMuPDF>=1.24.5",
+    "pymupdf4llm>=0.0.17",
     "pdfplumber>=0.11.0",
     "pytesseract>=0.3.10",
     "pdf2image>=1.17.0",
@@ -44,14 +45,13 @@ dependencies = [
     "python-multipart>=0.0.18",
     "requests>=2.31.0",
     "cryptography>=42.0",
-    "fpdf2>=2.8.0",
-    "weasyprint>=62.0",
     "markdown>=3.5",
     "pdf2docx>=0.5.8",
     "mammoth>=1.8.0",
     # NumPy 2.x avoids broken/partial 1.26 installs that raise
     # ImportError: cannot import name 'matrix_power' from 'numpy.linalg' (unknown location)
     "numpy>=2.1.0,<3",
+    "docling>=2.0.0",
 ]
 
 [project.optional-dependencies]
@@ -96,3 +96,6 @@ explicit = true
 
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
+# mistralai 2.4.6 was a supply-chain-attack package; PyPI quarantined the whole project.
+# Pin directly to the last known-good tag on GitHub.
+mistralai = { git = "https://github.com/mistralai/client-python", tag = "v2.4.5" }

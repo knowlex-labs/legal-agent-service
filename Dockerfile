@@ -8,6 +8,9 @@ FROM python:3.12-slim AS runtime
 COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    libgl1 \
+    libglib2.0-0 \
+    libgomp1 \
     tesseract-ocr \
     tesseract-ocr-hin \
     tesseract-ocr-tam \
@@ -18,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-extra \
     fonts-noto-color-emoji \
     fonts-liberation \
+    fonts-lohit-deva \
     fonts-sahadeva \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \

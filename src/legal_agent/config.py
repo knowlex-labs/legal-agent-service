@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -15,6 +15,15 @@ _LANGCHAIN_PROVIDERS = {"openai": "openai", "anthropic": "anthropic", "gemini": 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator("translation_debug_dir", mode="before")
+    @classmethod
+    def _empty_translation_debug_dir(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return str(v).strip() if isinstance(v, str) else v
 
     draft_llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
     draft_llm_model: str = "gpt-5.4"
@@ -32,19 +41,32 @@ class Settings(BaseSettings):
     metadata_extraction_provider: str = "anthropic"
 
     # OCR backend selection. "gemini" = Gemini Vision (default, primary path).
-    # "mistral" = Mistral Pixtral (free tier; secondary path / Gemini fallback).
-    # "sarvam" = Sarvam Document Intelligence (markdown only; ≤10 pages per job).
-    ocr_provider: Literal["gemini", "mistral", "sarvam"] = "gemini"
+    # "mistral" / "mistral_ocr" = Mistral's dedicated document OCR endpoint for PDFs.
+    # "sarvam" = Sarvam Document Intelligence (markdown only; <=10 pages per job).
+    ocr_provider: Literal["gemini", "mistral", "mistral_ocr", "sarvam"] = "gemini"
+    mistral_ocr_model: str = "mistral-ocr-latest"
     # Concurrent Sarvam jobs when chunking long PDFs. Each chunk is ≤10 pages.
     sarvam_ocr_concurrency: int = 4
     # Concurrent Gemini Vision calls per PDF (one call per page). Gemini API
     # rate-limits: free tier ~15 rpm, paid tier much higher. Lower if rate-limited.
     gemini_ocr_concurrency: int = 4
-    # Concurrent Mistral Pixtral calls per PDF (one call per page).
+    # Concurrent Mistral Pixtral calls per PDF in the legacy image OCR path.
     mistral_ocr_concurrency: int = 4
     # Mistral vision-capable model. Pixtral 12B is general-purpose; Pixtral Large
     # is higher accuracy. Both work as drop-in.
     mistral_vision_model: str = "pixtral-12b-2409"
+    # Scanned-PDF translation goes through a single vision LLM call per page that
+    # emits target-language semantic HTML preserving 2D layout. Mistral OCR is
+    # still used to extract image bytes that get spliced into placeholders.
+    vision_translation_model: str = "claude-sonnet-4-5-20250929"
+    vision_translation_concurrency: int = 4
+    # When True (default), scanned-PDF vision translation requests structured JSON
+    # blocks with typography hints → higher fidelity spacing/fonts vs legacy HTML-only.
+    # Set VISION_TRANSLATION_STRUCTURED_LAYOUT=false to revert to legacy behaviour.
+    vision_translation_structured_layout: bool = True
+    # When True with TRANSLATION_DEBUG_DIR set, writes per-page vision_fidelity *.json under that dir.
+    # Default False — fidelity metrics still appear on the completed job metadata only.
+    vision_translation_debug_fidelity_files: bool = False
     # Language hint passed to Sarvam (BCP-47, must match Sarvam's accepted list).
     # Sarvam's API rejects "unknown" — pick the document's primary script.
     # Common: en-IN, hi-IN, mr-IN, ta-IN, te-IN, bn-IN, gu-IN.
@@ -52,10 +74,31 @@ class Settings(BaseSettings):
     # Sarvam chat/translation model. Options: sarvam-m (24B, default), sarvam-30b, sarvam-105b.
     # Used when a request selects provider "sarvam" for translation or draft chat.
     sarvam_chat_model: str = "sarvam-m"
+    # Sarvam REST translate model. "sarvam-translate:v1" is the formal/legal
+    # translation model with 2000-char input limit. We use formal mode + {{n}}
+    # placeholder masking to preserve English tech/brand terms.
+    sarvam_translate_model: str = "sarvam-translate:v1"
+    # Concurrent POSTs to Sarvam REST /translate. Non-translatable blocks (numbers,
+    # emails, punctuation) are skipped, so effective call count is much lower than
+    # total <p> count. 4 is safe with the retry/backoff logic.
+    sarvam_translate_max_concurrency: int = 4
+    # Retries after the first attempt on HTTP 429 / 502 / 503 (Retry-After or exponential backoff).
+    sarvam_translate_max_retries: int = 6
+    # Backoff base when Retry-After is absent: delay = min(60, base * mult^attempt).
+    sarvam_translate_retry_base_seconds: float = 1.0
+    # Translation backend. "sarvam" hits Sarvam REST formal translate (cheapest,
+    # Indic-specialist); any other value is treated as an LLM model name dispatched
+    # via langchain init_chat_model — e.g. "gemini-2.5-flash", "claude-haiku-4-5-20251001",
+    # "gpt-5-mini". On LLM models targeting Hindi, the CBIC/Rajbhasha legal prompt
+    # is applied automatically; Sarvam ignores it (no prompt input).
+    translation_llm_model: str = "sarvam"
+    # Char budget per batched translate call. Sarvam REST caps input at ~2000;
+    # leave headroom for the sentinel + glossary sentinel expansion.
+    translation_batch_max_chars: int = 1800
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
-    # Content-addressed OCR cache in S3. Same PDF bytes → same cache entry across
-    # retries, different translations, and RAG/draft flows. Disable for debugging.
+    # Content-addressed OCR + vision-translation cache in S3 (shared client/path prefix).
+    # When False: no cache reads/writes — vision translation always calls the LLM per page.
     ocr_cache_enabled: bool = True
     ocr_cache_prefix: str = "ocr-cache"
 
@@ -72,8 +115,13 @@ class Settings(BaseSettings):
     postgres_password: str = ""
     legal_db_url: str | None = None
 
-    # Chat LLM default (frontend sends model ID directly)
-    chat_llm_default_model: str = "gemini-2.5-flash"
+    # Chat LLM default (frontend sends model ID directly; env var: CHAT_LLM_MODEL)
+    chat_llm_model: str = "gemini-2.5-flash"
+
+    # Directory for debug dumps of intermediate translation files (HTML, PDF).
+    # Leave empty in production. Set e.g. /tmp/translation_debug to inspect:
+    #   1_pymupdf_page_N.html, 2_before_translate.html, 4_final.html, 5_rendered.pdf
+    translation_debug_dir: str | None = None
 
     # Web search — Firecrawl is primary (scrapes full article text), Serper is fallback.
     # Both restricted to the 3 trusted Indian legal sources below (no Indian Kanoon).
@@ -108,9 +156,6 @@ class Settings(BaseSettings):
 
     # Document encryption (AES-256-GCM envelope encryption, matches platform API)
     document_encryption_master_key: str = ""
-
-    # Suppresses the ledger-drop warning when N missing entries <= tolerance.
-    translation_ledger_drop_tolerance: int = 2
 
     # ── Embeddings ────────────────────────────────────────────────────────
     # Each RAG system has its own embedding config so we can mix providers
