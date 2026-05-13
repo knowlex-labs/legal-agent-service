@@ -19,7 +19,6 @@ logger = logging.getLogger(__name__)
 
 _MIN_TEXT_CHARS_PER_PAGE = 50
 _TOL_PT = 12.0       # ~2 Latin char widths; used for split-row and alignment inference
-_CROSS_BLOCK_Y_TOL = 10.0  # cross-block row grouping: looser than within-block (6pt)
 _BULLET_PREFIXES = ("•", "◦", "○", "–", "—", "-", "*", "·")
 
 # Heading font-size thresholds (relative to median body size)
@@ -106,6 +105,16 @@ def _y_center(it: _Item) -> float:
 def _y_overlaps(a: _Item, b: _Item, tol: float = 6.0) -> bool:
     """Use center-based comparison so large-font lines don't bleed into the next row."""
     return abs(_y_center(a) - _y_center(b)) < tol
+
+
+def _y_range_overlaps(a: _Item, b: _Item, gap: float = 3.0) -> bool:
+    """True if the vertical extents of a and b overlap or are within gap pt of each other.
+
+    Used for cross-block grouping: items whose bboxes touch/overlap share a visual row
+    even if their centers differ due to varying icon heights. A physical gap of 3pt still
+    keeps consecutive body-text lines (whose bboxes don't overlap) in separate groups.
+    """
+    return a.y0 <= b.y1 + gap and b.y0 <= a.y1 + gap
 
 
 def _is_split(left_items: list[_Item], right_items: list[_Item]) -> bool:
@@ -274,7 +283,7 @@ def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock]:
         placed = False
         for group in reversed(groups):
             last = group[-1]
-            if _y_overlaps(it, last, tol=_CROSS_BLOCK_Y_TOL):
+            if _y_range_overlaps(it, last):
                 group.append(it)
                 placed = True
                 break
