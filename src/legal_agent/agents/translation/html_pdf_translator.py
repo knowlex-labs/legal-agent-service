@@ -13,6 +13,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -82,13 +83,25 @@ def _chunk_for_sarvam(text: str, limit: int = _SARVAM_MAX_CHARS) -> list[str]:
     return chunks
 
 
-def _dump(debug_dir: str | None, job_id: str, name: str, content: str | bytes) -> None:
+def _dump(
+    debug_dir: str | None,
+    job_id: str,
+    name: str,
+    content: str | bytes,
+    *,
+    ext: str | None = None,
+) -> None:
     if not debug_dir:
         return
     try:
         d = Path(debug_dir) / job_id
         d.mkdir(parents=True, exist_ok=True)
-        suffix = ".pdf" if isinstance(content, bytes) else ".html"
+        if ext:
+            suffix = ext if ext.startswith(".") else f".{ext}"
+        elif isinstance(content, bytes):
+            suffix = ".pdf"
+        else:
+            suffix = ".html"
         path = d / f"{name}{suffix}"
         if isinstance(content, bytes):
             path.write_bytes(content)
@@ -135,27 +148,25 @@ async def translate_pdf_via_html(
 
     Returns (pdf_bytes, metadata_dict).
 
-    Image-only PDFs (every page has < 50 native text chars) are routed to the
-    bbox-overlay translator so seals/stamps/letterhead pixels survive. PDFs
-    with any native text continue through the PyMuPDF dict → flow-HTML path.
+    Image-only PDFs (every page has < 50 native text chars) are routed through
+    a single vision-LLM call per page that emits target-language HTML preserving
+    the 2D layout. PDFs with native text continue through the PyMuPDF dict →
+    flow-HTML path.
     """
     from legal_agent.agents.translation.layout_extract import extract_document
-    from legal_agent.agents.translation.layout_ir import RowBlock, Span, TextBlock
     from legal_agent.agents.translation.layout_render import render_to_html
     from legal_agent.agents.translation.overlay_translator import (
         is_image_only_pdf,
-        translate_pdf_via_overlay,
     )
     from legal_agent.agents.translation.sarvam_translate import SARVAM_LANG_CODES
-    from legal_agent.agents.translation.translator import Translator
 
     if is_image_only_pdf(source_bytes):
-        logger.info("[%s] image-only PDF → overlay translator", job_id)
-        pdf_bytes, meta = await translate_pdf_via_overlay(
-            source_bytes, filename, request, job_id, debug_dir
+        from legal_agent.agents.translation.vision_translator import (
+            translate_scanned_pdf_via_vision,
         )
-        meta.setdefault("translation_pipeline", "gemini_bbox_overlay_sarvam_pymupdf")
-        return pdf_bytes, meta
+        return await translate_scanned_pdf_via_vision(
+            source_bytes, request, job_id, debug_dir
+        )
 
     lang = request.target_language.value
     target_code = SARVAM_LANG_CODES.get(lang, "hi-IN")
@@ -164,16 +175,49 @@ async def translate_pdf_via_html(
         if request.source_language
         else "en-IN"
     )
-    translator = Translator(lang)
+    t_extract = time.perf_counter()
 
     # 1. Extract IR
     ir_doc = await asyncio.to_thread(extract_document, source_bytes, ocr_language=source_code)
     if not ir_doc.pages:
         raise RuntimeError("extract_document returned no pages — PDF may be image-only, encrypted, or invalid")
+    logger.info("[%s] native extract took %.2fs", job_id, time.perf_counter() - t_extract)
 
-    # 2. Collect every span-list that needs translation, batch through the translator,
-    #    and reassemble. We never redistribute translated text across multiple original
-    #    spans — splitting Devanagari conjuncts across element boundaries breaks shaping.
+    translated_ir, blocks_total, blocks_translated, backend = await _translate_ir_document(
+        ir_doc, lang, source_code, target_code, job_id
+    )
+
+    # 4. Render to HTML
+    t_render_html = time.perf_counter()
+    final_html = render_to_html(translated_ir, lang)
+    _dump(debug_dir, job_id, "4_final", final_html)
+    logger.info("[%s] HTML render took %.2fs", job_id, time.perf_counter() - t_render_html)
+
+    # 5. Render to PDF
+    t_pdf = time.perf_counter()
+    pdf_bytes = await asyncio.to_thread(render_html_to_pdf_bytes, final_html)
+    logger.info("[%s] PDF render took %.2fs", job_id, time.perf_counter() - t_pdf)
+
+    return pdf_bytes, {
+        "pages": len(ir_doc.pages),
+        "blocks_total": blocks_total,
+        "blocks_translated": blocks_translated,
+        "translation_backend": backend,
+        "translation_pipeline": "pymupdf_ir_sarvam_playwright",
+    }
+
+
+async def _translate_ir_document(
+    ir_doc,
+    lang: str,
+    source_code: str,
+    target_code: str,
+    job_id: str,
+):
+    from legal_agent.agents.translation.layout_ir import RowBlock, Span, TextBlock
+    from legal_agent.agents.translation.translator import Translator
+
+    translator = Translator(lang)
     block_refs: list[tuple[int, int, str]] = []
     original_span_lists: list[list[Span]] = []
 
@@ -207,9 +251,11 @@ async def translate_pdf_via_html(
 
     translated_chunks: list[str] = []
     if translatable_chunks:
+        t_translate = time.perf_counter()
         translated_chunks = await translator.translate_batch(
             translatable_chunks, source_code, target_code
         )
+        logger.info("[%s] translation calls took %.2fs", job_id, time.perf_counter() - t_translate)
 
     translated_joined: dict[int, str] = {}
     for chunk_text, owner in zip(translated_chunks, chunk_owner):
@@ -277,17 +323,6 @@ async def translate_pdf_via_html(
         "[%s] translated %d/%d blocks, %d pages via Sarvam",
         job_id, blocks_translated, blocks_total, len(ir_doc.pages),
     )
+    return translated_ir, blocks_total, blocks_translated, translator.backend
 
-    # 4. Render to HTML
-    final_html = render_to_html(translated_ir, lang)
-    _dump(debug_dir, job_id, "4_final", final_html)
 
-    # 5. Render to PDF
-    pdf_bytes = await asyncio.to_thread(render_html_to_pdf_bytes, final_html)
-
-    return pdf_bytes, {
-        "pages": len(ir_doc.pages),
-        "blocks_total": blocks_total,
-        "blocks_translated": blocks_translated,
-        "translation_backend": translator.backend,
-    }

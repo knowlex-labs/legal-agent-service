@@ -4,7 +4,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).parent.parent.parent
@@ -15,6 +15,15 @@ _LANGCHAIN_PROVIDERS = {"openai": "openai", "anthropic": "anthropic", "gemini": 
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=ENV_FILE, env_file_encoding="utf-8", extra="ignore")
+
+    @field_validator("translation_debug_dir", mode="before")
+    @classmethod
+    def _empty_translation_debug_dir(cls, v: object) -> str | None:
+        if v is None:
+            return None
+        if isinstance(v, str) and not v.strip():
+            return None
+        return str(v).strip() if isinstance(v, str) else v
 
     draft_llm_provider: Literal["openai", "anthropic", "gemini"] = "openai"
     draft_llm_model: str = "gpt-5.4"
@@ -32,19 +41,32 @@ class Settings(BaseSettings):
     metadata_extraction_provider: str = "anthropic"
 
     # OCR backend selection. "gemini" = Gemini Vision (default, primary path).
-    # "mistral" = Mistral Pixtral (free tier; secondary path / Gemini fallback).
-    # "sarvam" = Sarvam Document Intelligence (markdown only; ≤10 pages per job).
-    ocr_provider: Literal["gemini", "mistral", "sarvam"] = "gemini"
+    # "mistral" / "mistral_ocr" = Mistral's dedicated document OCR endpoint for PDFs.
+    # "sarvam" = Sarvam Document Intelligence (markdown only; <=10 pages per job).
+    ocr_provider: Literal["gemini", "mistral", "mistral_ocr", "sarvam"] = "gemini"
+    mistral_ocr_model: str = "mistral-ocr-latest"
     # Concurrent Sarvam jobs when chunking long PDFs. Each chunk is ≤10 pages.
     sarvam_ocr_concurrency: int = 4
     # Concurrent Gemini Vision calls per PDF (one call per page). Gemini API
     # rate-limits: free tier ~15 rpm, paid tier much higher. Lower if rate-limited.
     gemini_ocr_concurrency: int = 4
-    # Concurrent Mistral Pixtral calls per PDF (one call per page).
+    # Concurrent Mistral Pixtral calls per PDF in the legacy image OCR path.
     mistral_ocr_concurrency: int = 4
     # Mistral vision-capable model. Pixtral 12B is general-purpose; Pixtral Large
     # is higher accuracy. Both work as drop-in.
     mistral_vision_model: str = "pixtral-12b-2409"
+    # Scanned-PDF translation goes through a single vision LLM call per page that
+    # emits target-language semantic HTML preserving 2D layout. Mistral OCR is
+    # still used to extract image bytes that get spliced into placeholders.
+    vision_translation_model: str = "claude-sonnet-4-5-20250929"
+    vision_translation_concurrency: int = 4
+    # When True (default), scanned-PDF vision translation requests structured JSON
+    # blocks with typography hints → higher fidelity spacing/fonts vs legacy HTML-only.
+    # Set VISION_TRANSLATION_STRUCTURED_LAYOUT=false to revert to legacy behaviour.
+    vision_translation_structured_layout: bool = True
+    # When True with TRANSLATION_DEBUG_DIR set, writes per-page vision_fidelity *.json under that dir.
+    # Default False — fidelity metrics still appear on the completed job metadata only.
+    vision_translation_debug_fidelity_files: bool = False
     # Language hint passed to Sarvam (BCP-47, must match Sarvam's accepted list).
     # Sarvam's API rejects "unknown" — pick the document's primary script.
     # Common: en-IN, hi-IN, mr-IN, ta-IN, te-IN, bn-IN, gu-IN.
@@ -75,8 +97,8 @@ class Settings(BaseSettings):
     translation_batch_max_chars: int = 1800
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
-    # Content-addressed OCR cache in S3. Same PDF bytes → same cache entry across
-    # retries, different translations, and RAG/draft flows. Disable for debugging.
+    # Content-addressed OCR + vision-translation cache in S3 (shared client/path prefix).
+    # When False: no cache reads/writes — vision translation always calls the LLM per page.
     ocr_cache_enabled: bool = True
     ocr_cache_prefix: str = "ocr-cache"
 

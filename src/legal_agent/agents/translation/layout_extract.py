@@ -13,7 +13,7 @@ import logging
 import statistics
 from dataclasses import dataclass
 
-from legal_agent.agents.translation.layout_ir import Document, Page, RowBlock, Span, TextBlock
+from legal_agent.agents.translation.layout_ir import Document, ImageBlock, Page, RowBlock, Span, TextBlock
 
 logger = logging.getLogger(__name__)
 
@@ -280,7 +280,7 @@ def _median_font_size(data: bytes) -> float:
     return statistics.median(sizes) if sizes else 11.0
 
 
-def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock]:
+def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock | ImageBlock]:
     page_dict = page.get_text("dict", sort=True)
     page_width = page_dict["width"]
 
@@ -418,7 +418,7 @@ def _ocr_fallback_blocks(
     data: bytes,
     *,
     language: str | None = None,
-) -> list[TextBlock | RowBlock]:
+) -> list[TextBlock | RowBlock | ImageBlock]:
     """OCR the whole PDF (Sarvam Vision) and produce IR blocks.
 
     Asks the OCR backend for HTML output so structural tags (`<h1>`, `<p>`,
@@ -443,28 +443,30 @@ def _ocr_fallback_blocks(
     return _markdown_lines_to_blocks(text)
 
 
-def _html_to_blocks(html: str) -> list[TextBlock | RowBlock]:
-    """Parse Sarvam Vision HTML output into Translation IR blocks.
+def _html_to_blocks(html: str) -> list[TextBlock | RowBlock | ImageBlock]:
+    """Parse HTML (from Sarvam Vision or rendered markdown) into Translation IR blocks.
 
-    Drops `<img>` and `<figure>` outright — that's the whole reason we ask for
-    HTML in the first place. Tables render as one paragraph per row with `|`
-    separators (good enough for translation; revisit if a customer doc needs
-    real table layout).
+    Preserves inline bold/italic as Span attributes and distinguishes ordered
+    (<ol>) from unordered (<ul>) lists. Drops <img>/<figure> outright. Tables
+    render as one paragraph per row with `|` separators.
     """
     from html.parser import HTMLParser
 
-    blocks: list[TextBlock | RowBlock] = []
+    blocks: list[TextBlock | RowBlock | ImageBlock] = []
 
     class _Builder(HTMLParser):
         def __init__(self) -> None:
             super().__init__(convert_charrefs=True)
             self._stack: list[str] = []
-            self._buf: list[str] = []
-            self._skip_depth = 0  # inside <img>/<figure>/<svg>/<script>/<style>
+            # Each entry is (text, bold, italic)
+            self._spans_buf: list[tuple[str, bool, bool]] = []
+            self._bold = False
+            self._italic = False
+            self._list_type: str | None = None  # "ol" or "ul"
+            self._skip_depth = 0
             self._cell_buf: list[str] = []
             self._row_buf: list[str] = []
             self._in_cell = False
-            self._in_row = False
 
         def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
             if tag in ("img", "figure", "svg", "script", "style"):
@@ -472,22 +474,36 @@ def _html_to_blocks(html: str) -> list[TextBlock | RowBlock]:
                 return
             if self._skip_depth:
                 return
-            if tag == "tr":
-                self._in_row = True
+            if tag in ("ol", "ul"):
+                self._list_type = tag
+            elif tag == "tr":
                 self._row_buf = []
             elif tag in ("td", "th"):
                 self._in_cell = True
                 self._cell_buf = []
+            elif tag in ("strong", "b"):
+                self._bold = True
+            elif tag in ("em", "i"):
+                self._italic = True
             elif tag in ("h1", "h2", "h3", "h4", "h5", "h6", "p", "li"):
-                self._flush_text()
+                self._flush_spans()
                 self._stack.append(tag)
-                self._buf = []
+                self._spans_buf = []
 
         def handle_endtag(self, tag: str) -> None:
             if tag in ("img", "figure", "svg", "script", "style"):
                 self._skip_depth = max(0, self._skip_depth - 1)
                 return
             if self._skip_depth:
+                return
+            if tag in ("ol", "ul"):
+                self._list_type = None
+                return
+            if tag in ("strong", "b"):
+                self._bold = False
+                return
+            if tag in ("em", "i"):
+                self._italic = False
                 return
             if tag in ("td", "th"):
                 self._row_buf.append("".join(self._cell_buf).strip())
@@ -499,49 +515,78 @@ def _html_to_blocks(html: str) -> list[TextBlock | RowBlock]:
                 if row_text and not _OCR_META_RE.match(row_text) and not _PLACEHOLDER_RE.match(row_text):
                     blocks.append(TextBlock(type="paragraph", spans=[Span(text=row_text)]))
                 self._row_buf = []
-                self._in_row = False
                 return
             if self._stack and self._stack[-1] == tag:
                 self._stack.pop()
-                self._flush_text(closing=tag)
+                self._flush_spans(closing=tag)
 
         def handle_data(self, data: str) -> None:
             if self._skip_depth:
                 return
             if self._in_cell:
                 self._cell_buf.append(data)
-            else:
-                self._buf.append(data)
+            elif data:
+                self._spans_buf.append((data, self._bold, self._italic))
 
-        def _flush_text(self, closing: str | None = None) -> None:
-            text = "".join(self._buf).strip()
-            self._buf = []
-            if not text or _OCR_META_RE.match(text) or _PLACEHOLDER_RE.match(text):
+        def _flush_spans(self, closing: str | None = None) -> None:
+            raw = [(t, b, i) for t, b, i in self._spans_buf if t.strip()]
+            self._spans_buf = []
+            if not raw:
                 return
+            full_text = "".join(t for t, _, _ in raw).strip()
+            if not full_text or _OCR_META_RE.match(full_text) or _PLACEHOLDER_RE.match(full_text):
+                return
+            spans = [Span(text=t, bold=b, italic=i) for t, b, i in raw if t]
             if closing in ("h1", "h2", "h3", "h4", "h5", "h6"):
                 level = 1 if closing == "h1" else 2
-                blocks.append(TextBlock(type="heading", level=level, spans=[Span(text=text)]))
+                blocks.append(TextBlock(type="heading", level=level, spans=spans))
             elif closing == "li":
-                blocks.append(TextBlock(type="bullet", spans=[Span(text=text)]))
+                block_type = "numbered" if self._list_type == "ol" else "bullet"
+                blocks.append(TextBlock(type=block_type, spans=spans))
             elif closing == "p" or closing is None:
-                blocks.append(TextBlock(type="paragraph", spans=[Span(text=text)]))
+                blocks.append(TextBlock(type="paragraph", spans=spans))
 
     builder = _Builder()
     builder.feed(html)
     return blocks
 
 
-def _markdown_lines_to_blocks(text: str) -> list[TextBlock | RowBlock]:
+_MD_IMAGE_RE = __import__("re").compile(r"!\[(?P<alt>[^\]]*)\]\((?P<src>[^)]+)\)")
+_MD_ORDERED_RE = __import__("re").compile(r"^(?P<num>\d{1,3})[.)]\s+(?P<text>.+)$")
+_MD_INLINE_RE = __import__("re").compile(r"(\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|_[^_]+_)")
+
+
+def _markdown_inline_to_spans(text: str) -> list[Span]:
+    spans: list[Span] = []
+    pos = 0
+    for match in _MD_INLINE_RE.finditer(text):
+        if match.start() > pos:
+            spans.append(Span(text=text[pos:match.start()]))
+        token = match.group(0)
+        if token.startswith(("**", "__")):
+            inner = token[2:-2]
+            spans.append(Span(text=inner, bold=True))
+        else:
+            inner = token[1:-1]
+            spans.append(Span(text=inner, italic=True))
+        pos = match.end()
+    if pos < len(text):
+        spans.append(Span(text=text[pos:]))
+    return spans or [Span(text=text)]
+
+
+def _markdown_lines_to_blocks(text: str) -> list[TextBlock | RowBlock | ImageBlock]:
     """Fallback parser for markdown OCR output (pre-HTML cached docs)."""
     text = _IMG_EMBED_RE.sub("", text)
-    blocks: list[TextBlock | RowBlock] = []
+    blocks: list[TextBlock | RowBlock | ImageBlock] = []
     paragraph_buf: list[str] = []
 
     def flush_paragraph() -> None:
         if paragraph_buf:
+            paragraph = " ".join(paragraph_buf)
             blocks.append(TextBlock(
                 type="paragraph",
-                spans=[Span(text=" ".join(paragraph_buf))],
+                spans=_markdown_inline_to_spans(paragraph),
             ))
             paragraph_buf.clear()
 
@@ -549,6 +594,15 @@ def _markdown_lines_to_blocks(text: str) -> list[TextBlock | RowBlock]:
         line = line.strip()
         if not line:
             flush_paragraph()
+            continue
+        img_match = _MD_IMAGE_RE.fullmatch(line)
+        if img_match:
+            flush_paragraph()
+            src = img_match.group("src").strip()
+            blocks.append(ImageBlock(
+                image_id=src,
+                alt_text=img_match.group("alt").strip() or src,
+            ))
             continue
         if line.startswith("#"):
             flush_paragraph()
@@ -558,8 +612,16 @@ def _markdown_lines_to_blocks(text: str) -> list[TextBlock | RowBlock]:
                 blocks.append(TextBlock(
                     type="heading",
                     level=1 if hashes <= 1 else 2,
-                    spans=[Span(text=heading_text)],
+                    spans=_markdown_inline_to_spans(heading_text),
                 ))
+            continue
+        ordered_match = _MD_ORDERED_RE.match(line)
+        if ordered_match:
+            flush_paragraph()
+            item_text = ordered_match.group("text").strip()
+            if _OCR_META_RE.match(item_text) or _PLACEHOLDER_RE.match(item_text):
+                continue
+            blocks.append(TextBlock(type="numbered", spans=_markdown_inline_to_spans(item_text)))
             continue
         if _is_bullet(line):
             flush_paragraph()
@@ -569,7 +631,7 @@ def _markdown_lines_to_blocks(text: str) -> list[TextBlock | RowBlock]:
                     break
             if _OCR_META_RE.match(line) or _PLACEHOLDER_RE.match(line):
                 continue
-            blocks.append(TextBlock(type="bullet", spans=[Span(text=line)]))
+            blocks.append(TextBlock(type="bullet", spans=_markdown_inline_to_spans(line)))
             continue
         if _OCR_META_RE.match(line) or _PLACEHOLDER_RE.match(line):
             flush_paragraph()

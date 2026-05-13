@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import html as _html
 
-from legal_agent.agents.translation.layout_ir import Document, Page, RowBlock, Span, TextBlock
+from legal_agent.agents.translation.layout_ir import Document, ImageBlock, Page, RowBlock, Span, TextBlock
 
 _SOUTH_INDIC: dict[str, str] = {
     "tamil": "Noto Sans Tamil",
@@ -34,6 +34,83 @@ _LANG_CODES: dict[str, str] = {
     "nepali": "ne", "sanskrit": "sa",
 }
 
+# Typography for scanned-PDF structured vision output (.vt-* inside .vision-structured).
+_VISION_STRUCTURED_CSS = """
+/* Structured vision translation blocks */
+.vision-structured {
+  margin-bottom: 4pt;
+}
+.vision-structured .vt-block {
+  margin: 0;
+  text-indent: 0;
+}
+/* Size scale */
+.vision-structured .vt-sz-xs { font-size: 8.5pt; }
+.vision-structured .vt-sz-small { font-size: 9.75pt; }
+.vision-structured .vt-sz-normal { font-size: 11pt; }
+.vision-structured .vt-sz-large { font-size: 13pt; }
+.vision-structured .vt-sz-xlarge { font-size: 15.5pt; }
+/* Weight */
+.vision-structured .vt-w-normal { font-weight: 400; }
+.vision-structured .vt-w-semibold { font-weight: 600; }
+.vision-structured .vt-w-bold { font-weight: 700; }
+/* Line spacing */
+.vision-structured .vt-lh-tight { line-height: 1.22; }
+.vision-structured .vt-lh-normal { line-height: 1.38; }
+.vision-structured .vt-lh-relaxed { line-height: 1.52; }
+/* Alignment */
+.vision-structured .vt-align-left { text-align: left; }
+.vision-structured .vt-align-center { text-align: center; }
+.vision-structured .vt-align-right { text-align: right; }
+.vision-structured .vt-align-justify { text-align: justify; }
+/* Region rhythm */
+.vision-structured .vt-role-letterhead {
+  margin: 1pt 0 2pt 0;
+}
+.vision-structured .vt-role-meta_row {
+  margin: 3pt 0 5pt 0;
+}
+.vision-structured .vt-role-subject {
+  margin: 10pt 0 8pt 0;
+}
+.vision-structured .vt-role-body_clause {
+  margin: 6pt 0;
+}
+.vision-structured .vt-role-general {
+  margin: 4pt 0;
+}
+.vision-structured .vt-role-signature_block {
+  margin: 16pt 0 6pt 0;
+}
+.vision-structured .vt-role-footer {
+  margin: 14pt 0 4pt 0;
+  font-size: 10pt;
+  color: #222;
+}
+/* Rows inside structured sections */
+.vision-structured .vt-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 1em;
+}
+.vision-structured .vt-row .col-left {
+  flex: 1 1 auto;
+  text-align: left;
+  white-space: normal;
+}
+.vision-structured .vt-row .col-right {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  text-align: right;
+}
+.vision-structured .vt-row .vt-cell {
+  font-weight: inherit;
+  font-size: inherit;
+  line-height: inherit;
+}
+"""
+
 
 def _noto_family(lang: str) -> str:
     lang = lang.lower()
@@ -42,12 +119,11 @@ def _noto_family(lang: str) -> str:
     if lang in _RTL_LANGS:
         return "'Noto Nastaliq Urdu', 'Noto Kufi Arabic', sans-serif"
     if lang in _DEVANAGARI_LANGS:
-        # Noto Sans Devanagari first — matches the weight/quality the overlay translator
-        # already uses and what the user expects. Mangal/Lohit kept as fallbacks for
-        # containers where Noto isn't installed.
+        # Formal legal notices look closer to the source scan with a serif
+        # Devanagari face; keep common OS/container fallbacks.
         return (
-            "'Noto Sans Devanagari', 'Mangal', 'Lohit Devanagari', 'Shobhika', 'Sahadeva', "
-            "'Nirmala UI', 'Noto Serif Devanagari', sans-serif"
+            "'Noto Serif Devanagari', 'Kokila', 'Mangal', 'Shobhika', 'Sahadeva', "
+            "'Nirmala UI', 'Noto Sans Devanagari', serif"
         )
     return "'Noto Sans', sans-serif"
 
@@ -66,11 +142,18 @@ def _render_spans(spans: list[Span]) -> str:
     return "".join(parts)
 
 
-def _render_block(block: TextBlock | RowBlock) -> str:
+def _render_block(block: TextBlock | RowBlock | ImageBlock) -> str:
     if isinstance(block, RowBlock):
         left = _render_spans(block.left)
         right = _render_spans(block.right)
         return f'<div class="row"><div class="col-left">{left}</div><div class="col-right">{right}</div></div>\n'
+
+    if isinstance(block, ImageBlock):
+        alt = _html.escape(block.alt_text or block.image_id)
+        if block.image_base64:
+            src = _html.escape(block.image_base64, quote=True)
+            return f'<figure class="ocr-image"><img src="{src}" alt="{alt}"/><figcaption>{alt}</figcaption></figure>\n'
+        return f'<figure class="ocr-image placeholder"><div>{alt}</div></figure>\n'
 
     # TextBlock
     inner = _render_spans(block.spans)
@@ -79,6 +162,8 @@ def _render_block(block: TextBlock | RowBlock) -> str:
         cls = f' class="{block.align}"' if block.align != "left" else ""
         return f"<{tag}{cls}>{inner}</{tag}>\n"
     if block.type == "bullet":
+        return f"<li>{inner}</li>\n"
+    if block.type == "numbered":
         return f"<li>{inner}</li>\n"
 
     # paragraph
@@ -93,28 +178,41 @@ def _render_block(block: TextBlock | RowBlock) -> str:
 
 def _render_page(page: Page) -> str:
     parts: list[str] = []
-    in_list = False
+    list_type: str | None = None
 
     for block in page.blocks:
-        if isinstance(block, TextBlock) and block.type == "bullet":
-            if not in_list:
-                parts.append("<ul>\n")
-                in_list = True
+        current_list = None
+        if isinstance(block, TextBlock) and block.type in {"bullet", "numbered"}:
+            current_list = "ol" if block.type == "numbered" else "ul"
+            if list_type != current_list:
+                if list_type:
+                    parts.append(f"</{list_type}>\n")
+                parts.append(f"<{current_list}>\n")
+                list_type = current_list
         else:
-            if in_list:
-                parts.append("</ul>\n")
-                in_list = False
+            if list_type:
+                parts.append(f"</{list_type}>\n")
+                list_type = None
 
         parts.append(_render_block(block))
 
-    if in_list:
-        parts.append("</ul>\n")
+    if list_type:
+        parts.append(f"</{list_type}>\n")
 
     return "".join(parts)
 
 
 def render_to_html(doc: Document, lang: str) -> str:
     """Render a translated Document IR to a complete HTML document."""
+    return wrap_pages_html([_render_page(page) for page in doc.pages], lang)
+
+
+def wrap_pages_html(per_page_html: list[str], lang: str) -> str:
+    """Wrap raw per-page HTML fragments in the shared document chrome.
+
+    Used both by the IR-based native-text path (via render_to_html) and by the
+    vision-LLM scanned path which emits raw HTML directly.
+    """
     lang_lower = lang.lower()
     lang_code = _LANG_CODES.get(lang_lower, "hi")
     noto = _noto_family(lang_lower)
@@ -138,6 +236,11 @@ def render_to_html(doc: Document, lang: str) -> str:
   font-family: 'Sahadeva';
   src: local('Sahadeva'),
        url('file:///usr/share/fonts/truetype/sahadeva/sahadeva.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Noto Serif Devanagari';
+  src: local('Noto Serif Devanagari'), local('Devanagari Sangam MN'),
+       url('file:///usr/share/fonts/truetype/noto/NotoSerifDevanagari-Regular.ttf') format('truetype');
 }
 @font-face {
   font-family: 'Noto Sans Devanagari';
@@ -198,20 +301,21 @@ def render_to_html(doc: Document, lang: str) -> str:
 body {{
   font-family: {noto};
   font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
-  line-height: 1.45;
+  font-size: 11pt;
+  line-height: 1.38;
   color: #111;
   direction: {direction};
   text-rendering: optimizeLegibility;
 }}
-h1 {{ font-size: 22pt; font-weight: 700; margin: 0 0 4pt; }}
+{_VISION_STRUCTURED_CSS}
+h1 {{ font-size: 16pt; font-weight: 700; margin: 0 0 5pt; text-align: center; }}
 h2 {{
-  font-size: 12pt; font-weight: 700;
-  text-transform: uppercase; letter-spacing: 0.5pt;
-  border-bottom: 1px solid #999; margin: 10pt 0 4pt;
+  font-size: 12.5pt; font-weight: 700;
+  margin: 9pt 0 4pt;
 }}
 h1.center, h2.center {{ text-align: center; border-bottom: 0; }}
 h1.right,  h2.right  {{ text-align: right; }}
-p {{ margin: 2pt 0; }}
+p {{ margin: 4pt 0; }}
 p.center {{ text-align: center; }}
 p.right  {{ text-align: right; }}
 a {{ color: inherit; text-decoration: underline; }}
@@ -224,13 +328,34 @@ a {{ color: inherit; text-decoration: underline; }}
 }}
 .col-left  {{ flex: 1 1 auto; }}
 .col-right {{ flex: 0 0 auto; white-space: nowrap; text-align: right; }}
-ul {{ padding-left: 1.4em; margin: 2pt 0 6pt 0; }}
-li {{ margin-bottom: 3pt; line-height: 1.5; }}
+ul, ol {{ padding-left: 1.4em; margin: 4pt 0 7pt 0; }}
+li {{ margin-bottom: 3pt; line-height: 1.38; }}
+strong {{ font-weight: 700; }}
+.ocr-image {{
+  margin: 8pt 0;
+  page-break-inside: avoid;
+  text-align: center;
+}}
+.ocr-image img {{
+  max-width: 100%;
+  max-height: 180pt;
+  object-fit: contain;
+}}
+.ocr-image figcaption {{
+  color: #555;
+  font-size: 8pt;
+  margin-top: 2pt;
+}}
+.ocr-image.placeholder {{
+  border: 1px dashed #aaa;
+  color: #555;
+  padding: 8pt;
+}}
 """
 
     # No forced page-breaks — let Playwright paginate naturally by content height.
     # Forcing breaks at source-page boundaries leaves blank space when Hindi text is shorter.
-    body = "\n".join(_render_page(page) for page in doc.pages)
+    body = "\n".join(per_page_html)
     return (
         f'<!DOCTYPE html>\n<html lang="{lang_code}" dir="{direction}">\n'
         f'<head>\n<meta charset="utf-8"/>\n<style>{css}</style>\n</head>\n'

@@ -2,7 +2,8 @@
 
 Backends:
 - Gemini Vision — per-page image → LLM call. Good general accuracy, weaker on Indic scripts.
-- Mistral Pixtral — per-page image → LLM call. Acts as the Gemini fallback (free tier).
+- Mistral OCR — PDF/image → dedicated OCR endpoint with page markdown and image metadata.
+- Mistral Pixtral — single-image VLM fallback and translation image placeholder helper.
 - Sarvam Document Intelligence — async job API. 22 Indian languages + English. ≤10 pages/job
   (long PDFs are chunked and processed concurrently). Markdown only.
 
@@ -20,11 +21,13 @@ Entry points:
 
 import base64
 import hashlib
+import json
 import logging
 import re
 import tempfile
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
 
@@ -35,7 +38,7 @@ from legal_agent.config import get_settings
 logger = logging.getLogger(__name__)
 
 OutputFormat = Literal["markdown", "plain", "html"]
-Provider = Literal["gemini", "mistral", "sarvam"]
+Provider = Literal["gemini", "mistral", "mistral_ocr", "sarvam"]
 
 # Module-level S3 client for the OCR cache. Lazily constructed — avoids paying
 # the boto3 init cost when caching is disabled or OCR is never called.
@@ -57,7 +60,72 @@ def _get_cache_s3_client():
     return _s3_client_singleton
 
 
-_FORMAT_EXT = {"markdown": "md", "plain": "txt", "html": "html"}
+_FORMAT_EXT = {"markdown": "md", "plain": "txt", "html": "html", "json": "json"}
+
+
+@dataclass
+class MistralOcrImage:
+    id: str
+    top_left_x: float | None = None
+    top_left_y: float | None = None
+    bottom_right_x: float | None = None
+    bottom_right_y: float | None = None
+    image_base64: str | None = None
+    annotation: str | None = None
+
+
+@dataclass
+class MistralOcrPage:
+    index: int
+    markdown: str
+    images: list[MistralOcrImage]
+    dimensions: dict[str, float]
+
+
+@dataclass
+class MistralOcrDocument:
+    pages: list[MistralOcrPage]
+    model: str | None = None
+
+    def to_json(self) -> str:
+        return json.dumps(asdict(self), ensure_ascii=False)
+
+    @classmethod
+    def from_json(cls, raw: str) -> "MistralOcrDocument":
+        data = json.loads(raw)
+        pages = [
+            MistralOcrPage(
+                index=int(page.get("index", i)),
+                markdown=str(page.get("markdown") or ""),
+                images=[
+                    MistralOcrImage(
+                        id=str(img.get("id") or img.get("image_id") or ""),
+                        top_left_x=_float_or_none(img.get("top_left_x")),
+                        top_left_y=_float_or_none(img.get("top_left_y")),
+                        bottom_right_x=_float_or_none(img.get("bottom_right_x")),
+                        bottom_right_y=_float_or_none(img.get("bottom_right_y")),
+                        image_base64=img.get("image_base64"),
+                        annotation=img.get("annotation"),
+                    )
+                    for img in page.get("images", [])
+                    if isinstance(img, dict)
+                ],
+                dimensions={
+                    str(k): float(v)
+                    for k, v in (page.get("dimensions") or {}).items()
+                    if isinstance(v, (int, float))
+                },
+            )
+            for i, page in enumerate(data.get("pages", []))
+            if isinstance(page, dict)
+        ]
+        return cls(pages=pages, model=data.get("model"))
+
+
+def _float_or_none(value: object) -> float | None:
+    if isinstance(value, (int, float)):
+        return float(value)
+    return None
 
 
 def _cache_key(
@@ -205,8 +273,8 @@ def ocr_pdf(
 
     if backend == "sarvam":
         text = ocr_pdf_with_sarvam(pdf_data, output_format, language=language)
-    elif backend == "mistral":
-        text = ocr_pdf_with_mistral(pdf_data, output_format)
+    elif backend in ("mistral", "mistral_ocr"):
+        text = ocr_pdf_with_mistral_ocr(pdf_data, output_format)
     else:
         text = ocr_pdf_with_gemini(pdf_data, output_format)
 
@@ -235,6 +303,8 @@ def ocr_image(
             text = _markdown_to_html(md)
         else:
             text = ocr_image_with_sarvam(image_bytes, mime_type, output_format)
+    elif backend == "mistral_ocr":
+        text = ocr_image_with_mistral_ocr(image_bytes, mime_type, output_format)
     elif backend == "mistral":
         text = ocr_image_with_mistral(image_bytes, mime_type, output_format)
     else:
@@ -560,6 +630,149 @@ def ocr_image_with_mistral(
         temperature=0.1,
     )
     return _strip_code_fence(response.choices[0].message.content or "")
+
+
+# ──────────────────────────────────────────────────────────────────────────
+# Mistral OCR endpoint backend
+# ──────────────────────────────────────────────────────────────────────────
+
+def ocr_pdf_with_mistral_ocr_document(
+    pdf_data: bytes,
+    *,
+    include_image_base64: bool = True,
+) -> MistralOcrDocument:
+    """OCR a PDF using Mistral's dedicated OCR endpoint.
+
+    This is distinct from the Pixtral chat fallback above: Mistral OCR parses the
+    document directly and returns page-level markdown plus extracted image
+    coordinates. The structured JSON is cached so scanned translation can reuse
+    layout metadata instead of re-OCRing.
+    """
+    sha, key = _cache_key(pdf_data, "mistral_ocr", "json")
+    sha_short = f"mistral_ocr/json/{sha[:12]}"
+    cached = _cache_lookup(key, sha_short)
+    if cached is not None:
+        return MistralOcrDocument.from_json(cached)
+
+    doc = _call_mistral_ocr(
+        pdf_data,
+        mime_type="application/pdf",
+        include_image_base64=include_image_base64,
+    )
+    _cache_store(key, sha_short, doc.to_json())
+    return doc
+
+
+def ocr_pdf_with_mistral_ocr(
+    pdf_data: bytes,
+    output_format: OutputFormat = "markdown",
+) -> str:
+    doc = ocr_pdf_with_mistral_ocr_document(pdf_data, include_image_base64=False)
+    pages = [page.markdown for page in doc.pages]
+    markdown_text = "\n\n".join(pages)
+    if output_format == "html":
+        return "\n".join(
+            f'<section data-page="{page.index + 1}">\n{_markdown_to_html(page.markdown)}\n</section>'
+            for page in doc.pages
+        )
+    if output_format == "plain":
+        return re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", markdown_text)
+    return markdown_text
+
+
+def ocr_image_with_mistral_ocr(
+    image_bytes: bytes,
+    mime_type: str = "image/png",
+    output_format: OutputFormat = "markdown",
+) -> str:
+    doc = _call_mistral_ocr(
+        image_bytes,
+        mime_type=mime_type,
+        include_image_base64=False,
+    )
+    markdown_text = "\n\n".join(page.markdown for page in doc.pages)
+    if output_format == "html":
+        return _markdown_to_html(markdown_text)
+    if output_format == "plain":
+        return re.sub(r"(?m)^\s{0,3}#{1,6}\s*", "", markdown_text)
+    return markdown_text
+
+
+def _call_mistral_ocr(
+    content: bytes,
+    *,
+    mime_type: str,
+    include_image_base64: bool,
+) -> MistralOcrDocument:
+    from mistralai.client import Mistral
+
+    settings = get_settings()
+    if not settings.mistral_api_key:
+        raise RuntimeError(
+            "MISTRAL_API_KEY is not configured but Mistral OCR was requested."
+        )
+
+    data_url = f"data:{mime_type};base64,{base64.b64encode(content).decode('ascii')}"
+    client = Mistral(api_key=settings.mistral_api_key)
+    response = client.ocr.process(
+        model=settings.mistral_ocr_model,
+        document={
+            "type": "document_url",
+            "document_url": data_url,
+        },
+        include_image_base64=include_image_base64,
+        table_format=None,
+    )
+    payload = _mistral_response_to_dict(response)
+    pages = [_parse_mistral_ocr_page(page, idx) for idx, page in enumerate(payload.get("pages", []))]
+    if not pages:
+        raise RuntimeError("Mistral OCR returned no pages")
+    logger.info(
+        "[mistral-ocr] %d page(s), %d image(s), model=%s",
+        len(pages),
+        sum(len(page.images) for page in pages),
+        payload.get("model") or settings.mistral_ocr_model,
+    )
+    return MistralOcrDocument(pages=pages, model=payload.get("model"))
+
+
+def _mistral_response_to_dict(response) -> dict:
+    if isinstance(response, dict):
+        return response
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    if hasattr(response, "dict"):
+        return response.dict()
+    return json.loads(json.dumps(response, default=lambda obj: getattr(obj, "__dict__", str(obj))))
+
+
+def _parse_mistral_ocr_page(page: dict, fallback_index: int) -> MistralOcrPage:
+    images: list[MistralOcrImage] = []
+    for img in page.get("images") or []:
+        if not isinstance(img, dict):
+            continue
+        images.append(
+            MistralOcrImage(
+                id=str(img.get("id") or img.get("image_id") or ""),
+                top_left_x=_float_or_none(img.get("top_left_x")),
+                top_left_y=_float_or_none(img.get("top_left_y")),
+                bottom_right_x=_float_or_none(img.get("bottom_right_x")),
+                bottom_right_y=_float_or_none(img.get("bottom_right_y")),
+                image_base64=img.get("image_base64"),
+            )
+        )
+    dimensions_raw = page.get("dimensions") or {}
+    dimensions = {
+        str(k): float(v)
+        for k, v in dimensions_raw.items()
+        if isinstance(v, (int, float))
+    } if isinstance(dimensions_raw, dict) else {}
+    return MistralOcrPage(
+        index=int(page.get("index", fallback_index)),
+        markdown=_strip_code_fence(str(page.get("markdown") or "")),
+        images=images,
+        dimensions=dimensions,
+    )
 
 
 # ──────────────────────────────────────────────────────────────────────────

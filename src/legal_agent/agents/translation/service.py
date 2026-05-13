@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from pathlib import Path
 
 from legal_agent.clients.decryption import DecryptionService
@@ -106,7 +107,9 @@ class TranslationService:
             )
 
         try:
+            t_resolve = time.perf_counter()
             source_bytes, filename = await self._resolve_source_bytes(request, user_id)
+            logger.info("[%s] source resolve/decrypt took %.2fs", job_id, time.perf_counter() - t_resolve)
         except StagedError:
             raise
         except Exception as exc:
@@ -116,7 +119,9 @@ class TranslationService:
         ext = fl.rsplit(".", 1)[-1] if "." in fl else ""
         if ext in _IMAGE_EXTS:
             try:
+                t_convert = time.perf_counter()
                 source_bytes = await asyncio.to_thread(_image_bytes_to_pdf, source_bytes, ext)
+                logger.info("[%s] image→PDF conversion took %.2fs", job_id, time.perf_counter() - t_convert)
             except Exception as exc:
                 raise StagedError(ErrorStage.EXTRACTION, exc) from exc
             filename = filename.rsplit(".", 1)[0] + ".pdf"
@@ -143,9 +148,11 @@ class TranslationService:
         from legal_agent.agents.translation.html_pdf_translator import translate_pdf_via_html
 
         try:
+            t_translate = time.perf_counter()
             pdf_bytes, html_meta = await translate_pdf_via_html(
                 source_bytes, filename, request, job_id, debug_dir
             )
+            logger.info("[%s] translation pipeline took %.2fs", job_id, time.perf_counter() - t_translate)
         except Exception as exc:
             raise StagedError(ErrorStage.TRANSLATION, exc) from exc
 
@@ -164,7 +171,9 @@ class TranslationService:
 
         s3_path = f"{folder}/translations/{out_name}"
         try:
+            t_upload = time.perf_counter()
             await self._s3_client.upload_bytes(s3_path, pdf_bytes, content_type="application/pdf")
+            logger.info("[%s] upload took %.2fs", job_id, time.perf_counter() - t_upload)
         except Exception as exc:
             raise StagedError(ErrorStage.UPLOAD, exc) from exc
         logger.info("[%s] Translation PDF uploaded to %s", job_id, s3_path)
