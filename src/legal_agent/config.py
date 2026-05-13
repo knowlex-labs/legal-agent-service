@@ -69,7 +69,7 @@ class Settings(BaseSettings):
     # via langchain init_chat_model — e.g. "gemini-2.5-flash", "claude-haiku-4-5-20251001",
     # "gpt-5-mini". On LLM models targeting Hindi, the CBIC/Rajbhasha legal prompt
     # is applied automatically; Sarvam ignores it (no prompt input).
-    translation_model: str = "sarvam"
+    translation_llm_model: str = "sarvam"
     # Char budget per batched translate call. Sarvam REST caps input at ~2000;
     # leave headroom for the sentinel + glossary sentinel expansion.
     translation_batch_max_chars: int = 1800

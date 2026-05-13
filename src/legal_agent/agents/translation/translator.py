@@ -118,7 +118,7 @@ class Translator:
 
     def __init__(self, target_lang: str, model: str | None = None) -> None:
         settings = get_settings()
-        self._model = (model or settings.translation_model).strip()
+        self._model = (model or settings.translation_llm_model).strip()
         self._target_lang = target_lang.lower()
         self._is_devanagari_target = self._target_lang in {
             "hindi", "marathi", "nepali", "sanskrit",
