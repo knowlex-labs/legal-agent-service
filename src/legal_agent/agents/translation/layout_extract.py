@@ -19,6 +19,7 @@ logger = logging.getLogger(__name__)
 
 _MIN_TEXT_CHARS_PER_PAGE = 50
 _TOL_PT = 12.0       # ~2 Latin char widths; used for split-row and alignment inference
+_CROSS_BLOCK_Y_TOL = 10.0  # cross-block row grouping: looser than within-block (6pt)
 _BULLET_PREFIXES = ("•", "◦", "○", "–", "—", "-", "*", "·")
 
 # Heading font-size thresholds (relative to median body size)
@@ -273,7 +274,7 @@ def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock]:
         placed = False
         for group in reversed(groups):
             last = group[-1]
-            if _y_overlaps(it, last):
+            if _y_overlaps(it, last, tol=_CROSS_BLOCK_Y_TOL):
                 group.append(it)
                 placed = True
                 break
