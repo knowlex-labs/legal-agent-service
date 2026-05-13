@@ -31,7 +31,7 @@ Platform API (Java) → POST /api/v1/jobs (this service)
 ### Key modules
 
 - **`agents/drafts/`** — 16 LangGraph agents, one per document type (bail, anticipatory bail, quashing petition, revision petition, SLP, criminal appeal, written statement, written arguments, execution petition, consumer complaint, patent, contract, notice, court filing, application, + generic). All extend `base.py::BaseDraftingAgent` which builds a state graph: `agent_node` (LLM with tool calls) → `tools` (RAG/legal search) → `output_node` (extracts `GeneratedDocument`). Also houses `drafts/custom/` and `drafts/templates/`. **Important**: `output_node` captures the raw markdown from the agent's last message (preserving all formatting) and only uses structured output for metadata — see `base.py` for the rationale.
-- **`agents/translation/`** — Document translation pipeline. `service.py` orchestrates: extraction → LLM translation → PDF rendering. OCR for scanned PDFs is pluggable (Gemini Vision or Sarvam; see `utils/ocr.py`). WeasyPrint for PDF output (falls back to fpdf2), with `html_builder.py` providing script-aware CSS for 22 Indian languages.
+- **`agents/translation/`** — Translation: Docling/layout when enabled else markdown extractor fallback → chunked translate (formal Sarvam REST if `model` is `sarvam`, else LangChain per chunk) → glossary on layout → Playwright/Chromium PDF. `html_builder.py` supplies CSS. OCR for uploads lives in `utils/ocr.py`.
 - **`services/draft_service.py`** — Routes to the right agent. Supports **per-request model override** (`request.model` field) via `_agent_classes` mapping + `_build_agent()`. Without override, uses the default-model instances in `_agents`.
 - **`services/job_manager.py`** — In-memory async job queue. All jobs (draft/translation/summary/synopsis) flow through this.
 - **`services/content_preprocessor.py`** — Pre-processes uploaded content before agents consume it (chunk budgeting, text extraction normalisation).
@@ -54,7 +54,7 @@ Platform API (Java) → POST /api/v1/jobs (this service)
 - **Per-request override**: `CreateDraftJobRequest.model` lets callers override per job. The provider is inferred from the model prefix (`gemini-*` → google-genai, `gpt-*`/`o*` → openai, `claude-*` → anthropic).
 - **Max output tokens**: `base.py::_PROVIDER_MAX_TOKENS` — 16384 for OpenAI and Google, 8192 for Anthropic.
 - **Workspace chat default**: `chat_llm_default_model` (separate from drafting).
-- **Translation**: `generator.py::_MODEL_ALIASES` maps `"gemini"`/`"claude"`/`"openai"` to specific model IDs — requests can send either an alias or a full model name.
+- **Translation**: `llm_translate._MODEL_ALIASES` maps `"gemini"`/`"claude"`/`"openai"` when using the LLM path; alias `"sarvam"` selects Sarvam formal REST translate (`chunk_translate.py`).
 
 ### Workspace RAG
 

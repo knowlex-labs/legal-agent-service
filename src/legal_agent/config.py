@@ -56,6 +56,14 @@ class Settings(BaseSettings):
     # translation model with 2000-char input limit. We use formal mode + {{n}}
     # placeholder masking to preserve English tech/brand terms.
     sarvam_translate_model: str = "sarvam-translate:v1"
+    # Concurrent POSTs to Sarvam REST /translate. Non-translatable blocks (numbers,
+    # emails, punctuation) are skipped, so effective call count is much lower than
+    # total <p> count. 4 is safe with the retry/backoff logic.
+    sarvam_translate_max_concurrency: int = 4
+    # Retries after the first attempt on HTTP 429 / 502 / 503 (Retry-After or exponential backoff).
+    sarvam_translate_max_retries: int = 6
+    # Backoff base when Retry-After is absent: delay = min(60, base * mult^attempt).
+    sarvam_translate_retry_base_seconds: float = 1.0
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
     # Content-addressed OCR cache in S3. Same PDF bytes → same cache entry across
@@ -79,10 +87,10 @@ class Settings(BaseSettings):
     # Chat LLM default (frontend sends model ID directly; env var: CHAT_LLM_MODEL)
     chat_llm_model: str = "gemini-2.5-flash"
 
-    # Translation LLM default (env var: TRANSLATION_LLM_MODEL)
-    # Accepts the same aliases as CreateTranslationJobRequest.model: sarvam, gemini, claude, openai,
-    # or a full model name (e.g. sarvam-30b).
-    translation_llm_model: str = "sarvam"
+    # Directory for debug dumps of intermediate translation files (HTML, PDF).
+    # Leave empty in production. Set e.g. /tmp/translation_debug to inspect:
+    #   1_pymupdf_page_N.html, 2_before_translate.html, 4_final.html, 5_rendered.pdf
+    translation_debug_dir: str | None = None
 
     # Web search — Firecrawl is primary (scrapes full article text), Serper is fallback.
     # Both restricted to the 3 trusted Indian legal sources below (no Indian Kanoon).
@@ -117,9 +125,6 @@ class Settings(BaseSettings):
 
     # Document encryption (AES-256-GCM envelope encryption, matches platform API)
     document_encryption_master_key: str = ""
-
-    # Suppresses the ledger-drop warning when N missing entries <= tolerance.
-    translation_ledger_drop_tolerance: int = 2
 
     # ── Embeddings ────────────────────────────────────────────────────────
     # Each RAG system has its own embedding config so we can mix providers

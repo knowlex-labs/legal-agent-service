@@ -31,7 +31,6 @@ from legal_agent.agents.drafts.custom import db as template_db
 from legal_agent.agents.drafts.custom.router import router as templates_router, set_template_service
 from legal_agent.agents.drafts.custom.service import TemplateService
 from legal_agent.api.routes import router, set_services
-from legal_agent.agents.translation.generator import TranslationGenerator
 from legal_agent.agents.translation.service import TranslationService
 from legal_agent.causelist.routes import causelist_router
 from legal_agent.clients.rag_client import LocalRAGClient, MockRAGClient
@@ -119,7 +118,6 @@ async def lifespan(app: FastAPI):
         s3_client=s3_client,
     )
     translation_service = TranslationService(
-        generator=TranslationGenerator(),
         job_manager=job_manager,
         s3_client=s3_client,
         decryption=decryption_service,
