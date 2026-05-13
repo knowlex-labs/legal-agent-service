@@ -64,6 +64,15 @@ class Settings(BaseSettings):
     sarvam_translate_max_retries: int = 6
     # Backoff base when Retry-After is absent: delay = min(60, base * mult^attempt).
     sarvam_translate_retry_base_seconds: float = 1.0
+    # Translation backend. "sarvam" hits Sarvam REST formal translate (cheapest,
+    # Indic-specialist); any other value is treated as an LLM model name dispatched
+    # via langchain init_chat_model — e.g. "gemini-2.5-flash", "claude-haiku-4-5-20251001",
+    # "gpt-5-mini". On LLM models targeting Hindi, the CBIC/Rajbhasha legal prompt
+    # is applied automatically; Sarvam ignores it (no prompt input).
+    translation_model: str = "sarvam"
+    # Char budget per batched translate call. Sarvam REST caps input at ~2000;
+    # leave headroom for the sentinel + glossary sentinel expansion.
+    translation_batch_max_chars: int = 1800
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
     # Content-addressed OCR cache in S3. Same PDF bytes → same cache entry across

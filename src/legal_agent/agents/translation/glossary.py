@@ -12,6 +12,7 @@ no Latin letters that Sarvam would transliterate.
 
 from __future__ import annotations
 
+import functools
 import logging
 import re
 import unicodedata
@@ -93,6 +94,12 @@ class Glossary:
         if first_mention and entry.first_mention:
             return entry.first_mention
         return entry.hi
+
+
+@functools.lru_cache(maxsize=1)
+def get_glossary() -> Glossary:
+    """Process-wide singleton — YAML is read-only at runtime."""
+    return Glossary.load()
 
 
 @dataclass
@@ -203,3 +210,36 @@ def localize_units(text: str) -> str:
 def strip_pua(text: str) -> str:
     """Remove Private-Use-Area glyphs (Font Awesome icons etc.) before translation."""
     return _PUA_RE.sub("", text)
+
+
+# CBIC/Rajbhasha conventions: ID labels are transliterated while the alphanumeric ID
+# (which is protected by _ID_RE during translation) is kept verbatim for portal verification.
+_GOVT_LABEL_REWRITES = (
+    (re.compile(r"\bDIN-"), "डीआईएन-"),
+    (re.compile(r"\bF\.\s*NO\.?[-:\s]"), "फा.सं.-"),
+    (re.compile(r"\bF\.\s*No\.?[-:\s]"), "फा.सं.-"),
+)
+
+# Address-block abbreviations → full forms (Rajbhasha saral-shabdavali: formal notices
+# require full forms, not abbreviations).
+_ADDRESS_NORMALIZATIONS = (
+    (re.compile(r"प्लॉट\s*नं\.?"), "प्लॉट संख्या"),
+    (re.compile(r"बैंक\s*खाता\s*नं\.?"), "बैंक खाता संख्या"),
+    (re.compile(r"मकान\s*नं\.?"), "मकान संख्या"),
+)
+
+
+def normalize_govt_hindi(text: str) -> str:
+    """Post-translation pass for Indian govt/legal Hindi documents.
+
+    Applies CBIC/Rajbhasha conventions the LLM/Sarvam call doesn't reliably enforce:
+    transliterates ID labels (DIN, F.NO.), expands address abbreviations (नं. → संख्या).
+    Safe to run on any Hindi output — patterns are specific enough to avoid collateral.
+    """
+    if not text:
+        return text
+    for pat, repl in _GOVT_LABEL_REWRITES:
+        text = pat.sub(repl, text)
+    for pat, repl in _ADDRESS_NORMALIZATIONS:
+        text = pat.sub(repl, text)
+    return text

@@ -156,9 +156,7 @@ class TranslationService:
         out_name = f"{original_name}_{lang_suffix}.pdf" if original_name else f"{lang_suffix}_translation.pdf"
 
         meta = {
-            "translation_pipeline": "pymupdf_html_sarvam_playwright",
             "extraction_route": "pymupdf_html",
-            "translation_backend": "sarvam_rest",
             "detected_document_type": request.document_type.value if request.document_type else None,
             **html_meta,
         }

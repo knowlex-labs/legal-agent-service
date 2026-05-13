@@ -42,7 +42,14 @@ def _noto_family(lang: str) -> str:
     if lang in _RTL_LANGS:
         return "'Noto Nastaliq Urdu', 'Noto Kufi Arabic', sans-serif"
     if lang in _DEVANAGARI_LANGS:
-        return "'Noto Sans Devanagari', 'Noto Serif Devanagari', sans-serif"
+        # Mangal (GoI/CBIC de facto, Windows-only) → Lohit Devanagari (Linux substitute,
+        # shipped in container) → Shobhika (serif, also in container) → Noto fallbacks.
+        # Lohit/Mangal render lighter than Noto Sans, matching the visual weight of
+        # CBIC/government PDFs.
+        return (
+            "'Mangal', 'Lohit Devanagari', 'Shobhika', 'Sahadeva', "
+            "'Nirmala UI', 'Noto Sans Devanagari', 'Noto Serif Devanagari', sans-serif"
+        )
     return "'Noto Sans', sans-serif"
 
 
@@ -120,6 +127,20 @@ def render_to_html(doc: Document, lang: str) -> str:
     # (Debian fonts-noto-*) fallback. Browsers skip URL sources whose path doesn't exist.
     font_faces = """
 @font-face {
+  font-family: 'Mangal';
+  src: local('Mangal'), local('Nirmala UI');
+}
+@font-face {
+  font-family: 'Lohit Devanagari';
+  src: local('Lohit Devanagari'),
+       url('file:///usr/share/fonts/truetype/lohit-devanagari/Lohit-Devanagari.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Sahadeva';
+  src: local('Sahadeva'),
+       url('file:///usr/share/fonts/truetype/sahadeva/sahadeva.ttf') format('truetype');
+}
+@font-face {
   font-family: 'Noto Sans Devanagari';
   src: local('Noto Sans Devanagari'), local('Devanagari MT'), local('Nirmala UI'),
        url('file:///usr/share/fonts/truetype/noto/NotoSansDevanagari-Regular.ttf') format('truetype');
@@ -194,6 +215,7 @@ h1.right,  h2.right  {{ text-align: right; }}
 p {{ margin: 2pt 0; }}
 p.center {{ text-align: center; }}
 p.right  {{ text-align: right; }}
+a {{ color: inherit; text-decoration: underline; }}
 .row {{
   display: flex;
   justify-content: space-between;

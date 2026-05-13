@@ -139,14 +139,6 @@ async def translate_pdf_via_html(
     bbox-overlay translator so seals/stamps/letterhead pixels survive. PDFs
     with any native text continue through the PyMuPDF dict → flow-HTML path.
     """
-    from legal_agent.agents.translation.glossary import (
-        DocState,
-        Glossary,
-        freeze,
-        localize_units,
-        restore,
-        strip_pua,
-    )
     from legal_agent.agents.translation.layout_extract import extract_document
     from legal_agent.agents.translation.layout_ir import RowBlock, Span, TextBlock
     from legal_agent.agents.translation.layout_render import render_to_html
@@ -154,12 +146,8 @@ async def translate_pdf_via_html(
         is_image_only_pdf,
         translate_pdf_via_overlay,
     )
-    from legal_agent.agents.translation.sarvam_translate import (
-        SARVAM_LANG_CODES,
-        call_sarvam_translate,
-        clean_sarvam_translate_output,
-    )
-    from legal_agent.config import get_settings
+    from legal_agent.agents.translation.sarvam_translate import SARVAM_LANG_CODES
+    from legal_agent.agents.translation.translator import Translator
 
     if is_image_only_pdf(source_bytes):
         logger.info("[%s] image-only PDF → overlay translator", job_id)
@@ -169,7 +157,6 @@ async def translate_pdf_via_html(
         meta.setdefault("translation_pipeline", "gemini_bbox_overlay_sarvam_pymupdf")
         return pdf_bytes, meta
 
-    settings = get_settings()
     lang = request.target_language.value
     target_code = SARVAM_LANG_CODES.get(lang, "hi-IN")
     source_code = (
@@ -177,78 +164,73 @@ async def translate_pdf_via_html(
         if request.source_language
         else "en-IN"
     )
-    api_key = settings.sarvam_api_key
-    if not api_key:
-        raise RuntimeError("SARVAM_API_KEY not configured")
-
-    tm = settings.sarvam_translate_model
-    sem = asyncio.Semaphore(max(1, settings.sarvam_translate_max_concurrency))
-    glossary = Glossary.load()
-    doc_state = DocState()
-    state_lock = asyncio.Lock()
-    is_hindi_target = target_code.startswith("hi")
-
-    async def _translate_chunk(frozen: str) -> str:
-        async with sem:
-            raw = await call_sarvam_translate(frozen, source_code, target_code, api_key, tm)
-        return clean_sarvam_translate_output(raw) or frozen
-
-    async def _translate_text(text: str) -> str:
-        if not text.strip():
-            return text
-        prepared = _collapse_repeated_chars(strip_pua(text.strip()))
-        if is_hindi_target:
-            prepared = localize_units(prepared)
-        async with state_lock:
-            frozen, sentinels = freeze(prepared, doc_state, glossary)
-        chunks = _chunk_for_sarvam(frozen)
-        if len(chunks) == 1:
-            cleaned = await _translate_chunk(chunks[0])
-        else:
-            logger.info("[sarvam-translate] splitting %d chars into %d chunks", len(frozen), len(chunks))
-            translated_chunks = await asyncio.gather(*(_translate_chunk(c) for c in chunks))
-            cleaned = "".join(translated_chunks)
-        return restore(cleaned, sentinels)
-
-    async def _translate_spans(spans: list[Span]) -> list[Span]:
-        """Translate spans as one unit; return a single Span with dominant formatting.
-
-        Never redistributes translated text back across multiple spans — doing so splits
-        Devanagari conjunct clusters across element boundaries, which breaks shaping in
-        Chromium (conjuncts like फ्ट appear as "फ्ट" visually spaced apart).
-        """
-        if not spans:
-            return spans
-        joined = "".join(s.text for s in spans)
-        if not _needs_translation(joined):
-            return spans
-        translated = await _translate_text(joined)
-        total = len(joined) or 1
-        bold = sum(len(s.text) for s in spans if s.bold) / total > 0.5
-        italic = sum(len(s.text) for s in spans if s.italic) / total > 0.5
-        return [Span(text=translated, bold=bold, italic=italic)]
+    translator = Translator(lang)
 
     # 1. Extract IR
     ir_doc = await asyncio.to_thread(extract_document, source_bytes, ocr_language=source_code)
     if not ir_doc.pages:
         raise RuntimeError("extract_document returned no pages — PDF may be image-only, encrypted, or invalid")
 
-    # 2. Translate all spans concurrently (one coroutine per block)
-    tasks: list[asyncio.Task] = []
-    block_refs: list[tuple[int, int, str]] = []  # (page_idx, block_idx, side)
+    # 2. Collect every span-list that needs translation, batch through the translator,
+    #    and reassemble. We never redistribute translated text across multiple original
+    #    spans — splitting Devanagari conjuncts across element boundaries breaks shaping.
+    block_refs: list[tuple[int, int, str]] = []
+    original_span_lists: list[list[Span]] = []
+
+    def _collect(spans: list[Span], pi: int, bi: int, side: str) -> None:
+        block_refs.append((pi, bi, side))
+        original_span_lists.append(spans)
 
     for pi, page in enumerate(ir_doc.pages):
         for bi, block in enumerate(page.blocks):
             if isinstance(block, RowBlock):
-                tasks.append(asyncio.create_task(_translate_spans(block.left)))
-                block_refs.append((pi, bi, "left"))
-                tasks.append(asyncio.create_task(_translate_spans(block.right)))
-                block_refs.append((pi, bi, "right"))
+                _collect(block.left, pi, bi, "left")
+                _collect(block.right, pi, bi, "right")
             elif isinstance(block, TextBlock):
-                tasks.append(asyncio.create_task(_translate_spans(block.spans)))
-                block_refs.append((pi, bi, "spans"))
+                _collect(block.spans, pi, bi, "spans")
 
-    results = await asyncio.gather(*tasks)
+    joined_per_block = ["".join(s.text for s in spans) for spans in original_span_lists]
+    translatable_indices: list[int] = []
+    translatable_chunks: list[str] = []
+    chunk_owner: list[int] = []
+    for i, joined in enumerate(joined_per_block):
+        if not _needs_translation(joined):
+            continue
+        prepared = _collapse_repeated_chars(joined.strip())
+        chunks = _chunk_for_sarvam(prepared)
+        if len(chunks) > 1:
+            logger.info("[sarvam-translate] splitting %d chars into %d chunks", len(prepared), len(chunks))
+        translatable_indices.append(i)
+        for c in chunks:
+            translatable_chunks.append(c)
+            chunk_owner.append(i)
+
+    translated_chunks: list[str] = []
+    if translatable_chunks:
+        translated_chunks = await translator.translate_batch(
+            translatable_chunks, source_code, target_code
+        )
+
+    translated_joined: dict[int, str] = {}
+    for chunk_text, owner in zip(translated_chunks, chunk_owner):
+        translated_joined[owner] = translated_joined.get(owner, "") + chunk_text
+
+    # CBIC/Rajbhasha post-pass for Hindi: transliterate DIN/F.NO. labels and expand
+    # address abbreviations (नं. → संख्या) that Sarvam doesn't reliably handle.
+    if target_code.startswith("hi"):
+        from legal_agent.agents.translation.glossary import normalize_govt_hindi
+        translated_joined = {k: normalize_govt_hindi(v) for k, v in translated_joined.items()}
+
+    results: list[list[Span]] = []
+    for i, spans in enumerate(original_span_lists):
+        if i not in translated_joined:
+            results.append(spans)
+            continue
+        joined = joined_per_block[i]
+        total = len(joined) or 1
+        bold = sum(len(s.text) for s in spans if s.bold) / total > 0.5
+        italic = sum(len(s.text) for s in spans if s.italic) / total > 0.5
+        results.append([Span(text=translated_joined[i], bold=bold, italic=italic)])
 
     # 3. Apply translated spans back into the IR (build new immutable objects)
     from copy import deepcopy
@@ -307,4 +289,5 @@ async def translate_pdf_via_html(
         "pages": len(ir_doc.pages),
         "blocks_total": blocks_total,
         "blocks_translated": blocks_translated,
+        "translation_backend": translator.backend,
     }

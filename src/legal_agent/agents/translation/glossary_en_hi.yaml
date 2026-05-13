@@ -162,3 +162,30 @@
 "hereby":               { hi: "एतद्द्वारा" }
 "plaintiff":            { hi: "वादी" }
 "defendant":            { hi: "प्रतिवादी" }
+
+# ─────────────── GST / tax / enforcement register (CBIC / DGGI / Rajbhasha) ───────────────
+# Longest-match-first means multi-word entries (e.g. "fake ITC") win over "fake".
+# Rationale per source (CBIC circulars, GoI Legal Glossary, Rajbhasha saral-shabdavali):
+#   - "fake" in fraud sense → फर्जी (forged/fraudulent), NOT नकली (counterfeit object).
+#   - "tangible material/evidence" → मूर्त साक्ष्य (evidentiary), NOT सामग्री (raw materials).
+#   - "financial trail" → लेन-देन की कड़ी (chain of transactions), NOT पगडंडी (footpath).
+#   - "Plot No."/"नं." → प्लॉट संख्या (full form for formal notices).
+"fake ITC":                { hi: "फर्जी आईटीसी", first_mention: "फर्जी आईटीसी (fake ITC)" }
+"ITC":                     { hi: "आईटीसी", first_mention: "आईटीसी (ITC)" }
+"fake invoice":            { hi: "फर्जी चालान" }
+"fake":                    { hi: "फर्जी" }
+"tangible material":       { hi: "मूर्त साक्ष्य" }
+"tangible evidence":       { hi: "मूर्त साक्ष्य" }
+"financial trail":         { hi: "लेन-देन की कड़ी" }
+"financial trail analysis": { hi: "लेन-देन की कड़ी का विश्लेषण" }
+"syndicate":               { hi: "रैकेट" }
+"provisional attachment":  { hi: "अस्थायी संलग्नक" }
+"bank account":            { hi: "बैंक खाता" }
+"show cause":              { hi: "कारण बताओ" }
+"Plot No.":                { hi: "प्लॉट संख्या" }
+"Plot No":                 { hi: "प्लॉट संख्या" }
+"Sector":                  { hi: "सेक्टर" }
+"Saheed Nagar":            { hi: "शहीद नगर" }
+"DGGI":                    { hi: "डीजीजीआई", first_mention: "डीजीजीआई (DGGI)" }
+"CGST":                    { hi: "सीजीएसटी", first_mention: "सीजीएसटी (CGST)" }
+"GST":                     { hi: "जीएसटी" }

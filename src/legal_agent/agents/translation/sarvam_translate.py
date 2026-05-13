@@ -105,13 +105,27 @@ async def call_sarvam_translate(
         "numerals_format": "international",
     }
 
+    _NETWORK_ERRORS = (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.ConnectError, httpx.NetworkError)
+
     async with httpx.AsyncClient(timeout=60) as client:
         for attempt in range(max_retries + 1):
-            resp = await client.post(
-                _SARVAM_TRANSLATE_URL,
-                headers={"api-subscription-key": api_key, "Content-Type": "application/json"},
-                json=body,
-            )
+            try:
+                resp = await client.post(
+                    _SARVAM_TRANSLATE_URL,
+                    headers={"api-subscription-key": api_key, "Content-Type": "application/json"},
+                    json=body,
+                )
+            except _NETWORK_ERRORS as exc:
+                if attempt < max_retries:
+                    wait = _retry_wait_seconds(0, attempt, base_delay, None)
+                    logger.warning(
+                        "[sarvam-translate] network error (%s) -- sleeping %.1fs then retry %s/%s (chars=%d)",
+                        type(exc).__name__, wait, attempt + 1, max_retries, len(text),
+                    )
+                    await asyncio.sleep(wait)
+                    continue
+                logger.error("[sarvam-translate] network error after %s retries: %s", max_retries, exc)
+                raise
             if resp.is_success:
                 translated = resp.json()["translated_text"]
                 return _unwrap_sarvam_dict_response(translated).replace("\x00", "")

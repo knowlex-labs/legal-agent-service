@@ -11,23 +11,12 @@ import asyncio
 import json
 import logging
 import re
+import unicodedata
 from concurrent.futures import ThreadPoolExecutor
 from html import escape as _esc
 from typing import TYPE_CHECKING
 
-from legal_agent.agents.translation.glossary import (
-    DocState,
-    Glossary,
-    freeze,
-    localize_units,
-    restore,
-    strip_pua,
-)
-from legal_agent.agents.translation.sarvam_translate import (
-    SARVAM_LANG_CODES,
-    call_sarvam_translate,
-    clean_sarvam_translate_output,
-)
+from legal_agent.agents.translation.sarvam_translate import SARVAM_LANG_CODES
 from legal_agent.config import get_settings
 
 if TYPE_CHECKING:
@@ -213,6 +202,9 @@ def _gemini_bboxes(image_bytes: bytes, page_label: str) -> list[dict]:
             continue
         text_val = it.get("text") or it.get("content") or it.get("string") or ""
         text = (text_val if isinstance(text_val, str) else str(text_val)).strip()
+        # NFC: Devanagari (and other Indic) has multiple valid encodings per glyph;
+        # normalise so glossary lookup and downstream grep match consistent forms.
+        text = unicodedata.normalize("NFC", text)
         if not text:
             rejects["empty_text"] += 1
             sample_reject = sample_reject or {"reason": "empty_text", "item": it}
@@ -267,6 +259,8 @@ async def translate_pdf_via_overlay(
 ) -> tuple[bytes, dict]:
     import fitz
 
+    from legal_agent.agents.translation.translator import Translator
+
     settings = get_settings()
     lang = request.target_language.value
     target_code = SARVAM_LANG_CODES.get(lang, "hi-IN")
@@ -274,37 +268,8 @@ async def translate_pdf_via_overlay(
         SARVAM_LANG_CODES.get(request.source_language.value, "en-IN")
         if request.source_language else "en-IN"
     )
-    api_key = settings.sarvam_api_key
-    if not api_key:
-        raise RuntimeError("SARVAM_API_KEY not configured")
-    tm = settings.sarvam_translate_model
     is_devanagari = target_code.startswith(("hi", "mr", "ne", "sa"))
-    glossary = Glossary.load()
-    doc_state = DocState()
-    state_lock = asyncio.Lock()
-    sem = asyncio.Semaphore(max(1, settings.sarvam_translate_max_concurrency))
-
-    async def _translate(text: str) -> str:
-        if not text.strip():
-            return text
-        if _already_in_target_script(text, target_code):
-            return text
-        prepared = strip_pua(text.strip())
-        if is_devanagari:
-            prepared = localize_units(prepared)
-        async with state_lock:
-            frozen, sentinels = freeze(prepared, doc_state, glossary)
-        try:
-            async with sem:
-                raw = await call_sarvam_translate(frozen, source_code, target_code, api_key, tm)
-        except Exception as exc:
-            msg = str(exc)
-            if "must be different" in msg or "400" in msg:
-                logger.info("[overlay] sarvam declined (likely same-script as target) — keeping original: %r", text[:60])
-                return text
-            raise
-        cleaned = clean_sarvam_translate_output(raw) or frozen
-        return restore(cleaned, sentinels)
+    translator = Translator(lang)
 
     src = fitz.open(stream=source_bytes, filetype="pdf")
     page_count = src.page_count
@@ -320,11 +285,20 @@ async def translate_pdf_via_overlay(
         idx, img = arg
         return idx, _gemini_bboxes(img, f"page {idx + 1}/{page_count}")
 
-    page_items: list[list[dict]] = [[] for _ in range(page_count)]
-    with ThreadPoolExecutor(max_workers=settings.gemini_ocr_concurrency) as pool:
-        for idx, items in pool.map(_ocr_one, enumerate(page_images)):
-            page_items[idx] = items
-            logger.info("[%s] overlay OCR page %d/%d: %d regions", job_id, idx + 1, page_count, len(items))
+    def _run_ocr_pool() -> list[list[dict]]:
+        out: list[list[dict]] = [[] for _ in range(page_count)]
+        with ThreadPoolExecutor(max_workers=settings.gemini_ocr_concurrency) as pool:
+            for idx, items in pool.map(_ocr_one, enumerate(page_images)):
+                out[idx] = items
+                logger.info(
+                    "[%s] overlay OCR page %d/%d: %d regions",
+                    job_id, idx + 1, page_count, len(items),
+                )
+        return out
+
+    # Offload the blocking Gemini Vision pool to a worker thread so FastAPI's
+    # event loop stays responsive (status polls, other jobs) while OCR runs.
+    page_items = await asyncio.to_thread(_run_ocr_pool)
 
     for pi, items in enumerate(page_items):
         if not items:
@@ -347,15 +321,20 @@ async def translate_pdf_via_overlay(
                 xmax / raster_w * 1000.0,
             ]
 
-    flat_tasks: list[asyncio.Task] = []
+    flat_texts: list[str] = []
     flat_index: list[tuple[int, int]] = []
     for pi, items in enumerate(page_items):
         for bi, item in enumerate(items):
-            flat_tasks.append(asyncio.create_task(_translate(item["text"])))
+            text = item["text"]
+            if not text.strip() or _already_in_target_script(text, target_code):
+                page_items[pi][bi]["translated"] = text
+                continue
+            flat_texts.append(text)
             flat_index.append((pi, bi))
-    translated_results = await asyncio.gather(*flat_tasks) if flat_tasks else []
-    for (pi, bi), t in zip(flat_index, translated_results):
-        page_items[pi][bi]["translated"] = t
+    if flat_texts:
+        translated_results = await translator.translate_batch(flat_texts, source_code, target_code)
+        for (pi, bi), t in zip(flat_index, translated_results):
+            page_items[pi][bi]["translated"] = t
 
     family = "Noto Sans Devanagari, Noto Sans, sans-serif" if is_devanagari else "Noto Sans, sans-serif"
     _PAD_X = 6.0

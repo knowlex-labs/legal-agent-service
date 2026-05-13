@@ -21,6 +21,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-extra \
     fonts-noto-color-emoji \
     fonts-liberation \
+    fonts-lohit-deva \
     fonts-sahadeva \
     libpango-1.0-0 \
     libpangocairo-1.0-0 \
