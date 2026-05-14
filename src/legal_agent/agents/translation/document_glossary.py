@@ -119,7 +119,7 @@ Extract terms that MUST stay consistent across the document:
 - Institutions, departments, organisations, journals, courts.
 - Personal and place names that appear more than once.
 - Statutory / legal terms specific to this document.
-- Recurring identifiers and abbreviations (DIN, F.NO, CGST, DRC-22, U.S., S. Ct.).
+- Recurring identifiers and abbreviations (DIN, F.NO, CGST, DRC-22, S. Ct.).
 - For academic / journal sources: case names (e.g. "Printz v. United States"),
   cited authors, and recurring technical concepts.
 

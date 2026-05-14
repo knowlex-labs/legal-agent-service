@@ -120,19 +120,23 @@ Your contract:
    output. Translate only what appears under CURRENT_CHUNK.
 8. OUTPUT SHAPE. Return ONLY a JSON array of translated strings, one per input
    region, in the same order. No prose, no markdown fences, no commentary.
+9. ANTI-ECHO. Your output JSON must contain ONLY translations of CURRENT_CHUNK.
+   Never copy, repeat, or paraphrase content from CONTEXT_PREVIOUS_OUTPUT into
+   your output — doing so corrupts the document with duplicate paragraphs.
+   The very first character of your response must be `[`.
 
 DOCUMENT_SUBJECT: {subject}
 
 GLOSSARY:
 {glossary_lines}
 
-CONTEXT_PREVIOUS_OUTPUT (already translated — do not retranslate):
+CONTEXT_PREVIOUS_OUTPUT (already translated — DO NOT REPRODUCE IN OUTPUT):
 {prev_output}
 
 CONTEXT_NEXT_SOURCE (upcoming source — do not translate, for disambiguation):
 {next_source}
 
-CURRENT_CHUNK (translate these, return JSON array of same length):
+CURRENT_CHUNK (translate ONLY these strings, return JSON array of same length):
 {current_chunk_json}
 """
 
@@ -175,24 +179,32 @@ Your contract:
    defendant, tort, prima facie, mens rea, consideration, equity, estoppel,
    in personam, in rem — may be used inline with a parenthetical Hindi gloss
    on first occurrence only; subsequent occurrences may use either form.
+   For Hindi output: use masculine (पुल्लिंग) first-person verb forms by
+   default (चाहूँगा, करूँगा, जाऊँगा, सकूँगा) unless the source text
+   explicitly identifies the speaker as female. Academic English "I" carries
+   no gender — always render it in masculine Hindi.
 7. CONTEXT BLOCKS ARE READ-ONLY. CONTEXT_PREVIOUS_OUTPUT and
    CONTEXT_NEXT_SOURCE are for continuity only. Do NOT include them in your
    output. Translate only what appears under CURRENT_CHUNK.
 8. OUTPUT SHAPE. Return ONLY a JSON array of translated strings, one per input
    region, in the same order. No prose, no markdown fences, no commentary.
+9. ANTI-ECHO. Your output JSON must contain ONLY translations of CURRENT_CHUNK.
+   Never copy, repeat, or paraphrase content from CONTEXT_PREVIOUS_OUTPUT into
+   your output — doing so corrupts the document with duplicate paragraphs.
+   The very first character of your response must be `[`.
 
 DOCUMENT_SUBJECT: {subject}
 
 GLOSSARY:
 {glossary_lines}
 
-CONTEXT_PREVIOUS_OUTPUT (already translated — do not retranslate):
+CONTEXT_PREVIOUS_OUTPUT (already translated — DO NOT REPRODUCE IN OUTPUT):
 {prev_output}
 
 CONTEXT_NEXT_SOURCE (upcoming source — do not translate, for disambiguation):
 {next_source}
 
-CURRENT_CHUNK (translate these, return JSON array of same length):
+CURRENT_CHUNK (translate ONLY these strings, return JSON array of same length):
 {current_chunk_json}
 """
 

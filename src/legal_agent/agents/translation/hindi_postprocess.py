@@ -25,6 +25,19 @@ _GOVT_LABEL_REWRITES = (
     (re.compile(r"\bF\.\s*NO\.?[-:\s]"), "फा.सं.-"),
     (re.compile(r"\bF\.\s*No\.?[-:\s]"), "फा.सं.-"),
 )
+
+# Country abbreviations frozen verbatim by glossary._ID_RE (U.S matches the
+# structured-ID pattern and never reaches the translator). Replace them
+# deterministically in the post-translation pass so they never appear bare
+# inside Hindi sentences. Applied for both registers.
+_COUNTRY_ABBREV_REWRITES = (
+    # \bX\.Y\b matches the abbreviation at a word boundary; the trailing \.?
+    # sits outside the boundary to greedily consume a sentence-final period so
+    # "U.S. constitutionalists" doesn't leave a stray period behind.
+    (re.compile(r"\bU\.S\b\.?"), "अमेरिकी"),
+    (re.compile(r"\bU\.K\b\.?"), "ब्रिटेन"),
+    (re.compile(r"\bE\.U\b\.?"), "यूरोपीय संघ"),
+)
 _ADDRESS_NORMALIZATIONS = (
     (re.compile(r"प्लॉट\s*नं\.?"), "प्लॉट संख्या"),
     (re.compile(r"बैंक\s*खाता\s*नं\.?"), "बैंक खाता संख्या"),
@@ -68,6 +81,7 @@ class HindiCleanupReport:
     numerals_converted: int = 0
     govt_label_rewrites: int = 0
     address_normalizations: int = 0
+    country_abbrev_rewrites: int = 0
     whitespace_collapses: int = 0
 
     def as_dict(self) -> dict[str, int]:
@@ -157,7 +171,9 @@ def _dedupe_adjacent_ngrams(
         n = len(tokens)
         while i < n:
             collapsed = False
-            for span in range(min(6, (n - i) // 2), 1, -1):
+            # Span raised to 20: catches full-sentence echoes from context-window
+            # leakage, not just short fragment repeats.
+            for span in range(min(20, (n - i) // 2), 1, -1):
                 left = tokens[i : i + span]
                 right = tokens[i + span : i + 2 * span]
                 if not left or left != right:
@@ -165,7 +181,10 @@ def _dedupe_adjacent_ngrams(
                 phrase = " ".join(left).strip().lower()
                 if not phrase:
                     continue
-                if any(g and g in phrase for g in glossary_lower):
+                # Only exempt single-token glossary terms (proper nouns like party names).
+                # Compound phrases (≥2 tokens) are never legitimately duplicated adjacent
+                # in prose, so don't exempt them even if they appear in the glossary.
+                if any(g and g in phrase for g in glossary_lower if len(g.split()) <= 1):
                     continue
                 result.extend(left)
                 i += 2 * span
@@ -243,6 +262,15 @@ def _collapse_whitespace(text: str, report: HindiCleanupReport) -> str:
     return new
 
 
+def _apply_country_abbrevs(text: str, report: HindiCleanupReport) -> str:
+    for pat, repl in _COUNTRY_ABBREV_REWRITES:
+        new = pat.sub(repl, text)
+        if new != text:
+            report.country_abbrev_rewrites += 1
+            text = new
+    return text
+
+
 def _apply_govt_hindi(text: str, report: HindiCleanupReport) -> str:
     for pat, repl in _GOVT_LABEL_REWRITES:
         new = pat.sub(repl, text)
@@ -288,6 +316,7 @@ def clean_hindi_output(
     text = _dedupe_adjacent_ngrams(text, report, glossary_targets=targets)
     text = _apply_devanagari_quotes(text, report)
     text = _apply_numerals_policy(text, report, numerals_policy)
+    text = _apply_country_abbrevs(text, report)
     text = _collapse_whitespace(text, report)
     if register == "government_legal":
         text = _apply_govt_hindi(text, report)

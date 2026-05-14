@@ -338,7 +338,7 @@ async def _translate_ir_document(
     target_code: str,
     job_id: str,
 ):
-    from legal_agent.agents.translation.layout_ir import RowBlock, Span, TextBlock
+    from legal_agent.agents.translation.layout_ir import RowBlock, Span, TableBlock, TableCell, TextBlock
     from legal_agent.agents.translation.translator import DocumentContext, Translator
     from legal_agent.config import get_settings
 
@@ -370,6 +370,10 @@ async def _translate_ir_document(
                 _collect(block.right, pi, bi, "right")
             elif isinstance(block, TextBlock):
                 _collect(block.spans, pi, bi, "spans")
+            elif isinstance(block, TableBlock):
+                for ri, row in enumerate(block.rows):
+                    for ci, cell in enumerate(row):
+                        _collect(cell.spans, pi, bi, f"cell:{ri}:{ci}")
 
     joined_per_block = ["".join(s.text for s in spans) for spans in original_span_lists]
 
@@ -543,19 +547,34 @@ async def _translate_ir_document(
                 right=translated_spans,
                 role=existing.role,
             )
+        elif side.startswith("cell:") and isinstance(block, TableBlock):
+            _, ri_s, ci_s = side.split(":")
+            ri, ci = int(ri_s), int(ci_s)
+            existing_table = translated_ir.pages[pi].blocks[bi]
+            assert isinstance(existing_table, TableBlock)
+            new_rows = [list(row) for row in existing_table.rows]
+            old_cell = new_rows[ri][ci]
+            new_rows[ri][ci] = TableCell(spans=translated_spans, is_header=old_cell.is_header)
+            translated_ir.pages[pi].blocks[bi] = TableBlock(
+                rows=new_rows, role=existing_table.role,
+            )
 
     blocks_total = len(block_refs)
+
+    def _ref_spans(pi: int, bi: int, side: str) -> list[Span]:
+        block = ir_doc.pages[pi].blocks[bi]
+        if side == "left" and isinstance(block, RowBlock):
+            return block.left
+        if side == "right" and isinstance(block, RowBlock):
+            return block.right
+        if side.startswith("cell:") and isinstance(block, TableBlock):
+            _, ri_s, ci_s = side.split(":")
+            return block.rows[int(ri_s)][int(ci_s)].spans
+        return getattr(block, "spans", [])  # type: ignore[return-value]
+
     blocks_translated = sum(
         1 for (pi, bi, side) in block_refs
-        if _needs_translation("".join(
-            s.text for s in (
-                ir_doc.pages[pi].blocks[bi].left
-                if side == "left" else
-                ir_doc.pages[pi].blocks[bi].right
-                if side == "right" else
-                ir_doc.pages[pi].blocks[bi].spans  # type: ignore[union-attr]
-            )
-        ))
+        if _needs_translation("".join(s.text for s in _ref_spans(pi, bi, side)))
     )
 
     logger.info(

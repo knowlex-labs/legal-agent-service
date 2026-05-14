@@ -13,7 +13,7 @@ import logging
 import statistics
 from dataclasses import dataclass
 
-from legal_agent.agents.translation.layout_ir import Document, ImageBlock, Page, RowBlock, Span, TextBlock
+from legal_agent.agents.translation.layout_ir import Document, ImageBlock, Page, RowBlock, Span, TableBlock, TableCell, TextBlock
 
 logger = logging.getLogger(__name__)
 
@@ -236,6 +236,7 @@ def _process_block(block: dict, page_width: float) -> list[_Item]:
                 text=txt,
                 bold=bool(flags & (1 << 4)),
                 italic=bool(flags & (1 << 1)),
+                underline=bool(flags & (1 << 0)),
             ))
             max_sz = max(max_sz, s.get("size", 0.0))
         if not spans:
@@ -321,16 +322,149 @@ def _median_font_size(data: bytes) -> float:
     return statistics.median(sizes) if sizes else 11.0
 
 
-def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock | ImageBlock]:
+def _bbox_overlaps(a: tuple[float, float, float, float], b: tuple[float, float, float, float]) -> bool:
+    """True if two (x0,y0,x1,y1) bboxes overlap."""
+    return a[0] < b[2] and a[2] > b[0] and a[1] < b[3] and a[3] > b[1]
+
+
+def _extract_tables(page, median_size: float) -> tuple[list[TableBlock], list[tuple[float, float, float, float]]]:
+    """Detect tables via PyMuPDF find_tables() and return (TableBlock list, bbox list).
+
+    The bbox list is used to exclude those regions from regular text extraction
+    so cells are not counted twice.
+    """
+    try:
+        finder = page.find_tables()
+    except Exception:
+        return [], []
+
+    tables_obj = getattr(finder, "tables", []) or []
+    if not tables_obj:
+        return [], []
+
+    result: list[TableBlock] = []
+    bboxes: list[tuple[float, float, float, float]] = []
+
+    page_dict = page.get_text("dict", sort=True)
+
+    for table in tables_obj:
+        try:
+            cell_grid = table.extract()  # list[list[str | None]]
+        except Exception:
+            continue
+        if not cell_grid or not cell_grid[0]:
+            continue
+
+        # Get per-cell bounding boxes to recover span-level bold/italic.
+        # table.cells is a flat list of (x0,y0,x1,y1) tuples, row-major order.
+        raw_cells = getattr(table, "cells", None) or []
+
+        # Build a flat list of spans per cell using the bbox to slice page.get_text("dict")
+        cell_spans_flat: list[list[Span]] = []
+        cols = len(cell_grid[0])
+        for ci, cell_text in enumerate(_flatten_grid(cell_grid)):
+            bbox = raw_cells[ci] if ci < len(raw_cells) else None
+            spans = _spans_in_bbox(page_dict, bbox, cell_text or "")
+            cell_spans_flat.append(spans)
+
+        # Is the first row a header? Heuristic: any cell in row 0 has majority-bold spans.
+        has_header = False
+        if cell_spans_flat[:cols]:
+            bold_cells = sum(
+                1 for spans in cell_spans_flat[:cols]
+                if spans and sum(len(s.text) for s in spans if s.bold) > sum(len(s.text) for s in spans) * 0.4
+            )
+            has_header = bold_cells >= max(1, cols // 2)
+
+        rows: list[list[TableCell]] = []
+        flat_idx = 0
+        for ri, row in enumerate(cell_grid):
+            cells: list[TableCell] = []
+            for ci in range(len(row)):
+                spans = cell_spans_flat[flat_idx] if flat_idx < len(cell_spans_flat) else []
+                # Fallback: plain text span if no styled spans recovered
+                if not spans and row[ci]:
+                    spans = [Span(text=str(row[ci]))]
+                cells.append(TableCell(spans=spans, is_header=(has_header and ri == 0)))
+                flat_idx += 1
+            if any(c.spans for c in cells):
+                rows.append(cells)
+
+        if rows:
+            result.append(TableBlock(rows=rows))
+            tbl_bbox: tuple[float, float, float, float] = tuple(table.bbox)  # type: ignore[assignment]
+            bboxes.append(tbl_bbox)
+
+    return result, bboxes
+
+
+def _flatten_grid(grid: list[list[str | None]]) -> list[str | None]:
+    return [cell for row in grid for cell in row]
+
+
+def _spans_in_bbox(
+    page_dict: dict,
+    bbox: tuple[float, float, float, float] | None,
+    fallback_text: str,
+) -> list[Span]:
+    """Extract styled spans from page_dict that fall within bbox."""
+    if bbox is None:
+        return [Span(text=fallback_text)] if fallback_text else []
+    x0, y0, x1, y1 = bbox
+    spans: list[Span] = []
+    for block in page_dict.get("blocks", []):
+        if block.get("type") != 0:
+            continue
+        bx0, by0, bx1, by1 = block.get("bbox", (0, 0, 0, 0))
+        if not _bbox_overlaps((bx0, by0, bx1, by1), (x0, y0, x1, y1)):
+            continue
+        for line in block.get("lines", []):
+            lx0, ly0, lx1, ly1 = line.get("bbox", (0, 0, 0, 0))
+            if not _bbox_overlaps((lx0, ly0, lx1, ly1), (x0, y0, x1, y1)):
+                continue
+            for s in line.get("spans", []):
+                txt = s.get("text", "").strip()
+                if not txt:
+                    continue
+                flags = s.get("flags", 0)
+                spans.append(Span(
+                    text=txt,
+                    bold=bool(flags & (1 << 4)),
+                    italic=bool(flags & (1 << 1)),
+                    underline=bool(flags & (1 << 0)),
+                ))
+    return spans if spans else ([Span(text=fallback_text)] if fallback_text else [])
+
+
+def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock | ImageBlock | TableBlock]:
     page_dict = page.get_text("dict", sort=True)
     page_width = page_dict["width"]
+
+    # Detect tables first; their bboxes are used to skip double-counting text blocks.
+    table_blocks, table_bboxes = _extract_tables(page, median_size)
+    # Track which tables have already been inserted (keyed by bbox index).
+    tables_inserted: set[int] = set()
 
     all_items: list[_Item] = []
     all_x0: list[float] = []
     all_x1: list[float] = []
+    # Items that are actually table-anchor placeholders carry a table_idx tag.
+    table_anchors: list[tuple[float, int]] = []  # (y0, table_idx)
 
     for block in page_dict.get("blocks", []):
         if block.get("type") != 0:
+            continue
+        bx0, by0, bx1, by1 = block.get("bbox", (0, 0, 0, 0))
+        # Skip text blocks that fall inside a detected table region; instead,
+        # record an anchor so we know where to insert the TableBlock in order.
+        overlap_idx = next(
+            (ti for ti, tb in enumerate(table_bboxes) if _bbox_overlaps((bx0, by0, bx1, by1), tb)),
+            None,
+        )
+        if overlap_idx is not None:
+            if overlap_idx not in tables_inserted:
+                tables_inserted.add(overlap_idx)
+                table_anchors.append((by0, overlap_idx))
             continue
         items = _process_block(block, page_width)
         all_items.extend(items)
@@ -339,11 +473,11 @@ def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock | Image
                 all_x0.append(it.x0)
                 all_x1.append(it.x1)
 
-    if not all_items:
-        return []
+    if not all_items and not table_blocks:
+        return table_blocks  # type: ignore[return-value]
 
-    m_left = _percentile(all_x0, _PERCENTILE_LO)
-    m_right = _percentile(all_x1, _PERCENTILE_HI)
+    m_left = _percentile(all_x0, _PERCENTILE_LO) if all_x0 else 0.0
+    m_right = _percentile(all_x1, _PERCENTILE_HI) if all_x1 else page_width
 
     # Cross-block split-row detection: group adjacent text _Items by y-overlap,
     # check if they form a two-column layout spanning different PyMuPDF blocks.
@@ -413,7 +547,31 @@ def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock | Image
                     type=nxt.type, align=nxt.align, spans=nxt.spans, role="author",
                 )
 
-    return result
+    if not table_anchors:
+        return result  # type: ignore[return-value]
+
+    # Insert each detected table at its correct y-position in the result list.
+    # We do this by building a merged list sorted by the y0 of each item.
+    # Text blocks in `result` are already in top-to-bottom order; we just need
+    # to splice in the table blocks at the right position.
+    # Since result items don't carry y-coords, approximate using block index
+    # relative to y-sorted table anchors: insert each table before the first
+    # result block that comes after the table's y0.
+    final: list[TextBlock | RowBlock | ImageBlock | TableBlock] = []
+    anchors_sorted = sorted(table_anchors, key=lambda x: x[0])
+    anchor_ptr = 0
+    # We can't easily map result[i] back to a y-coord, so use a simpler heuristic:
+    # insert the table block at the position in `result` proportional to its y0
+    # relative to the page height. This is a good approximation for legal documents.
+    page_height = page_dict.get("height", 842.0)
+    n_result = len(result)
+    for table_y0, table_idx in anchors_sorted:
+        insert_at = int((table_y0 / max(page_height, 1.0)) * n_result)
+        final.extend(result[anchor_ptr:insert_at])
+        final.append(table_blocks[table_idx])
+        anchor_ptr = insert_at
+    final.extend(result[anchor_ptr:])
+    return final  # type: ignore[return-value]
 
 
 def extract_document(data: bytes, *, ocr_language: str | None = None) -> Document:
