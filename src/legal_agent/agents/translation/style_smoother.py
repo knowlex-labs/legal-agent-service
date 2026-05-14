@@ -1,20 +1,9 @@
 """Stage C (style) — parallel Haiku style smoother.
 
-Runs concurrently with the fidelity `Reviewer`. Where the reviewer's job is
-faithfulness against the source, the smoother's job is target-language polish:
-
-- catch over-Sanskritized constructions (e.g. unnecessary `वादीतिवादी`),
-- catch awkward literal English-to-Hindi calques,
-- insert missing spaces between fused content-words like `हैंकेवल → हैं केवल`
-  — the failure mode that rule-based passes cannot solve without a Hindi
-  morphological splitter,
-- collapse repeated phrases.
-
-The smoother emits **diff-style edits** (per-region list of `{span, replacement}`
-records), not full rewrites. That output shape is what makes the parallel
-reviewer/smoother merge composable: the merge layer can drop any smoother
-edit whose span overlaps a reviewer correction, without losing the
-non-conflicting smoother improvements.
+Runs concurrently with the fidelity reviewer. Catches over-Sanskritization,
+awkward literal calques, fused content-words like `हैंकेवल → हैं केवल`, and
+repeated phrases. Emits diff-style edits so the merge layer can drop any
+edit overlapping a reviewer fix without losing the non-conflicting ones.
 """
 
 from __future__ import annotations
@@ -28,6 +17,13 @@ from dataclasses import dataclass, field
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage
 
+from legal_agent.agents.translation._llm_common import (
+    extract_json_blob,
+    format_glossary_lines,
+    format_numbered,
+    infer_provider,
+    message_content_to_text,
+)
 from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -134,70 +130,55 @@ class SmootherResult:
     changes: int
 
 
-def _infer_provider(model: str) -> str:
-    m = model.lower().removeprefix("models/")
-    if m.startswith("gemini"):
-        return "google-genai"
-    if m.startswith("claude"):
-        return "anthropic"
-    if m.startswith("gpt") or m.startswith("o"):
-        return "openai"
-    raise ValueError(f"Unsupported smoother model: {model!r}")
-
-
-def _strip_fences(raw: str) -> str:
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3]
-    return raw.strip()
-
-
-def _format_numbered(items: list[str]) -> str:
-    return "\n".join(f"[{i}] {t}" for i, t in enumerate(items))
-
-
-def _format_glossary_lines(glossary: dict[str, str] | None) -> str:
-    if not glossary:
-        return "(none)"
-    return "\n".join(f"- {tgt}" for tgt in glossary.values())
-
-
 def _spans_overlap(a: tuple[int, int], b: tuple[int, int]) -> bool:
     return not (a[1] <= b[0] or b[1] <= a[0])
 
 
-def _edit_touches_sentinel(text: str, edit: SmootherEdit) -> bool:
-    """Reject an edit whose span overlaps any [__NNNN__]-family sentinel
-    in the original candidate. Belt-and-braces against an LLM that ignores
-    the prompt rule about sentinels.
-    """
-    for m in _SENTINEL_RE.finditer(text):
-        if _spans_overlap(edit.span, m.span()):
-            return True
-    return False
+def _parse_edits(raw_edits: object) -> list[SmootherEdit]:
+    """Coerce one region's `edits` JSON into a list of SmootherEdit, dropping
+    malformed entries (non-dict, wrong span shape, non-int bounds, t < s)."""
+    if not isinstance(raw_edits, list):
+        return []
+    out: list[SmootherEdit] = []
+    for e in raw_edits:
+        if not isinstance(e, dict):
+            continue
+        span = e.get("span")
+        replacement = e.get("replacement")
+        if (
+            not isinstance(span, list) or len(span) != 2
+            or not isinstance(replacement, str)
+        ):
+            continue
+        try:
+            s, t = int(span[0]), int(span[1])
+        except (TypeError, ValueError):
+            continue
+        if s < 0 or t < s:
+            continue
+        out.append(SmootherEdit(span=(s, t), replacement=replacement))
+    return out
 
 
 def apply_edits(text: str, edits: list[SmootherEdit]) -> str:
-    """Apply a list of non-overlapping edits to `text`, right-to-left to keep
-    offsets valid. Drops any edit that overlaps a sentinel or another edit
-    already accepted.
+    """Apply non-overlapping edits to `text`. Drops edits that overlap a
+    sentinel, overlap an earlier accepted edit, or have out-of-bounds spans.
     """
     if not edits:
         return text
-    # Filter sentinel-overlapping edits.
-    safe: list[SmootherEdit] = [e for e in edits if not _edit_touches_sentinel(text, e)]
-    # Drop overlapping edits — keep the one that appears first.
+    sentinel_spans = [m.span() for m in _SENTINEL_RE.finditer(text)]
+    safe = [
+        e for e in edits
+        if not any(_spans_overlap(e.span, s) for s in sentinel_spans)
+    ]
     safe.sort(key=lambda e: e.span[0])
     accepted: list[SmootherEdit] = []
     for e in safe:
-        if not accepted or e.span[0] >= accepted[-1].span[1]:
+        if 0 <= e.span[0] <= e.span[1] <= len(text) and (
+            not accepted or e.span[0] >= accepted[-1].span[1]
+        ):
             accepted.append(e)
-    # Sanity: span bounds.
-    accepted = [e for e in accepted if 0 <= e.span[0] <= e.span[1] <= len(text)]
-    # Apply right-to-left.
-    for e in sorted(accepted, key=lambda x: x.span[0], reverse=True):
+    for e in reversed(accepted):
         text = text[: e.span[0]] + e.replacement + text[e.span[1]:]
     return text
 
@@ -220,7 +201,7 @@ class StyleSmoother:
             max(1, settings.translation_smoother_max_concurrency)
         )
         self._llm = (
-            init_chat_model(self._model, model_provider=_infer_provider(self._model))
+            init_chat_model(self._model, model_provider=infer_provider(self._model))
             if self._enabled
             else None
         )
@@ -235,9 +216,8 @@ class StyleSmoother:
         candidate_regions: list[str],
         glossary: dict[str, str] | None,
     ) -> SmootherResult:
-        """Return smoother edits per region. On any failure, returns an empty
-        edit list for every region so the pipeline never blocks on style.
-        """
+        """Return smoother edits per region. Any failure short-circuits to
+        a no-op result so the pipeline never blocks on style."""
         empty = SmootherResult(
             items=[SmootherItem(index=i) for i in range(len(candidate_regions))],
             changes=0,
@@ -246,13 +226,12 @@ class StyleSmoother:
             return empty
 
         template = (
-            _SMOOTHER_PROMPT_LEGAL
-            if self._register == "government_legal"
+            _SMOOTHER_PROMPT_LEGAL if self._register == "government_legal"
             else _SMOOTHER_PROMPT_GENERAL
         )
         prompt = template.format(
-            glossary_lines=_format_glossary_lines(glossary),
-            numbered_candidate=_format_numbered(candidate_regions),
+            glossary_lines=format_glossary_lines(glossary, targets_only=True),
+            numbered_candidate=format_numbered(candidate_regions),
         )
         try:
             async with self._sem:
@@ -261,14 +240,7 @@ class StyleSmoother:
             logger.warning("[smoother] %s call failed: %s", self._model, exc)
             return empty
 
-        raw = resp.content if isinstance(resp.content, str) else "".join(
-            p.get("text", "") if isinstance(p, dict) else str(p) for p in resp.content
-        )
-        cleaned = _strip_fences(raw)
-        if not cleaned.startswith("["):
-            match = re.search(r"\[.*\]", cleaned, re.DOTALL)
-            if match:
-                cleaned = match.group(0)
+        cleaned = extract_json_blob(message_content_to_text(resp.content), "[")
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError:
@@ -276,7 +248,6 @@ class StyleSmoother:
                 "[smoother] %s returned non-JSON; head=%r", self._model, cleaned[:200]
             )
             return empty
-
         if not isinstance(parsed, list):
             return empty
 
@@ -288,36 +259,14 @@ class StyleSmoother:
                 idx = int(entry.get("index"))
             except (TypeError, ValueError):
                 continue
-            edits_raw = entry.get("edits") or []
-            if not isinstance(edits_raw, list):
-                continue
-            edits: list[SmootherEdit] = []
-            for e in edits_raw:
-                if not isinstance(e, dict):
-                    continue
-                span = e.get("span")
-                replacement = e.get("replacement")
-                if (
-                    not isinstance(span, list)
-                    or len(span) != 2
-                    or not isinstance(replacement, str)
-                ):
-                    continue
-                try:
-                    s, t = int(span[0]), int(span[1])
-                except (TypeError, ValueError):
-                    continue
-                if s < 0 or t < s:
-                    continue
-                edits.append(SmootherEdit(span=(s, t), replacement=replacement))
+            edits = _parse_edits(entry.get("edits") or [])
             by_index[idx] = SmootherItem(index=idx, edits=edits)
 
         items: list[SmootherItem] = []
         changes = 0
         for i in range(len(candidate_regions)):
             item = by_index.get(i, SmootherItem(index=i))
-            if item.edits:
-                changes += len(item.edits)
+            changes += len(item.edits)
             items.append(item)
         logger.info(
             "[smoother] %s reviewed %d regions, %d edit(s)",

@@ -102,7 +102,6 @@ class Settings(BaseSettings):
     # documents to eliminate mid-document drift / topic substitution.
     # Stage A (glossary) + Stage C (reviewer) now run for both Sarvam and LLM
     # backends — only Stage B (translation) is dispatched by translation_llm_model.
-    translation_primary_model: str = "claude-sonnet-4-5-20250929"
     translation_reviewer_enabled: bool = True
     translation_reviewer_model: str = "claude-haiku-4-5-20251001"
     translation_reviewer_max_concurrency: int = 4

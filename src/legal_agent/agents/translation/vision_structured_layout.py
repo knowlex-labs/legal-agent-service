@@ -19,6 +19,7 @@ from legal_agent.agents.translation.layout_ir import (
     VisionStructuredPage,
     VisionStyledRowBlock,
     VisionStyledTextBlock,
+    VisionTableBlock,
 )
 
 logger = logging.getLogger(__name__)
@@ -113,7 +114,7 @@ def _coerce_line_spacing(v: Any) -> VisionLineSpacing:
     return "normal"
 
 
-def _block_from_dict(d: dict[str, Any]) -> VisionStyledTextBlock | VisionStyledRowBlock | None:
+def _block_from_dict(d: dict[str, Any]) -> VisionStyledTextBlock | VisionStyledRowBlock | VisionTableBlock | None:
     t = (d.get("type") or "text").lower()
     if t == "row":
         return VisionStyledRowBlock(
@@ -123,6 +124,20 @@ def _block_from_dict(d: dict[str, Any]) -> VisionStyledTextBlock | VisionStyledR
             size=_coerce_size(d.get("size")),
             left_html=sanitize_vision_inline_html(str(d.get("left_html") or d.get("left") or "")),
             right_html=sanitize_vision_inline_html(str(d.get("right_html") or d.get("right") or "")),
+        )
+    if t == "table":
+        rows_raw = d.get("rows") or []
+        rows = [
+            [sanitize_vision_inline_html(str(cell)) for cell in row]
+            for row in rows_raw if isinstance(row, list)
+        ]
+        if not rows:
+            return None
+        return VisionTableBlock(
+            type="table",
+            has_header=bool(d.get("has_header", False)),
+            rows=rows,
+            role=_coerce_role(d.get("role", "general")),
         )
     if t != "text":
         return None
@@ -186,7 +201,7 @@ def parse_vision_structured_response(raw: str) -> VisionStructuredPage | None:
     blocks_raw = data.get("blocks")
     if not isinstance(blocks_raw, list) or not blocks_raw:
         return None
-    blocks: list[VisionStyledTextBlock | VisionStyledRowBlock] = []
+    blocks: list[VisionStyledTextBlock | VisionStyledRowBlock | VisionTableBlock] = []
     for item in blocks_raw:
         if not isinstance(item, dict):
             continue
@@ -198,6 +213,8 @@ def parse_vision_structured_response(raw: str) -> VisionStructuredPage | None:
         if isinstance(b, VisionStyledRowBlock) and not (
             b.left_html.strip() or b.right_html.strip()
         ):
+            continue
+        if isinstance(b, VisionTableBlock) and not b.rows:
             continue
         blocks.append(b)
     if not blocks:
@@ -237,10 +254,21 @@ def _css_classes_row(b: VisionStyledRowBlock) -> str:
     )
 
 
+def _render_vision_table(b: VisionTableBlock) -> str:
+    rows_html: list[str] = []
+    for ri, row in enumerate(b.rows):
+        is_header = b.has_header and ri == 0
+        tag = "th" if is_header else "td"
+        cells = "".join(f"<{tag}>{cell}</{tag}>" for cell in row)
+        rows_html.append(f"<tr>{cells}</tr>")
+    cls = f"vt-table vt-role-{b.role}"
+    return f'<table class="{cls}">\n' + "\n".join(rows_html) + "\n</table>"
+
+
 def vision_structured_page_to_section_html(page: VisionStructuredPage, page_no: int) -> str:
     """Emit a single <section> fragment for one page."""
     lines: list[str] = [
-        f'<section data-page="{page_no}" class="vision-structured" data-vt-schema="v4">'
+        f'<section data-page="{page_no}" class="vision-structured" data-vt-schema="v5">'
     ]
     for b in page.blocks:
         if isinstance(b, VisionStyledRowBlock):
@@ -251,6 +279,8 @@ def vision_structured_page_to_section_html(page: VisionStructuredPage, page_no: 
                 f'<div class="col-right vt-cell">{b.right_html}</div>'
                 f"</div>"
             )
+        elif isinstance(b, VisionTableBlock):
+            lines.append(_render_vision_table(b))
         else:
             cls = _css_classes_text(b)
             lines.append(f'<div class="{cls}">{b.html}</div>')
@@ -259,7 +289,7 @@ def vision_structured_page_to_section_html(page: VisionStructuredPage, page_no: 
 
 
 def vision_fidelity_summary(
-    blocks: list[VisionStyledTextBlock | VisionStyledRowBlock],
+    blocks: list[VisionStyledTextBlock | VisionStyledRowBlock | VisionTableBlock],
 ) -> dict[str, Any]:
     """Lightweight QA payload for logs / job metadata (A/B checklist)."""
     roles: dict[str, int] = {}

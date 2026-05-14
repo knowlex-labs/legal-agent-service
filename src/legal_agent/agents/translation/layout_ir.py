@@ -18,6 +18,23 @@ class Span(BaseModel):
     text: str
     bold: bool = False
     italic: bool = False
+    underline: bool = False
+
+
+# Semantic role on a native-PDF block, populated by the heading-detection pass
+# in layout_extract. Used by the semantic chunker (footnotes isolated, headings
+# 1:1) and the layout renderer (per-role CSS, page-break controls). Distinct
+# from `type` which captures structural shape (heading/paragraph/bullet).
+NativeBlockRole = Literal[
+    "title",
+    "author",
+    "heading",
+    "body",
+    "footnote",
+    "page_header",
+    "page_number",
+    "caption",
+]
 
 
 # Semantic role on a native-PDF block, populated by the heading-detection pass
@@ -61,10 +78,22 @@ class ImageBlock(BaseModel):
     height_px: float | None = None
 
 
+class TableCell(BaseModel):
+    spans: list[Span]
+    is_header: bool = False
+
+
+class TableBlock(BaseModel):
+    """Multi-column table detected from a native PDF via PyMuPDF find_tables()."""
+    type: Literal["table"] = "table"
+    rows: list[list[TableCell]]
+    role: NativeBlockRole | None = None
+
+
 class Page(BaseModel):
     width_pt: float
     height_pt: float
-    blocks: list[TextBlock | RowBlock | ImageBlock]
+    blocks: list[TextBlock | RowBlock | ImageBlock | TableBlock]
 
 
 class Document(BaseModel):
@@ -130,8 +159,23 @@ class VisionStyledRowBlock(BaseModel):
     right_html: str = ""
 
 
+class VisionTableBlock(BaseModel):
+    """Multi-column table extracted from a scanned page.
+
+    rows[0] is the header row when has_header=True. Each cell may contain
+    inline HTML (<strong>, <em>) but no block-level tags.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    type: Literal["table"] = "table"
+    role: VisionRegionRole = "general"
+    has_header: bool = False
+    rows: list[list[str]] = Field(default_factory=list)
+
+
 VisionStyledBlock = Annotated[
-    VisionStyledTextBlock | VisionStyledRowBlock,
+    VisionStyledTextBlock | VisionStyledRowBlock | VisionTableBlock,
     Field(discriminator="type"),
 ]
 
@@ -142,4 +186,4 @@ class VisionStructuredPage(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     page: int = 1
-    blocks: list[VisionStyledTextBlock | VisionStyledRowBlock] = Field(default_factory=list)
+    blocks: list[VisionStyledTextBlock | VisionStyledRowBlock | VisionTableBlock] = Field(default_factory=list)

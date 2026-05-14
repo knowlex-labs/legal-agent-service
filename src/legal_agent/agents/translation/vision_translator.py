@@ -40,7 +40,7 @@ PROMPT_VERSION_LEGACY = "vision-translate-v3-simple-hindi-layout"
 # the source language), and translation runs separately through Sarvam. The
 # version bump invalidates the per-page S3 cache from the old v4 single-pass
 # prompt cleanly.
-PROMPT_VERSION_STRUCTURED = "vision-ocr-v5-then-sarvam"
+PROMPT_VERSION_STRUCTURED = "vision-ocr-v6-table-support"
 
 # Anthropic enforces a 5 MiB limit on the base64 image payload. Keep a margin
 # below the hard limit so SDK wrapping never crosses the boundary.
@@ -190,10 +190,26 @@ Allowed block shapes:
    - html: source-language text exactly as printed; inline tags ONLY <strong>, <em>, <u>, <br/>.
      Use <em> for visibly italicized text (case names, titles, foreign words).
 
-2) Row block (same horizontal line split):
+2) Row block (exactly two columns on one line, e.g. "F.NO: 123" flush-left and date flush-right):
    - type: "row"
    - role: usually meta_row
    - left_html, right_html: source-language fragments
+
+3) Table block (use when the page has a multi-column table with 3+ columns OR
+   when rows are separated by horizontal rules / borders):
+   - type: "table"
+   - role: usually "general" or "body_clause"
+   - has_header: true if the first row contains column headers
+   - rows: array of arrays of cell text (inline HTML <strong>, <em> allowed; NO <u>)
+     Example for an index table:
+     {{"type":"table","has_header":true,"rows":[["S.No","Description","Annexure","Pages"],["1.","Memo of Petition","","1-9"]]}}
+
+IMPORTANT — underline rules:
+- Use <u> ONLY when source text has visible text-underline formatting on words.
+- Do NOT use <u> to represent horizontal separator rules, table borders, or decorative
+  lines between sections. A line drawn under or around text is structural — express it
+  via the correct block type (table, or an appropriate role), NOT by marking adjacent
+  text as <u>...</u>.
 
 Role guidance:
 - title: the document or article title (often top-centered, large).
@@ -408,13 +424,13 @@ async def _translate_structured_page_via_sarvam(
     [__VTAG_NNNN__] sentinels before translation and restored after, so
     italicized case names and bold spans survive intact.
     """
-    from legal_agent.agents.translation.layout_ir import VisionStyledRowBlock
+    from legal_agent.agents.translation.layout_ir import VisionStyledRowBlock, VisionTableBlock
     from legal_agent.agents.translation.sarvam_translate import SARVAM_LANG_CODES
     from legal_agent.agents.translation.source_cleanup import clean_source_text
     from legal_agent.agents.translation.translator import Translator
 
     blocks = list(page.blocks)
-    items: list[tuple[int, str, list[str]]] = []  # (block_idx, side, tags)
+    items: list[tuple[int, str, list[str]]] = []  # (block_idx, side_or_cell_key, tags)
     inputs: list[str] = []
 
     def _prepare(raw: str) -> tuple[str, list[str]]:
@@ -432,6 +448,13 @@ async def _translate_structured_page_via_sarvam(
                     cleaned, tags = _prepare(raw)
                     items.append((i, side, tags))
                     inputs.append(cleaned)
+        elif isinstance(b, VisionTableBlock):
+            for ri, row in enumerate(b.rows):
+                for ci, cell in enumerate(row):
+                    if cell and cell.strip():
+                        cleaned, tags = _prepare(cell)
+                        items.append((i, f"table:{ri}:{ci}", tags))
+                        inputs.append(cleaned)
         else:
             raw = b.html or ""
             if raw.strip():
@@ -461,6 +484,12 @@ async def _translate_structured_page_via_sarvam(
                 blocks[i] = b.model_copy(update={"left_html": restored})
             else:
                 blocks[i] = b.model_copy(update={"right_html": restored})
+        elif isinstance(b, VisionTableBlock) and side.startswith("table:"):
+            _, ri_s, ci_s = side.split(":")
+            ri, ci = int(ri_s), int(ci_s)
+            new_rows = [list(r) for r in b.rows]
+            new_rows[ri][ci] = restored
+            blocks[i] = b.model_copy(update={"rows": new_rows})
         else:
             blocks[i] = b.model_copy(update={"html": restored})
 

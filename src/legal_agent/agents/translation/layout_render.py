@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import html as _html
 
-from legal_agent.agents.translation.layout_ir import Document, ImageBlock, Page, RowBlock, Span, TextBlock
+from legal_agent.agents.translation.layout_ir import Document, ImageBlock, Page, RowBlock, Span, TableBlock, TextBlock
 
 _SOUTH_INDIC: dict[str, str] = {
     "tamil": "Noto Sans Tamil",
@@ -49,7 +49,7 @@ _VISION_STRUCTURED_CSS = """
 .vision-structured .vt-sz-small { font-size: 9.75pt; }
 .vision-structured .vt-sz-normal { font-size: 11pt; }
 .vision-structured .vt-sz-large { font-size: 13pt; }
-.vision-structured .vt-sz-xlarge { font-size: 15.5pt; }
+.vision-structured .vt-sz-xlarge { font-size: 18pt; }
 /* Weight */
 .vision-structured .vt-w-normal { font-weight: 400; }
 .vision-structured .vt-w-semibold { font-weight: 600; }
@@ -75,6 +75,7 @@ _VISION_STRUCTURED_CSS = """
 }
 .vision-structured .vt-role-body_clause {
   margin: 6pt 0;
+  text-align: justify;
 }
 .vision-structured .vt-role-general {
   margin: 4pt 0;
@@ -87,10 +88,17 @@ _VISION_STRUCTURED_CSS = """
   font-size: 10pt;
   color: #222;
 }
-/* Academic / journal roles */
+/* Title role is used for both document titles (journal/book) and in-document
+   section headings (e.g. "FACTS OF THE CASE" in court filings). Font size and
+   weight come from the vt-sz-* and vt-w-* classes the OCR model emits — that
+   way a section heading labelled "large" renders at 13pt while a journal title
+   labelled "xlarge" renders at 18pt (see vt-sz-xlarge above). */
 .vision-structured .vt-role-title {
-  margin: 14pt 0 6pt 0;
+  margin: 8pt 0 5pt 0;
   text-align: center;
+  line-height: 1.22;
+  letter-spacing: 0.2pt;
+  page-break-after: avoid;
 }
 .vision-structured .vt-role-author {
   margin: 4pt 0 14pt 0;
@@ -185,6 +193,8 @@ def _render_spans(spans: list[Span]) -> str:
             text = f"<strong>{text}</strong>"
         elif span.italic:
             text = f"<em>{text}</em>"
+        if span.underline:
+            text = f"<u>{text}</u>"
         parts.append(text)
     return "".join(parts)
 
@@ -195,7 +205,21 @@ def _role_class(role: str | None) -> str:
     return f"role-{role}"
 
 
-def _render_block(block: TextBlock | RowBlock | ImageBlock) -> str:
+def _render_native_table(block: TableBlock) -> str:
+    rows_html: list[str] = []
+    for row in block.rows:
+        cells = "".join(
+            f"<{'th' if cell.is_header else 'td'}>{_render_spans(cell.spans)}</{'th' if cell.is_header else 'td'}>"
+            for cell in row
+        )
+        rows_html.append(f"<tr>{cells}</tr>")
+    return "<table class=\"native-table\">\n" + "\n".join(rows_html) + "\n</table>\n"
+
+
+def _render_block(block: TextBlock | RowBlock | ImageBlock | TableBlock) -> str:
+    if isinstance(block, TableBlock):
+        return _render_native_table(block)
+
     if isinstance(block, RowBlock):
         left = _render_spans(block.left)
         right = _render_spans(block.right)
@@ -396,20 +420,30 @@ body {{
   widows: 2;
   orphans: 2;
 }}
+.source-page.page-break {{ break-before: page; }}
 {_VISION_STRUCTURED_CSS}
 h1 {{
-  font-size: 17pt; font-weight: 700; margin: 0 0 6pt;
+  font-size: 18pt; font-weight: 700; margin: 12pt 0 8pt;
   text-align: center; page-break-after: avoid;
+  line-height: 1.25;
 }}
 h2 {{
-  font-size: 13pt; font-weight: 700;
-  margin: 12pt 0 4pt; page-break-after: avoid;
+  font-size: 14pt; font-weight: 700;
+  margin: 14pt 0 5pt; page-break-after: avoid;
+  line-height: 1.3;
+}}
+/* Document title (journal article title, book chapter title) — set apart
+   from regular h1 so it reads as the document opener, not just another
+   heading. Larger size, breathing room above and below. */
+h1.role-title {{
+  font-size: 16pt; font-weight: 700;
+  margin: 18pt 0 12pt; text-align: center;
+  line-height: 1.28; letter-spacing: 0.2pt;
 }}
 h1.center, h2.center {{ text-align: center; border-bottom: 0; }}
 h1.right,  h2.right  {{ text-align: right; }}
-h1.role-title {{ margin-top: 10pt; }}
 h1 + p, h2 + p, h3 + p {{ text-indent: 0; }}
-p {{ margin: 4pt 0; text-align: justify; }}
+p {{ margin: 6pt 0; text-align: justify; }}
 p.center {{ text-align: center; }}
 p.right  {{ text-align: right; }}
 /* Footnote rendering: small font, separated by a top rule from the previous
@@ -425,6 +459,12 @@ p.role-footnote {{
 p.role-footnote + p.role-footnote {{
   border-top: none;
   padding-top: 0;
+}}
+p.role-author {{
+  margin: 6pt 0 16pt 0;
+  text-align: center;
+  font-style: italic;
+  font-size: 1.05em;
 }}
 p.role-page_header, p.role-page_number {{
   font-size: 0.85em;
@@ -468,11 +508,37 @@ strong {{ font-weight: 700; }}
   color: #555;
   padding: 8pt;
 }}
+table.vt-table, table.native-table {{
+  width: 100%;
+  border-collapse: collapse;
+  margin: 6pt 0;
+  font-size: inherit;
+  page-break-inside: auto;
+}}
+table.vt-table th, table.vt-table td,
+table.native-table th, table.native-table td {{
+  border: 0.5pt solid #555;
+  padding: 3pt 6pt;
+  text-align: left;
+  vertical-align: top;
+}}
+table.vt-table th, table.native-table th {{
+  font-weight: 700;
+  background-color: #f5f5f5;
+}}
 """
 
-    # No forced page-breaks — let Playwright paginate naturally by content height.
-    # Forcing breaks at source-page boundaries leaves blank space when Hindi text is shorter.
-    body = "\n".join(per_page_html)
+    # Force a page break before each source page (except the first) so the
+    # translated output has the same page count as the original. Without this,
+    # Playwright reflows all content freely and a 5-page petition can become 4
+    # or 7 pages depending on how much Hindi text expands.
+    if len(per_page_html) <= 1:
+        body = per_page_html[0] if per_page_html else ""
+    else:
+        wrapped = [f'<div class="source-page">{per_page_html[0]}</div>']
+        for h in per_page_html[1:]:
+            wrapped.append(f'<div class="source-page page-break">{h}</div>')
+        body = "\n".join(wrapped)
     return (
         f'<!DOCTYPE html>\n<html lang="{lang_code}" dir="{direction}">\n'
         f'<head>\n<meta charset="utf-8"/>\n<style>{css}</style>\n</head>\n'
