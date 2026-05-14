@@ -16,13 +16,17 @@ from __future__ import annotations
 
 import json
 import logging
-import re
 from typing import Literal
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
+from legal_agent.agents.translation._llm_common import (
+    extract_json_blob,
+    infer_provider,
+    message_content_to_text,
+)
 from legal_agent.agents.translation.glossary import GlossaryEntry
 from legal_agent.config import get_settings
 
@@ -141,34 +145,13 @@ def _truncate_middle(text: str, limit: int) -> str:
     return text[:half] + "\n\n[...TRUNCATED FOR EXTRACTION...]\n\n" + text[-half:]
 
 
-def _strip_fences(raw: str) -> str:
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3]
-    return raw.strip()
-
-
-def _infer_provider(model: str) -> str:
-    m = model.lower().removeprefix("models/")
-    if m.startswith("gemini"):
-        return "google-genai"
-    if m.startswith("claude"):
-        return "anthropic"
-    if m.startswith("gpt") or m.startswith("o"):
-        return "openai"
-    raise ValueError(f"Unsupported glossary extractor model: {model!r}")
-
-
 async def extract_document_glossary(
     source_text: str,
     source_language: str,
     target_language: str,
 ) -> DocumentGlossary:
-    """Run the Stage A extractor. Returns an empty glossary on any failure
-    so the translator can proceed without the document-glossary layer.
-    """
+    """Run the Stage A extractor. Any failure → empty glossary so the
+    translator can proceed without the document-glossary layer."""
     settings = get_settings()
     model = settings.translation_glossary_extractor_model
     snippet = _truncate_middle(source_text.strip(), _MAX_SOURCE_CHARS)
@@ -181,22 +164,13 @@ async def extract_document_glossary(
         source_text=snippet,
     )
     try:
-        llm = init_chat_model(model, model_provider=_infer_provider(model))
+        llm = init_chat_model(model, model_provider=infer_provider(model))
         resp = await llm.ainvoke([HumanMessage(content=prompt)])
     except Exception as exc:
         logger.warning("[glossary-extractor] %s call failed: %s", model, exc)
         return DocumentGlossary()
 
-    raw = resp.content if isinstance(resp.content, str) else "".join(
-        p.get("text", "") if isinstance(p, dict) else str(p) for p in resp.content
-    )
-    cleaned = _strip_fences(raw)
-    # Defensive: some models prepend a stray sentence — pull the first {...} blob.
-    if not cleaned.startswith("{"):
-        match = re.search(r"\{.*\}", cleaned, re.DOTALL)
-        if match:
-            cleaned = match.group(0)
-
+    cleaned = extract_json_blob(message_content_to_text(resp.content), "{")
     try:
         parsed = json.loads(cleaned)
     except json.JSONDecodeError:
@@ -213,8 +187,6 @@ async def extract_document_glossary(
 
     logger.info(
         "[glossary-extractor] subject=%r doc_register=%s terms=%d",
-        gloss.subject[:80],
-        gloss.doc_register,
-        len(gloss.terms),
+        gloss.subject[:80], gloss.doc_register, len(gloss.terms),
     )
     return gloss

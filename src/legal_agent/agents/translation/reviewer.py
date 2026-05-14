@@ -1,13 +1,8 @@
 """Stage C — source-grounded translation reviewer.
 
-The reviewer receives the SOURCE (ground truth) alongside the candidate
-translation and the binding glossary. Its single job is to catch and rewrite
-drift, hallucinations, glossary violations, and verbatim-token loss against
-the source — not to polish target-language prose.
-
-Without the source in its prompt, a reviewer can only check fluency; it
-cannot detect the "Guest Faculty → merit scholarships" failure mode this
-pipeline exists to eliminate.
+Receives SOURCE alongside CANDIDATE and the binding glossary; rewrites drift,
+hallucinations, glossary violations, and verbatim-token loss against the
+source. Style polish is the smoother's job, not this one.
 """
 
 from __future__ import annotations
@@ -16,12 +11,18 @@ import asyncio
 import difflib
 import json
 import logging
-import re
 from dataclasses import dataclass
 
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage
 
+from legal_agent.agents.translation._llm_common import (
+    extract_json_blob,
+    format_glossary_lines,
+    format_numbered,
+    infer_provider,
+    message_content_to_text,
+)
 from legal_agent.config import get_settings
 
 logger = logging.getLogger(__name__)
@@ -143,34 +144,11 @@ class ReviewResult:
     fixed_count: int
 
 
-def _infer_provider(model: str) -> str:
-    m = model.lower().removeprefix("models/")
-    if m.startswith("gemini"):
-        return "google-genai"
-    if m.startswith("claude"):
-        return "anthropic"
-    if m.startswith("gpt") or m.startswith("o"):
-        return "openai"
-    raise ValueError(f"Unsupported reviewer model: {model!r}")
-
-
-def _strip_fences(raw: str) -> str:
-    raw = raw.strip()
-    if raw.startswith("```"):
-        raw = raw.split("\n", 1)[1] if "\n" in raw else raw[3:]
-        if raw.endswith("```"):
-            raw = raw[:-3]
-    return raw.strip()
-
-
-def _format_numbered(items: list[str]) -> str:
-    return "\n".join(f"[{i}] {t}" for i, t in enumerate(items))
-
-
-def _format_glossary_lines(glossary: dict[str, str] | None) -> str:
-    if not glossary:
-        return "(none)"
-    return "\n".join(f"- {src} → {tgt}" for src, tgt in glossary.items())
+def _passthrough_result(candidates: list[str]) -> "ReviewResult":
+    return ReviewResult(
+        items=[ReviewItem(index=i, status="ok", corrected=c) for i, c in enumerate(candidates)],
+        fixed_count=0,
+    )
 
 
 class Reviewer:
@@ -193,7 +171,7 @@ class Reviewer:
             max(1, settings.translation_reviewer_max_concurrency)
         )
         self._llm = (
-            init_chat_model(self._model, model_provider=_infer_provider(self._model))
+            init_chat_model(self._model, model_provider=infer_provider(self._model))
             if self._enabled
             else None
         )
@@ -210,89 +188,48 @@ class Reviewer:
         subject: str,
         glossary: dict[str, str] | None,
     ) -> ReviewResult:
-        """Return corrected translations. On any failure, falls back to the
-        original candidate so the pipeline never blocks on reviewer issues.
+        """Return corrected translations. Any failure short-circuits to a
+        pass-through so the pipeline never blocks on reviewer issues.
         """
         if not self._enabled or not source_regions or self._llm is None:
-            return ReviewResult(
-                items=[
-                    ReviewItem(index=i, status="ok", corrected=c)
-                    for i, c in enumerate(candidate_regions)
-                ],
-                fixed_count=0,
-            )
+            return _passthrough_result(candidate_regions)
         if len(source_regions) != len(candidate_regions):
             logger.warning(
                 "[reviewer] length mismatch source=%d candidate=%d; skipping",
-                len(source_regions),
-                len(candidate_regions),
+                len(source_regions), len(candidate_regions),
             )
-            return ReviewResult(
-                items=[
-                    ReviewItem(index=i, status="ok", corrected=c)
-                    for i, c in enumerate(candidate_regions)
-                ],
-                fixed_count=0,
-            )
+            return _passthrough_result(candidate_regions)
 
         template = (
-            _REVIEWER_PROMPT_GENERAL
-            if self._register == "general"
+            _REVIEWER_PROMPT_GENERAL if self._register == "general"
             else _REVIEWER_PROMPT_LEGAL
         )
         prompt = template.format(
             subject=subject or "(unspecified)",
             source_language=self._source_language,
             target_language=self._target_language,
-            glossary_lines=_format_glossary_lines(glossary),
-            numbered_source=_format_numbered(source_regions),
-            numbered_candidate=_format_numbered(candidate_regions),
+            glossary_lines=format_glossary_lines(glossary),
+            numbered_source=format_numbered(source_regions),
+            numbered_candidate=format_numbered(candidate_regions),
         )
         try:
             async with self._sem:
                 resp = await self._llm.ainvoke([HumanMessage(content=prompt)])
         except Exception as exc:
             logger.warning("[reviewer] %s call failed: %s", self._model, exc)
-            return ReviewResult(
-                items=[
-                    ReviewItem(index=i, status="ok", corrected=c)
-                    for i, c in enumerate(candidate_regions)
-                ],
-                fixed_count=0,
-            )
+            return _passthrough_result(candidate_regions)
 
-        raw = resp.content if isinstance(resp.content, str) else "".join(
-            p.get("text", "") if isinstance(p, dict) else str(p) for p in resp.content
-        )
-        cleaned = _strip_fences(raw)
-        if not cleaned.startswith("["):
-            match = re.search(r"\[.*\]", cleaned, re.DOTALL)
-            if match:
-                cleaned = match.group(0)
+        cleaned = extract_json_blob(message_content_to_text(resp.content), "[")
         try:
             parsed = json.loads(cleaned)
         except json.JSONDecodeError:
             logger.warning(
                 "[reviewer] %s returned non-JSON; head=%r", self._model, cleaned[:200]
             )
-            return ReviewResult(
-                items=[
-                    ReviewItem(index=i, status="ok", corrected=c)
-                    for i, c in enumerate(candidate_regions)
-                ],
-                fixed_count=0,
-            )
-
+            return _passthrough_result(candidate_regions)
         if not isinstance(parsed, list):
-            return ReviewResult(
-                items=[
-                    ReviewItem(index=i, status="ok", corrected=c)
-                    for i, c in enumerate(candidate_regions)
-                ],
-                fixed_count=0,
-            )
+            return _passthrough_result(candidate_regions)
 
-        # Index returned items so the model's order doesn't have to be perfect.
         by_index: dict[int, ReviewItem] = {}
         for entry in parsed:
             if not isinstance(entry, dict):
@@ -301,31 +238,22 @@ class Reviewer:
                 idx = int(entry.get("index"))
             except (TypeError, ValueError):
                 continue
-            status = entry.get("status") or "ok"
             corrected = entry.get("corrected")
             if not isinstance(corrected, str):
                 continue
-            by_index[idx] = ReviewItem(
-                index=idx,
-                status="fixed" if status == "fixed" else "ok",
-                corrected=corrected,
-            )
+            status = "fixed" if entry.get("status") == "fixed" else "ok"
+            by_index[idx] = ReviewItem(index=idx, status=status, corrected=corrected)
 
         items: list[ReviewItem] = []
         fixed_count = 0
         for i, candidate in enumerate(candidate_regions):
-            item = by_index.get(
-                i, ReviewItem(index=i, status="ok", corrected=candidate)
-            )
+            item = by_index.get(i, ReviewItem(index=i, status="ok", corrected=candidate))
             if item.status == "fixed" and item.corrected != candidate:
                 fixed_count += 1
             items.append(item)
-
         logger.info(
             "[reviewer] %s reviewed %d regions, %d corrected",
-            self._model,
-            len(items),
-            fixed_count,
+            self._model, len(items), fixed_count,
         )
         return ReviewResult(items=items, fixed_count=fixed_count)
 
@@ -333,12 +261,11 @@ class Reviewer:
 def reviewer_changed_spans(
     candidate: str, corrected: str
 ) -> list[tuple[int, int]]:
-    """Spans in `corrected` whose content differs from `candidate`.
+    """Spans in `corrected` (half-open) where content differs from `candidate`.
 
-    Used by the smoother-merge layer to drop smoother edits whose target span
-    overlaps a reviewer correction. Returns spans as `[start, end)` over the
-    `corrected` string. Equal opcodes contribute nothing; any non-equal opcode
-    contributes the corresponding corrected-side span.
+    Used by the smoother-merge layer to drop smoother edits that overlap a
+    reviewer correction. Pure deletions report as zero-width spans so
+    adjacent smoother edits at the join point are also dropped.
     """
     if candidate == corrected:
         return []
@@ -347,12 +274,7 @@ def reviewer_changed_spans(
     for op, _i1, _i2, j1, j2 in sm.get_opcodes():
         if op == "equal":
             continue
-        if j1 != j2:
-            spans.append((j1, j2))
-        else:
-            # Pure deletion — flag a zero-width span so adjacent smoother
-            # edits at the join point are dropped.
-            spans.append((j1, j1))
+        spans.append((j1, j2) if j1 != j2 else (j1, j1))
     return spans
 
 

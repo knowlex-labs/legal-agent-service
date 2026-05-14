@@ -30,6 +30,7 @@ from dataclasses import dataclass, field
 from langchain.chat_models import init_chat_model
 from langchain_core.messages import HumanMessage
 
+from legal_agent.agents.translation._llm_common import infer_provider
 from legal_agent.agents.translation.glossary import (
     DocState,
     GlossaryEntry,
@@ -225,18 +226,6 @@ class DocumentContext:
         return "\n".join(f"- {src} → {tgt}" for src, tgt in self.glossary.items())
 
 
-def _infer_provider(model: str) -> str:
-    """Map a model-name prefix to a langchain provider id."""
-    m = model.lower().removeprefix("models/")
-    if m.startswith("gemini"):
-        return "google-genai"
-    if m.startswith("claude"):
-        return "anthropic"
-    if m.startswith("gpt") or m.startswith("o"):
-        return "openai"
-    raise ValueError(f"Unsupported translation model: {model!r}")
-
-
 def _pack(frozen: list[str], max_chars: int) -> list[list[int]]:
     """Group indices of `frozen` into batches whose joined length ≤ max_chars."""
     batches: list[list[int]] = []
@@ -300,7 +289,7 @@ class Translator:
             self._llm = None
         else:
             self._llm = init_chat_model(
-                self._model, model_provider=_infer_provider(self._model)
+                self._model, model_provider=infer_provider(self._model)
             )
 
     @property

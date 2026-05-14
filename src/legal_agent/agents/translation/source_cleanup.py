@@ -1,23 +1,12 @@
 """Pre-translation deterministic source-text cleanup.
 
-Fixes the extraction artefacts that make the downstream translation feel
-machine-generated even when the model itself is faithful:
-
-- merged words ("Mr.Smith"), OCR residue (dotted underlines, repeated runs)
-- unambiguous Devanagari mid-word splits where the second token starts with
-  a dependent vowel sign / nukta / anusvara / virama (e.g. "झूठ ी" → "झूठी").
-  These characters can never begin a word, so seeing one at token-start
-  proves the space was an extraction artefact. Syllable-boundary splits
-  like "झू ठी" cannot be solved deterministically without a Hindi
-  morphological splitter — the parallel Haiku style smoother handles
-  those as part of its fused-content-word repair prompt.
-- end-of-line hyphenation
-- line-wrap reconstruction inside a block
-- adjacent duplicated 2-6 word fragments
-- soft-hyphens / zero-width spaces / smart quotes / NFC
-
-Pure deterministic functions, no I/O. Returns a `CleanupReport` so the
-contribution of each pass can surface in `pipeline_metrics`.
+Fixes extraction artefacts (merged words, OCR residue, mid-word splits,
+broken line joins, duplicate fragments, NFC / smart-quote noise) before the
+translator sees them. Pure functions; emits a `CleanupReport` so each pass's
+contribution surfaces in `pipeline_metrics`. The unambiguous Devanagari
+mid-word split rule (second token starts with a dependent vowel sign) is the
+only Hindi-aware pass — syllable-boundary splits like "झू ठी" are left for
+the style smoother to fix since they aren't deterministically detectable.
 """
 
 from __future__ import annotations
@@ -61,25 +50,15 @@ _DEHYPHEN_RE = re.compile(r"(\w+)-\n([a-z])")
 # Two-or-more spaces → one. Tabs → space. Trailing whitespace stripped per line.
 _MULTI_SPACE_RE = re.compile(r"[ \t]{2,}")
 
-# Devanagari dependent-vowel signs / nukta / anusvara / visarga / vedic marks
-# that CANNOT begin a word — if we see "<deva-letters> <one of these><...>",
-# the space is an extraction artefact and the two halves are one word.
-_DEVA_DEPENDENT_OPENER = (
-    "़"      # nukta
-    "ािीुूृॄ"  # ा ि ी ु ू ृ ॄ
-    "ॅॆेै"  # candra-e, short-e, e, ai
-    "ॉॊोौ"  # candra-o, short-o, o, au
-    "्"      # virama
-    "ँंः"  # candrabindu, anusvara, visarga
-)
-# The second token MUST start with a dependent-vowel-sign / nukta / anusvara /
-# visarga / virama — these characters CAN ONLY appear after a consonant in a
-# valid word, so seeing one at the start of a token proves the space was an
-# extraction artefact. Anchoring at position 0 (no `[ऀ-ॿ]*` before the class)
-# is critical: otherwise the pattern matches any Devanagari word containing a
-# dependent vowel anywhere, and we'd glue together legitimately separate words.
-_DEVA_MIDWORD_SPLIT_RE = re.compile(
-    rf"([ऀ-ॿ]+) ([{_DEVA_DEPENDENT_OPENER}][ऀ-ॿ]*)"
+# Devanagari dependent-vowel signs / nukta / anusvara / visarga / virama —
+# none can begin a word. When a token starts with one, the space before it is
+# an extraction artefact. The regex anchors the class at position 0 (no
+# leading `[ऀ-ॿ]*`); without that, the pattern would glue together any pair
+# of Devanagari tokens where the second happens to contain a dependent vowel
+# anywhere, which is most Hindi words.
+DEVA_DEPENDENT_OPENER = "़ािीुूृॄॅॆेैॉॊोौ्ँंः"
+DEVA_MIDWORD_SPLIT_RE = re.compile(
+    rf"([ऀ-ॿ]+) ([{DEVA_DEPENDENT_OPENER}][ऀ-ॿ]*)"
 )
 
 # Line-wrap detection: line that doesn't end with a sentence-terminator,
@@ -204,7 +183,7 @@ def _repair_devanagari_midword_splits(text: str, report: CleanupReport) -> str:
     prev = None
     while prev != text:
         prev = text
-        text, n = _DEVA_MIDWORD_SPLIT_RE.subn(lambda m: m.group(1) + m.group(2), text)
+        text, n = DEVA_MIDWORD_SPLIT_RE.subn(lambda m: m.group(1) + m.group(2), text)
         report.midword_splits_repaired += n
     return text
 
@@ -282,18 +261,11 @@ def clean_source_text(
 ) -> tuple[str, CleanupReport]:
     """Run every deterministic pre-translation cleanup pass.
 
-    Order is significant:
-      1. NFC normalize so all subsequent regex sees canonical codepoints.
-      2. Strip invisible / control chars — bloats token counts otherwise.
-      3. Smart-quote normalization.
-      4. Dehyphenate end-of-line word splits (must run before line rejoin).
-      5. Line-wrap reconstruction.
-      6. Devanagari mid-word repair (after rejoin, before dedup).
-      7. Adjacent duplicate fragment collapse.
-      8. Whitespace collapse.
-      9. Cap repeated punctuation runs.
-
-    `glossary_sources` lets dedup skip legitimate repeated party / scheme names.
+    Order matters: NFC first so subsequent regex sees canonical codepoints;
+    dehyphenation before line-rejoin (rejoin assumes wrapped lines are intact
+    words); mid-word repair after rejoin so it sees fused tokens; dedup last
+    on the textual side. `glossary_sources` lets dedup skip legitimate
+    repeated party / scheme names.
     """
     report = CleanupReport()
     if not text:

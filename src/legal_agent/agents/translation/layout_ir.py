@@ -26,6 +26,7 @@ class Span(BaseModel):
 # from `type` which captures structural shape (heading/paragraph/bullet).
 NativeBlockRole = Literal[
     "title",
+    "author",
     "heading",
     "body",
     "footnote",

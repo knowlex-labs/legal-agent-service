@@ -87,10 +87,17 @@ _VISION_STRUCTURED_CSS = """
   font-size: 10pt;
   color: #222;
 }
-/* Academic / journal roles */
+/* Academic / journal roles. Title font-size is set explicitly so the
+   `vt-sz-*` size class emitted by the vision model can't shrink it back
+   to body-adjacent — a journal title that's marked `large` would otherwise
+   render at 13pt, indistinguishable from body. */
 .vision-structured .vt-role-title {
-  margin: 14pt 0 6pt 0;
+  margin: 18pt 0 14pt 0;
   text-align: center;
+  font-size: 20pt !important;
+  font-weight: 700 !important;
+  line-height: 1.22;
+  letter-spacing: 0.2pt;
 }
 .vision-structured .vt-role-author {
   margin: 4pt 0 14pt 0;
@@ -398,18 +405,27 @@ body {{
 }}
 {_VISION_STRUCTURED_CSS}
 h1 {{
-  font-size: 17pt; font-weight: 700; margin: 0 0 6pt;
+  font-size: 18pt; font-weight: 700; margin: 12pt 0 8pt;
   text-align: center; page-break-after: avoid;
+  line-height: 1.25;
 }}
 h2 {{
-  font-size: 13pt; font-weight: 700;
-  margin: 12pt 0 4pt; page-break-after: avoid;
+  font-size: 14pt; font-weight: 700;
+  margin: 14pt 0 5pt; page-break-after: avoid;
+  line-height: 1.3;
+}}
+/* Document title (journal article title, book chapter title) — set apart
+   from regular h1 so it reads as the document opener, not just another
+   heading. Larger size, breathing room above and below. */
+h1.role-title {{
+  font-size: 22pt; font-weight: 700;
+  margin: 18pt 0 12pt; text-align: center;
+  line-height: 1.28; letter-spacing: 0.2pt;
 }}
 h1.center, h2.center {{ text-align: center; border-bottom: 0; }}
 h1.right,  h2.right  {{ text-align: right; }}
-h1.role-title {{ margin-top: 10pt; }}
 h1 + p, h2 + p, h3 + p {{ text-indent: 0; }}
-p {{ margin: 4pt 0; text-align: justify; }}
+p {{ margin: 6pt 0; text-align: justify; }}
 p.center {{ text-align: center; }}
 p.right  {{ text-align: right; }}
 /* Footnote rendering: small font, separated by a top rule from the previous
@@ -425,6 +441,12 @@ p.role-footnote {{
 p.role-footnote + p.role-footnote {{
   border-top: none;
   padding-top: 0;
+}}
+p.role-author {{
+  margin: 6pt 0 16pt 0;
+  text-align: center;
+  font-style: italic;
+  font-size: 1.05em;
 }}
 p.role-page_header, p.role-page_number {{
   font-size: 0.85em;

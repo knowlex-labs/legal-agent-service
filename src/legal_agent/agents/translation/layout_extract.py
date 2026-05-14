@@ -49,13 +49,18 @@ _PLACEHOLDER_RE = __import__("re").compile(
     __import__("re").IGNORECASE,
 )
 
-# Heading font-size thresholds (relative to median body size)
+# Heading font-size thresholds (relative to median body size).
+# _TITLE_RATIO was originally 1.6 — too strict for journal articles whose
+# title is typically ~1.3-1.45× body. With the previous threshold these
+# titles were misclassified as h2 and rendered at body-adjacent size in the
+# final PDF. 1.35 catches the journal-title case without dragging every
+# inline-bold sentence in.
 _H1_RATIO = 1.3
 _H2_RATIO = 1.08
-# Title is reserved for very-large early-document blocks (e.g. journal article
-# title, book chapter title). Footnotes are detected from a sub-body font size.
-_TITLE_RATIO = 1.6
+_TITLE_RATIO = 1.35
 _FOOTNOTE_RATIO = 0.85
+# Body paragraphs longer than this cannot be headings, even if one span is large.
+_HEADING_MAX_CHARS = 250
 
 _PERCENTILE_LO = 5   # margin_left: 5th-pct of line x0 values
 _PERCENTILE_HI = 95  # margin_right: 95th-pct of line x1 values
@@ -98,6 +103,15 @@ def _is_bullet(text: str) -> bool:
     return any(t.startswith(p) for p in _BULLET_PREFIXES)
 
 
+def _is_all_caps(text: str) -> bool:
+    """True when text is predominantly uppercase — catches small-caps journal titles
+    that are rendered at body font size and can't be detected by size ratio alone."""
+    letters = [c for c in text if c.isalpha()]
+    if len(letters) < 4:
+        return False
+    return sum(1 for c in letters if c.isupper()) / len(letters) > 0.85
+
+
 def _strip_bullet_prefix(spans: list[Span]) -> list[Span]:
     """Remove the leading bullet character from the first span."""
     if not spans:
@@ -118,6 +132,12 @@ def _classify(item: _Item, m_left: float, m_right: float, median_size: float) ->
     full_text = "".join(s.text for s in item.spans)
     align = _infer_align(item.x0, item.x1, m_left, m_right)
 
+    # ALL-CAPS + centered: journal/academic title rendered via small-caps at body
+    # font size. Size ratios can't distinguish these from body text, so detect
+    # by case + alignment. Cap at 400 chars to exclude long ALL-CAPS body paragraphs.
+    if align == "center" and _is_all_caps(full_text) and len(full_text) <= 400:
+        return TextBlock(type="heading", level=1, align=align, spans=item.spans, role="title")
+
     if median_size:
         if item.max_size >= _TITLE_RATIO * median_size:
             return TextBlock(
@@ -127,7 +147,9 @@ def _classify(item: _Item, m_left: float, m_right: float, median_size: float) ->
             return TextBlock(
                 type="heading", level=1, align=align, spans=item.spans, role="heading",
             )
-        if item.max_size >= _H2_RATIO * median_size:
+        # Guard: long blocks are body paragraphs even when one inline span (e.g. an
+        # italic word) is slightly larger. Real headings are short.
+        if item.max_size >= _H2_RATIO * median_size and len(full_text) <= _HEADING_MAX_CHARS:
             return TextBlock(
                 type="heading", level=2, align=align, spans=item.spans, role="heading",
             )
@@ -374,6 +396,22 @@ def _extract_page(page, median_size: float) -> list[TextBlock | RowBlock | Image
         # Single item
         for it in text_items:
             result.append(_classify(it, m_left, m_right, median_size))
+
+    # Post-pass: mark centered paragraph immediately after a title block as author.
+    # Journal articles commonly place the author name on a line by itself below the title.
+    for i in range(len(result) - 1):
+        blk = result[i]
+        if not isinstance(blk, TextBlock) or blk.role != "title":
+            continue
+        nxt = result[i + 1]
+        if not isinstance(nxt, TextBlock):
+            continue
+        if nxt.type == "paragraph" and nxt.align == "center":
+            nxt_text = "".join(s.text for s in nxt.spans).strip()
+            if len(nxt_text) <= 80:
+                result[i + 1] = TextBlock(
+                    type=nxt.type, align=nxt.align, spans=nxt.spans, role="author",
+                )
 
     return result
 

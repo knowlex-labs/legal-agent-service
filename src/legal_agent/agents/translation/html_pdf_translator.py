@@ -255,6 +255,82 @@ def _label_from_lang_code(code: str) -> str:
     return _LANG_LABEL_FROM_CODE.get(base, base.title() or "Unknown")
 
 
+async def _run_quality_pass(
+    *,
+    translated_joined: dict[int, str],
+    source_regions_per_owner: list[str],
+    doc_glossary,
+    source_label: str,
+    target_label: str,
+    job_id: str,
+) -> tuple[object, object, int]:
+    """Run reviewer + smoother concurrently and merge results into
+    `translated_joined` in-place. Returns (review_result, smooth_result,
+    smoother_applied_count). Either result may be None when its toggle is off.
+    """
+    from legal_agent.agents.translation.reviewer import (
+        Reviewer, review_in_batches,
+    )
+    from legal_agent.agents.translation.style_smoother import (
+        StyleSmoother, apply_edits, smooth_in_batches,
+    )
+
+    register = doc_glossary.doc_register if doc_glossary else "government_legal"
+    reviewer = Reviewer(source_label, target_label, register=register)
+    smoother = StyleSmoother(register=register)
+    owner_order = sorted(translated_joined.keys())
+    source_regions = [source_regions_per_owner[i] for i in owner_order]
+    candidate_regions = [translated_joined[i] for i in owner_order]
+    glossary = (
+        {t.source: t.target for t in doc_glossary.terms} if doc_glossary else None
+    )
+    subject = doc_glossary.subject if doc_glossary else ""
+
+    review_coro = (
+        review_in_batches(
+            reviewer,
+            source_regions=source_regions,
+            candidate_regions=candidate_regions,
+            subject=subject, glossary=glossary, batch_size=20,
+        ) if reviewer.enabled else _none_coro()
+    )
+    smooth_coro = (
+        smooth_in_batches(
+            smoother,
+            candidate_regions=candidate_regions,
+            glossary=glossary, batch_size=20,
+        ) if smoother.enabled else _none_coro()
+    )
+    t = time.perf_counter()
+    review_result, smooth_result = await asyncio.gather(review_coro, smooth_coro)
+    logger.info(
+        "[%s] quality pass took %.2fs (reviewer=%s, smoother=%s)",
+        job_id, time.perf_counter() - t,
+        "on" if review_result else "off",
+        "on" if smooth_result else "off",
+    )
+
+    smoother_applied = 0
+    for k, owner in enumerate(owner_order):
+        candidate = candidate_regions[k]
+        review_item = review_result.items[k] if review_result else None
+        smooth_item = smooth_result.items[k] if smooth_result else None
+        if review_item and review_item.status == "fixed":
+            translated_joined[owner] = review_item.corrected
+        elif smooth_item and smooth_item.edits:
+            new_text = apply_edits(candidate, smooth_item.edits)
+            translated_joined[owner] = new_text
+            if new_text != candidate:
+                smoother_applied += 1
+        else:
+            translated_joined[owner] = candidate
+    return review_result, smooth_result, smoother_applied
+
+
+async def _none_coro():
+    return None
+
+
 async def _translate_ir_document(
     ir_doc,
     lang: str,
@@ -297,25 +373,20 @@ async def _translate_ir_document(
 
     joined_per_block = ["".join(s.text for s in spans) for spans in original_span_lists]
 
-    # ── Pre-translation source cleanup ──────────────────────────────────
-    # Deterministic passes: NFC, soft-hyphen / zero-width strip, smart-quote
-    # normalization, end-of-line dehyphenation, line-wrap rejoin, Devanagari
-    # mid-word repair (fixes the "झू ठी" class), adjacent ngram dedup.
-    # Runs BEFORE the translator so the model never sees garbage.
+    # Pre-translation source cleanup — runs before the translator so the
+    # model never sees extraction garbage (merged words, OCR residue, mid-word
+    # splits, line-wrap breaks). See source_cleanup.clean_source_text.
     from legal_agent.agents.translation.source_cleanup import (
         CleanupReport,
         clean_source_text,
     )
 
     cleanup_total = CleanupReport()
-    cleaned_per_block: list[str] = []
+    joined_per_block_for_translate: list[str] = []
     for joined in joined_per_block:
         cleaned, rep = clean_source_text(joined)
         cleanup_total.merge(rep)
-        cleaned_per_block.append(cleaned)
-    # Translate the cleaned text but keep the original for the renderer's
-    # bold/italic ratio calculation (it counts char widths against `joined`).
-    joined_per_block_for_translate = cleaned_per_block
+        joined_per_block_for_translate.append(cleaned)
 
     translatable_indices: list[int] = []
     translatable_chunks: list[str] = []
@@ -386,98 +457,21 @@ async def _translate_ir_document(
     for chunk_text, owner in zip(translated_chunks, chunk_owner):
         translated_joined[owner] = translated_joined.get(owner, "") + chunk_text
 
-    # ── Stage C: parallel fidelity reviewer || style smoother ───────────
-    # Both run concurrently on the same candidate. Merge per-region:
-    #   - if reviewer marked "fixed", start from the reviewer's corrected
-    #     text and apply only those smoother edits whose span does NOT
-    #     overlap any reviewer-touched span,
-    #   - else start from the candidate and apply all smoother edits.
-    # This guarantees no fidelity correction is silently lost while still
-    # capturing the smoother's style improvements (over-Sanskritization,
-    # fused-content-word repairs, awkward calques).
+    # Stage C: fidelity reviewer + style smoother in parallel. Per-region
+    # merge prefers reviewer fixes (fidelity wins) and applies smoother edits
+    # only on regions the reviewer left untouched — smoother spans index
+    # into the original candidate, not the reviewer's rewrite, so they can't
+    # be safely composed on rewritten regions.
     if run_stage_ac and translated_joined:
-        from legal_agent.agents.translation.reviewer import (
-            Reviewer,
-            review_in_batches,
-            reviewer_changed_spans,
+        review_result, smooth_result, smoother_applied = await _run_quality_pass(
+            translated_joined=translated_joined,
+            source_regions_per_owner=joined_per_block_for_translate,
+            doc_glossary=doc_glossary,
+            source_label=source_label,
+            target_label=target_label,
+            job_id=job_id,
         )
-        from legal_agent.agents.translation.style_smoother import (
-            StyleSmoother,
-            apply_edits,
-            smooth_in_batches,
-        )
-        register_for_quality = (
-            doc_glossary.doc_register if doc_glossary else "government_legal"
-        )
-        reviewer = Reviewer(source_label, target_label, register=register_for_quality)
-        smoother = StyleSmoother(register=register_for_quality)
         owner_order = sorted(translated_joined.keys())
-        source_regions = [joined_per_block_for_translate[i] for i in owner_order]
-        candidate_regions = [translated_joined[i] for i in owner_order]
-        glossary_dict = (
-            {t.source: t.target for t in doc_glossary.terms}
-            if doc_glossary
-            else None
-        )
-        subject_str = doc_glossary.subject if doc_glossary else ""
-
-        async def _run_reviewer():
-            if not reviewer.enabled:
-                return None
-            return await review_in_batches(
-                reviewer,
-                source_regions=source_regions,
-                candidate_regions=candidate_regions,
-                subject=subject_str,
-                glossary=glossary_dict,
-                batch_size=20,
-            )
-
-        async def _run_smoother():
-            if not smoother.enabled:
-                return None
-            return await smooth_in_batches(
-                smoother,
-                candidate_regions=candidate_regions,
-                glossary=glossary_dict,
-                batch_size=20,
-            )
-
-        t_quality = time.perf_counter()
-        review_result, smooth_result = await asyncio.gather(
-            _run_reviewer(), _run_smoother()
-        )
-        logger.info(
-            "[%s] quality pass took %.2fs (reviewer=%s, smoother=%s)",
-            job_id, time.perf_counter() - t_quality,
-            "on" if review_result else "off",
-            "on" if smooth_result else "off",
-        )
-        smoother_applied = 0
-        for k, owner in enumerate(owner_order):
-            candidate = candidate_regions[k]
-            review_item = review_result.items[k] if review_result else None
-            smooth_item = smooth_result.items[k] if smooth_result else None
-            if review_item and review_item.status == "fixed":
-                base = review_item.corrected
-                touched = reviewer_changed_spans(candidate, base)
-                # Smoother spans index into the original candidate, NOT into
-                # the reviewer's corrected text — they refer to different
-                # strings. Safest policy: when the reviewer rewrote a region,
-                # skip the smoother's edits for that region. The reviewer's
-                # correction is the source of truth for fidelity; style
-                # improvements there are a v2 problem.
-                if touched:
-                    pass
-                translated_joined[owner] = base
-            else:
-                base = candidate
-                if smooth_item and smooth_item.edits:
-                    translated_joined[owner] = apply_edits(base, smooth_item.edits)
-                    if translated_joined[owner] != base:
-                        smoother_applied += 1
-                else:
-                    translated_joined[owner] = base
         if review_result is not None:
             pipeline_metrics["reviewer_regions"] = len(owner_order)
             pipeline_metrics["reviewer_fixed_count"] = review_result.fixed_count
@@ -486,17 +480,13 @@ async def _translate_ir_document(
             pipeline_metrics["smoother_changes"] = smoother_applied
             pipeline_metrics["smoother_model"] = settings.translation_smoother_model
 
-    # ── Rule-based Hindi post-processing ────────────────────────────────
-    # Catches Sarvam surface artefacts (mid-word splits, danda spacing,
-    # ASCII vs Devanagari quote scoping, adjacent ngram dupes) and applies
-    # govt-Hindi rules (DIN-, F.NO., address-abbrev) ONLY when the doc
-    # register is government_legal — academic translations stay clean.
+    # Hindi post-processing: surface fixes (danda / mid-word / dedup / quotes
+    # / numerals) on every Hindi doc, plus govt-Hindi label rewrites gated to
+    # the government_legal register so academic translations stay clean.
     if target_code.startswith("hi"):
         from legal_agent.agents.translation.hindi_postprocess import clean_hindi_output
 
-        register_for_hindi = (
-            doc_glossary.doc_register if doc_glossary else "general"
-        )
+        register_for_hindi = doc_glossary.doc_register if doc_glossary else "general"
         glossary_targets = frozenset(
             t.target for t in doc_glossary.terms if t.target
         ) if doc_glossary else frozenset()

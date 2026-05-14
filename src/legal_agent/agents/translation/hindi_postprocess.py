@@ -1,19 +1,10 @@
 """Rule-based Hindi post-translation cleanup.
 
-Runs after the parallel reviewer + smoother. Catches surface-level Sarvam
-artefacts and govt-Hindi normalization the LLMs don't reliably enforce:
-
-- NFC re-pass
-- danda / comma / period spacing
-- mid-word splits Sarvam may produce ("झू ठी" → "झूठी")
-- duplicate adjacent sentences / 2-6 word ngrams (glossary-aware)
-- ASCII-quote → Devanagari-curly conversion when the quotes sit between
-  Devanagari characters; English regions left alone
-- numerals policy (western default; devanagari opt-in)
-- govt-Hindi rules (DIN-, F.NO., प्लॉट नं., मकान नं., बैंक खाता नं.) gated
-  to the `government_legal` register so academic docs aren't bureaucrat-ified
-
-Returns a `CleanupReport` for `pipeline_metrics`.
+Runs after the parallel reviewer + smoother. Surface fixes (danda / comma /
+period spacing, mid-word splits, adjacent sentence + ngram dedup, NFC,
+Devanagari-scoped smart quotes, numerals policy) plus govt-Hindi label
+rewrites gated to the `government_legal` register so academic docs aren't
+bureaucrat-ified. Emits a `HindiCleanupReport` for `pipeline_metrics`.
 """
 
 from __future__ import annotations
@@ -21,6 +12,8 @@ from __future__ import annotations
 import re
 import unicodedata
 from dataclasses import dataclass
+
+from legal_agent.agents.translation.source_cleanup import DEVA_MIDWORD_SPLIT_RE
 
 _DEVA = "ऀ-ॿ"
 _DEVA_RANGE_RE = re.compile(f"[{_DEVA}]")
@@ -36,18 +29,6 @@ _ADDRESS_NORMALIZATIONS = (
     (re.compile(r"प्लॉट\s*नं\.?"), "प्लॉट संख्या"),
     (re.compile(r"बैंक\s*खाता\s*नं\.?"), "बैंक खाता संख्या"),
     (re.compile(r"मकान\s*नं\.?"), "मकान संख्या"),
-)
-
-# Devanagari dependent-vowel signs / nukta / anusvara / visarga / virama —
-# none of these can start a word. Same rule as source_cleanup; runs again
-# here because Sarvam occasionally inserts a space mid-syllable.
-_DEVA_DEPENDENT_OPENER = "़ािीुूृॄॅॆेैॉॊोौ्ँंः"
-# See source_cleanup._DEVA_MIDWORD_SPLIT_RE — the second token must START
-# with a dependent vowel sign. Anchoring at position 0 prevents the regex
-# from gluing legitimately separate words that happen to contain a dependent
-# vowel anywhere.
-_DEVA_MIDWORD_SPLIT_RE = re.compile(
-    rf"([{_DEVA}]+) ([{_DEVA_DEPENDENT_OPENER}][{_DEVA}]*)"
 )
 
 # Danda spacing — sentence-final danda should have a single space after and no
@@ -120,7 +101,7 @@ def _repair_midword_splits(text: str, report: HindiCleanupReport) -> str:
     prev = None
     while prev != text:
         prev = text
-        text, n = _DEVA_MIDWORD_SPLIT_RE.subn(lambda m: m.group(1) + m.group(2), text)
+        text, n = DEVA_MIDWORD_SPLIT_RE.subn(lambda m: m.group(1) + m.group(2), text)
         report.midword_splits_repaired += n
     return text
 
