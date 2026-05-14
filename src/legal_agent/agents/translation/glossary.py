@@ -95,6 +95,19 @@ class Glossary:
             return entry.first_mention
         return entry.hi
 
+    def with_dynamic_entries(self, entries: list[GlossaryEntry]) -> "Glossary":
+        """Return a new Glossary with per-document entries overlaid on this one.
+
+        Dynamic entries take precedence on key collision so the per-document
+        extractor's output (Stage A) overrides the static YAML when the same
+        term appears in both. Used by the three-stage translation pipeline.
+        """
+        merged_by_term = {e.term: e for e in self._entries}
+        for entry in entries:
+            if entry.term:
+                merged_by_term[entry.term] = entry
+        return Glossary(list(merged_by_term.values()))
+
 
 @functools.lru_cache(maxsize=1)
 def get_glossary() -> Glossary:

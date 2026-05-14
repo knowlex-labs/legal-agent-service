@@ -57,12 +57,22 @@ class Document(BaseModel):
 # --- Vision structured layout (scanned PDF translation) ----------------------------
 
 VisionRegionRole = Literal[
+    # Indian govt / legal document roles.
     "letterhead",
     "meta_row",
     "subject",
     "body_clause",
     "signature_block",
     "footer",
+    # Academic / journal / general document roles.
+    "title",
+    "author",
+    "page_header",
+    "page_number",
+    "body",
+    "footnote",
+    "block_quote",
+    "caption",
     "general",
 ]
 

@@ -203,8 +203,8 @@ async def translate_pdf_via_html(
         raise RuntimeError("extract_document returned no pages — PDF may be image-only, encrypted, or invalid")
     logger.info("[%s] native extract took %.2fs", job_id, time.perf_counter() - t_extract)
 
-    translated_ir, blocks_total, blocks_translated, backend = await _translate_ir_document(
-        ir_doc, lang, source_code, target_code, job_id
+    translated_ir, blocks_total, blocks_translated, backend, pipeline_metrics = (
+        await _translate_ir_document(ir_doc, lang, source_code, target_code, job_id)
     )
 
     # 4. Render to HTML
@@ -223,8 +223,24 @@ async def translate_pdf_via_html(
         "blocks_total": blocks_total,
         "blocks_translated": blocks_translated,
         "translation_backend": backend,
-        "translation_pipeline": "pymupdf_ir_sarvam_playwright",
+        "translation_pipeline": "pymupdf_ir_three_stage_playwright",
+        **pipeline_metrics,
     }
+
+
+_LANG_LABEL_FROM_CODE: dict[str, str] = {
+    "en": "English", "hi": "Hindi", "mr": "Marathi", "bn": "Bengali",
+    "ta": "Tamil", "te": "Telugu", "gu": "Gujarati", "kn": "Kannada",
+    "ml": "Malayalam", "or": "Odia", "pa": "Punjabi", "as": "Assamese",
+    "ur": "Urdu", "ne": "Nepali", "sa": "Sanskrit", "mai": "Maithili",
+    "kok": "Konkani", "doi": "Dogri", "sd": "Sindhi", "ks": "Kashmiri",
+    "brx": "Bodo", "mni": "Manipuri", "sat": "Santali",
+}
+
+
+def _label_from_lang_code(code: str) -> str:
+    base = code.split("-", 1)[0].lower() if code else ""
+    return _LANG_LABEL_FROM_CODE.get(base, base.title() or "Unknown")
 
 
 async def _translate_ir_document(
@@ -235,9 +251,23 @@ async def _translate_ir_document(
     job_id: str,
 ):
     from legal_agent.agents.translation.layout_ir import RowBlock, Span, TextBlock
-    from legal_agent.agents.translation.translator import Translator
+    from legal_agent.agents.translation.translator import DocumentContext, Translator
+    from legal_agent.config import get_settings
 
-    translator = Translator(lang)
+    settings = get_settings()
+    # Stage B backend: honour translation_llm_model. When it's "sarvam"
+    # (the configured default), Sarvam REST does the per-chunk translation —
+    # fast, Indic-specialist, no system prompt. Any other value names an LLM
+    # (claude-*, gemini-*, gpt-*) and engages the context-windowed prompt path.
+    stage_b_model = settings.translation_llm_model
+    translator = Translator(lang, model=stage_b_model)
+    # Stage A (glossary) + Stage C (reviewer) run for both Sarvam and LLM
+    # backends. On Sarvam, Stage A terms protect via freeze()/restore() sentinels
+    # (Sarvam has no system prompt), and Stage C catches drift post-translation.
+    # Only Stage B's context-windowed prompt remains LLM-only — gated inside
+    # Translator via uses_context_pipeline.
+    run_stage_ac = True
+
     block_refs: list[tuple[int, int, str]] = []
     original_span_lists: list[list[Span]] = []
 
@@ -263,11 +293,51 @@ async def _translate_ir_document(
         prepared = _collapse_repeated_chars(joined.strip())
         chunks = _chunk_for_sarvam(prepared)
         if len(chunks) > 1:
-            logger.info("[sarvam-translate] splitting %d chars into %d chunks", len(prepared), len(chunks))
+            logger.info("[translate] splitting %d chars into %d chunks", len(prepared), len(chunks))
         translatable_indices.append(i)
         for c in chunks:
             translatable_chunks.append(c)
             chunk_owner.append(i)
+
+    source_label = _label_from_lang_code(source_code)
+    target_label = _label_from_lang_code(target_code) or lang.title()
+
+    pipeline_metrics: dict[str, object] = {
+        "translation_pipeline_mode": "three_stage" if run_stage_ac else "legacy_single_pass",
+        "translation_primary_model": translator.backend,
+    }
+
+    # Stage A — per-document glossary extractor (Haiku); runs for any backend.
+    doc_glossary = None
+    if run_stage_ac and translatable_indices:
+        from legal_agent.agents.translation.document_glossary import (
+            extract_document_glossary,
+        )
+        t_gloss = time.perf_counter()
+        joined_source_text = "\n\n".join(
+            joined_per_block[i] for i in translatable_indices
+        )
+        doc_glossary = await extract_document_glossary(
+            joined_source_text, source_label, target_label,
+        )
+        pipeline_metrics["glossary_terms"] = len(doc_glossary.terms)
+        pipeline_metrics["document_subject"] = doc_glossary.subject[:200]
+        pipeline_metrics["document_register"] = doc_glossary.doc_register
+        logger.info(
+            "[%s] glossary extraction took %.2fs (%d terms, register=%s)",
+            job_id, time.perf_counter() - t_gloss, len(doc_glossary.terms),
+            doc_glossary.doc_register,
+        )
+        translator.set_document_context(
+            DocumentContext(
+                subject=doc_glossary.subject,
+                source_language=source_label,
+                target_language=target_label,
+                register=doc_glossary.doc_register,
+                glossary={t.source: t.target for t in doc_glossary.terms},
+            ),
+            dynamic_entries=doc_glossary.to_glossary_entries(),
+        )
 
     translated_chunks: list[str] = []
     if translatable_chunks:
@@ -281,8 +351,47 @@ async def _translate_ir_document(
     for chunk_text, owner in zip(translated_chunks, chunk_owner):
         translated_joined[owner] = translated_joined.get(owner, "") + chunk_text
 
+    # Stage C — source-grounded reviewer pass; runs for any backend.
+    if run_stage_ac and translated_joined and settings.translation_reviewer_enabled:
+        from legal_agent.agents.translation.reviewer import (
+            Reviewer,
+            review_in_batches,
+        )
+        reviewer = Reviewer(
+            source_label,
+            target_label,
+            register=(doc_glossary.doc_register if doc_glossary else "government_legal"),
+        )
+        if reviewer.enabled:
+            owner_order = sorted(translated_joined.keys())
+            source_regions = [joined_per_block[i] for i in owner_order]
+            candidate_regions = [translated_joined[i] for i in owner_order]
+            t_review = time.perf_counter()
+            review = await review_in_batches(
+                reviewer,
+                source_regions=source_regions,
+                candidate_regions=candidate_regions,
+                subject=(doc_glossary.subject if doc_glossary else ""),
+                glossary=(
+                    {t.source: t.target for t in doc_glossary.terms}
+                    if doc_glossary
+                    else None
+                ),
+                batch_size=20,
+            )
+            logger.info(
+                "[%s] reviewer pass took %.2fs (%d/%d corrected)",
+                job_id, time.perf_counter() - t_review,
+                review.fixed_count, len(owner_order),
+            )
+            for owner, item in zip(owner_order, review.items):
+                translated_joined[owner] = item.corrected
+            pipeline_metrics["reviewer_regions"] = len(owner_order)
+            pipeline_metrics["reviewer_fixed_count"] = review.fixed_count
+            pipeline_metrics["reviewer_model"] = settings.translation_reviewer_model
+
     # CBIC/Rajbhasha post-pass for Hindi: transliterate DIN/F.NO. labels and expand
-    # address abbreviations (नं. → संख्या) that Sarvam doesn't reliably handle.
+    # address abbreviations (नं. → संख्या) that the translator doesn't reliably handle.
     if target_code.startswith("hi"):
         from legal_agent.agents.translation.glossary import normalize_govt_hindi
         translated_joined = {k: normalize_govt_hindi(v) for k, v in translated_joined.items()}
@@ -340,9 +449,9 @@ async def _translate_ir_document(
     )
 
     logger.info(
-        "[%s] translated %d/%d blocks, %d pages via Sarvam",
-        job_id, blocks_translated, blocks_total, len(ir_doc.pages),
+        "[%s] translated %d/%d blocks, %d pages via %s",
+        job_id, blocks_translated, blocks_total, len(ir_doc.pages), translator.backend,
     )
-    return translated_ir, blocks_total, blocks_translated, translator.backend
+    return translated_ir, blocks_total, blocks_translated, translator.backend, pipeline_metrics
 
 

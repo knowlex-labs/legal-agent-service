@@ -63,12 +63,22 @@ def sanitize_vision_inline_html(fragment: str) -> str:
 
 
 _ROLES: frozenset[str] = frozenset({
+    # Indian govt / legal.
     "letterhead",
     "meta_row",
     "subject",
     "body_clause",
     "signature_block",
     "footer",
+    # Academic / journal / general.
+    "title",
+    "author",
+    "page_header",
+    "page_number",
+    "body",
+    "footnote",
+    "block_quote",
+    "caption",
     "general",
 })
 

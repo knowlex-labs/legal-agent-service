@@ -87,6 +87,53 @@ _VISION_STRUCTURED_CSS = """
   font-size: 10pt;
   color: #222;
 }
+/* Academic / journal roles */
+.vision-structured .vt-role-title {
+  margin: 14pt 0 6pt 0;
+  text-align: center;
+}
+.vision-structured .vt-role-author {
+  margin: 4pt 0 14pt 0;
+  text-align: center;
+  font-style: italic;
+}
+.vision-structured .vt-role-page_header {
+  margin: 0 0 6pt 0;
+  font-size: 9pt;
+  color: #444;
+}
+.vision-structured .vt-role-page_number {
+  margin: 6pt 0;
+  text-align: center;
+  font-size: 9pt;
+  color: #444;
+}
+.vision-structured .vt-role-body {
+  margin: 4pt 0;
+  text-align: justify;
+}
+.vision-structured .vt-role-footnote {
+  margin: 2pt 0;
+  font-size: 9pt;
+  border-top: 0.5pt solid #888;
+  padding-top: 4pt;
+}
+.vision-structured .vt-role-footnote + .vt-role-footnote {
+  border-top: none;
+  padding-top: 0;
+}
+.vision-structured .vt-role-block_quote {
+  margin: 6pt 18pt;
+  font-size: 10pt;
+  border-left: 2pt solid #888;
+  padding-left: 8pt;
+}
+.vision-structured .vt-role-caption {
+  margin: 4pt 0;
+  font-size: 9pt;
+  font-style: italic;
+  text-align: center;
+}
 /* Rows inside structured sections */
 .vision-structured .vt-row {
   display: flex;

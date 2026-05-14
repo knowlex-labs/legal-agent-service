@@ -95,6 +95,24 @@ class Settings(BaseSettings):
     # Char budget per batched translate call. Sarvam REST caps input at ~2000;
     # leave headroom for the sentinel + glossary sentinel expansion.
     translation_batch_max_chars: int = 1800
+
+    # ── Three-stage agent translation pipeline ───────────────────────────
+    # Stage A (glossary extractor) → Stage B (translator with doc context) →
+    # Stage C (source-grounded reviewer). Activated for legal/administrative
+    # documents to eliminate mid-document drift / topic substitution.
+    # Stage A (glossary) + Stage C (reviewer) now run for both Sarvam and LLM
+    # backends — only Stage B (translation) is dispatched by translation_llm_model.
+    translation_primary_model: str = "claude-sonnet-4-5-20250929"
+    translation_reviewer_enabled: bool = True
+    translation_reviewer_model: str = "claude-haiku-4-5-20251001"
+    translation_glossary_extractor_model: str = "claude-haiku-4-5-20251001"
+    # Per-LLM-call char budget when running the three-stage pipeline. Smaller
+    # than translation_batch_max_chars (1800) so any drift is bounded to a
+    # short window and the reviewer has tight scope.
+    translation_chunk_max_chars: int = 800
+    # Preceding-output regions fed back as CONTEXT_PREVIOUS_OUTPUT for the
+    # translator. Higher = more continuity but more tokens.
+    translation_context_window_regions: int = 3
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
     # Content-addressed OCR + vision-translation cache in S3 (shared client/path prefix).
