@@ -20,11 +20,27 @@ class Span(BaseModel):
     italic: bool = False
 
 
+# Semantic role on a native-PDF block, populated by the heading-detection pass
+# in layout_extract. Used by the semantic chunker (footnotes isolated, headings
+# 1:1) and the layout renderer (per-role CSS, page-break controls). Distinct
+# from `type` which captures structural shape (heading/paragraph/bullet).
+NativeBlockRole = Literal[
+    "title",
+    "heading",
+    "body",
+    "footnote",
+    "page_header",
+    "page_number",
+    "caption",
+]
+
+
 class TextBlock(BaseModel):
     type: Literal["heading", "paragraph", "bullet", "numbered"]
     level: int = 0
     align: Literal["left", "center", "right"] = "left"
     spans: list[Span]
+    role: NativeBlockRole | None = None
 
 
 class RowBlock(BaseModel):
@@ -32,6 +48,7 @@ class RowBlock(BaseModel):
     type: Literal["row"] = "row"
     left: list[Span]
     right: list[Span]
+    role: NativeBlockRole | None = None
 
 
 class ImageBlock(BaseModel):

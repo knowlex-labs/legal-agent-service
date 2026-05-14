@@ -189,11 +189,19 @@ def _render_spans(spans: list[Span]) -> str:
     return "".join(parts)
 
 
+def _role_class(role: str | None) -> str:
+    if not role:
+        return ""
+    return f"role-{role}"
+
+
 def _render_block(block: TextBlock | RowBlock | ImageBlock) -> str:
     if isinstance(block, RowBlock):
         left = _render_spans(block.left)
         right = _render_spans(block.right)
-        return f'<div class="row"><div class="col-left">{left}</div><div class="col-right">{right}</div></div>\n'
+        role_cls = _role_class(block.role)
+        cls = f' class="row {role_cls}"' if role_cls else ' class="row"'
+        return f'<div{cls}><div class="col-left">{left}</div><div class="col-right">{right}</div></div>\n'
 
     if isinstance(block, ImageBlock):
         alt = _html.escape(block.alt_text or block.image_id)
@@ -204,21 +212,33 @@ def _render_block(block: TextBlock | RowBlock | ImageBlock) -> str:
 
     # TextBlock
     inner = _render_spans(block.spans)
+    role_cls = _role_class(block.role)
     if block.type == "heading":
-        tag = "h1" if block.level <= 1 else "h2"
-        cls = f' class="{block.align}"' if block.align != "left" else ""
+        # role=title takes the h1 slot regardless of detected level.
+        if block.role == "title":
+            tag = "h1"
+        else:
+            tag = "h1" if block.level <= 1 else "h2"
+        cls_parts: list[str] = []
+        if block.align != "left":
+            cls_parts.append(block.align)
+        if role_cls:
+            cls_parts.append(role_cls)
+        cls = f' class="{" ".join(cls_parts)}"' if cls_parts else ""
         return f"<{tag}{cls}>{inner}</{tag}>\n"
     if block.type == "bullet":
         return f"<li>{inner}</li>\n"
     if block.type == "numbered":
         return f"<li>{inner}</li>\n"
 
-    # paragraph
+    # paragraph (incl. footnotes)
     cls_parts = []
     if block.align == "center":
         cls_parts.append("center")
     elif block.align == "right":
         cls_parts.append("right")
+    if role_cls:
+        cls_parts.append(role_cls)
     cls = f' class="{" ".join(cls_parts)}"' if cls_parts else ""
     return f"<p{cls}>{inner}</p>\n"
 
@@ -260,10 +280,29 @@ def wrap_pages_html(per_page_html: list[str], lang: str) -> str:
     Used both by the IR-based native-text path (via render_to_html) and by the
     vision-LLM scanned path which emits raw HTML directly.
     """
+    from legal_agent.config import get_settings
+
     lang_lower = lang.lower()
     lang_code = _LANG_CODES.get(lang_lower, "hi")
     noto = _noto_family(lang_lower)
     direction = "rtl" if lang_lower in _RTL_LANGS else "ltr"
+    settings = get_settings()
+    is_indic = (
+        lang_lower in _DEVANAGARI_LANGS
+        or lang_lower in _SOUTH_INDIC
+        or lang_lower in _RTL_LANGS
+    )
+    # Devanagari / Indic scripts need more vertical breathing room than Latin
+    # because of stacked diacritics. 1.55 reads cleanly without looking spaced.
+    body_line_height = "1.55" if is_indic else "1.42"
+    body_font_size = "11.5pt" if is_indic else "11pt"
+    page_margin = (
+        f"{settings.translation_pdf_margin_top} "
+        f"{settings.translation_pdf_margin_right} "
+        f"{settings.translation_pdf_margin_bottom} "
+        f"{settings.translation_pdf_margin_left}"
+    )
+    hyphens_rule = "hyphens: none;" if is_indic else "hyphens: auto;"
 
     # @font-face declarations: ensure the family names referenced below resolve to a
     # shaping-capable font even when the host hasn't installed the Noto package.
@@ -343,28 +382,59 @@ def wrap_pages_html(per_page_html: list[str], lang: str) -> str:
 
     css = f"""
 {font_faces}
-@page {{ size: A4; margin: 1.5cm 1.4cm; }}
+@page {{ size: A4; margin: {page_margin}; }}
 * {{ box-sizing: border-box; }}
 body {{
   font-family: {noto};
   font-feature-settings: "kern" 1, "liga" 1, "calt" 1;
-  font-size: 11pt;
-  line-height: 1.38;
+  font-size: {body_font_size};
+  line-height: {body_line_height};
   color: #111;
   direction: {direction};
   text-rendering: optimizeLegibility;
+  {hyphens_rule}
+  widows: 2;
+  orphans: 2;
 }}
 {_VISION_STRUCTURED_CSS}
-h1 {{ font-size: 16pt; font-weight: 700; margin: 0 0 5pt; text-align: center; }}
+h1 {{
+  font-size: 17pt; font-weight: 700; margin: 0 0 6pt;
+  text-align: center; page-break-after: avoid;
+}}
 h2 {{
-  font-size: 12.5pt; font-weight: 700;
-  margin: 9pt 0 4pt;
+  font-size: 13pt; font-weight: 700;
+  margin: 12pt 0 4pt; page-break-after: avoid;
 }}
 h1.center, h2.center {{ text-align: center; border-bottom: 0; }}
 h1.right,  h2.right  {{ text-align: right; }}
-p {{ margin: 4pt 0; }}
+h1.role-title {{ margin-top: 10pt; }}
+h1 + p, h2 + p, h3 + p {{ text-indent: 0; }}
+p {{ margin: 4pt 0; text-align: justify; }}
 p.center {{ text-align: center; }}
 p.right  {{ text-align: right; }}
+/* Footnote rendering: small font, separated by a top rule from the previous
+   body block. Consecutive footnotes share one rule. */
+p.role-footnote {{
+  margin: 2pt 0;
+  font-size: 0.82em;
+  text-align: left;
+  page-break-inside: avoid;
+  border-top: 0.5pt solid #888;
+  padding-top: 4pt;
+}}
+p.role-footnote + p.role-footnote {{
+  border-top: none;
+  padding-top: 0;
+}}
+p.role-page_header, p.role-page_number {{
+  font-size: 0.85em;
+  color: #555;
+}}
+p.role-caption {{
+  font-size: 0.85em;
+  font-style: italic;
+  text-align: center;
+}}
 a {{ color: inherit; text-decoration: underline; }}
 .row {{
   display: flex;
@@ -376,7 +446,7 @@ a {{ color: inherit; text-decoration: underline; }}
 .col-left  {{ flex: 1 1 auto; }}
 .col-right {{ flex: 0 0 auto; white-space: nowrap; text-align: right; }}
 ul, ol {{ padding-left: 1.4em; margin: 4pt 0 7pt 0; }}
-li {{ margin-bottom: 3pt; line-height: 1.38; }}
+li {{ margin-bottom: 3pt; line-height: {body_line_height}; }}
 strong {{ font-weight: 700; }}
 .ocr-image {{
   margin: 8pt 0;

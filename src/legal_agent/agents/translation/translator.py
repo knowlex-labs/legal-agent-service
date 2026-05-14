@@ -107,8 +107,13 @@ Your contract:
 6. REGISTER. Match the source register. For Hindi government / legal sources,
    output formal English administrative prose ("hereby", "the undersigned",
    "with effect from"), not casual or marketing language. For English → Hindi,
-   follow CBIC / Rajbhasha conventions (formal Devanagari, no transliteration
-   of common nouns).
+   produce professional modern legal Hindi accessible to a practicing Indian
+   lawyer — formal Devanagari, but avoid forced तत्सम / over-Sanskritization
+   where a common-register word reads more naturally. Common English legal
+   terms — plaintiff, defendant, tort, prima facie, mens rea, actus reus,
+   consideration, equity, estoppel, in personam, in rem — may be used inline
+   with a parenthetical Hindi gloss on first occurrence only; subsequent
+   occurrences may use either form.
 7. CONTEXT BLOCKS ARE READ-ONLY. CONTEXT_PREVIOUS_OUTPUT and
    CONTEXT_NEXT_SOURCE are for continuity only. Do NOT include them in your
    output. Translate only what appears under CURRENT_CHUNK.
@@ -159,9 +164,16 @@ Your contract:
    pairs extracted from this specific document. You MUST use the listed target
    for every occurrence; deviations are errors.
 6. REGISTER. Match the source register. For academic / journal prose, produce
-   natural formal target-language prose — neither bureaucratic nor casual.
-   Translate every translatable word; do not leave English fragments inline
-   (e.g. render "U.S." as "अमेरिकी" / "संयुक्त राज्य अमेरिका" in Hindi, not "U.S").
+   natural formal target-language prose — neither bureaucratic nor casual,
+   neither textbook nor government-circular. For English → Hindi, that means
+   modern professional Hindi accessible to Indian researchers and lawyers —
+   avoid over-Sanskritized constructions where a common-register word reads
+   more naturally. Translate every translatable word; do not leave English
+   fragments inline (e.g. render "U.S." as "अमेरिकी" / "संयुक्त राज्य अमेरिका"
+   in Hindi, not "U.S"). Common English academic / legal terms — plaintiff,
+   defendant, tort, prima facie, mens rea, consideration, equity, estoppel,
+   in personam, in rem — may be used inline with a parenthetical Hindi gloss
+   on first occurrence only; subsequent occurrences may use either form.
 7. CONTEXT BLOCKS ARE READ-ONLY. CONTEXT_PREVIOUS_OUTPUT and
    CONTEXT_NEXT_SOURCE are for continuity only. Do NOT include them in your
    output. Translate only what appears under CURRENT_CHUNK.

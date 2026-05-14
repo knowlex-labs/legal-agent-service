@@ -105,6 +105,7 @@ class Settings(BaseSettings):
     translation_primary_model: str = "claude-sonnet-4-5-20250929"
     translation_reviewer_enabled: bool = True
     translation_reviewer_model: str = "claude-haiku-4-5-20251001"
+    translation_reviewer_max_concurrency: int = 4
     translation_glossary_extractor_model: str = "claude-haiku-4-5-20251001"
     # Per-LLM-call char budget when running the three-stage pipeline. Smaller
     # than translation_batch_max_chars (1800) so any drift is bounded to a
@@ -113,6 +114,34 @@ class Settings(BaseSettings):
     # Preceding-output regions fed back as CONTEXT_PREVIOUS_OUTPUT for the
     # translator. Higher = more continuity but more tokens.
     translation_context_window_regions: int = 3
+
+    # ── Pipeline quality layer ──────────────────────────────────────────
+    # Style smoother runs in parallel with the fidelity reviewer (Stage C).
+    # Emits diff-style edits so its output can be merged into reviewer fixes
+    # without overwriting fidelity corrections. Catches over-Sanskritization,
+    # awkward literal renderings, and fused content-words (हैंकेवल → हैं केवल)
+    # that rule-based passes can't solve without a Hindi morphological splitter.
+    translation_smoother_enabled: bool = True
+    translation_smoother_model: str = "claude-haiku-4-5-20251001"
+    translation_smoother_max_concurrency: int = 4
+    # Paragraph-/role-aware chunker. False keeps the legacy char-budget _pack.
+    translation_semantic_chunking: bool = True
+    # Cross-page paragraph stitching is OPT-IN — gated by strict geometry +
+    # role + heading checks, but the failure mode (merging unrelated paragraphs
+    # across section breaks) is severe enough to keep this off by default.
+    translation_cross_page_stitch: bool = False
+    # Hindi numeral policy after post-processing. "western" (default) keeps
+    # 0-9 — matches legal/contract conventions. "devanagari" rewrites to ०-९.
+    translation_hindi_numerals: Literal["western", "devanagari"] = "western"
+    # PDF page margins. Legacy 0/0/0/0 gave an edge-to-edge "machine print"
+    # look; current defaults read like a proper legal document.
+    translation_pdf_margin_top: str = "2.2cm"
+    translation_pdf_margin_bottom: str = "2.2cm"
+    translation_pdf_margin_left: str = "2.5cm"
+    translation_pdf_margin_right: str = "2cm"
+    # Running header (document subject) + page number rendered via Playwright
+    # headerTemplate / footerTemplate. Off keeps the bare-page look.
+    translation_pdf_running_header: bool = True
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
     # Content-addressed OCR + vision-translation cache in S3 (shared client/path prefix).

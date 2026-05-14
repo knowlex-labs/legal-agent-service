@@ -410,25 +410,34 @@ async def _translate_structured_page_via_sarvam(
     """
     from legal_agent.agents.translation.layout_ir import VisionStyledRowBlock
     from legal_agent.agents.translation.sarvam_translate import SARVAM_LANG_CODES
+    from legal_agent.agents.translation.source_cleanup import clean_source_text
     from legal_agent.agents.translation.translator import Translator
 
     blocks = list(page.blocks)
     items: list[tuple[int, str, list[str]]] = []  # (block_idx, side, tags)
     inputs: list[str] = []
 
+    def _prepare(raw: str) -> tuple[str, list[str]]:
+        # Inline-tag protection first so cleanup never sees HTML; THEN run
+        # deterministic source cleanup on the residual text (NFC, mid-word
+        # repair, ngram dedup, whitespace collapse).
+        protected, tags = _protect_tags(raw, _INLINE_TAG_RE)
+        cleaned, _report = clean_source_text(protected)
+        return cleaned, tags
+
     for i, b in enumerate(blocks):
         if isinstance(b, VisionStyledRowBlock):
             for side, raw in (("left", b.left_html), ("right", b.right_html)):
                 if raw and raw.strip():
-                    protected, tags = _protect_tags(raw, _INLINE_TAG_RE)
+                    cleaned, tags = _prepare(raw)
                     items.append((i, side, tags))
-                    inputs.append(protected)
+                    inputs.append(cleaned)
         else:
             raw = b.html or ""
             if raw.strip():
-                protected, tags = _protect_tags(raw, _INLINE_TAG_RE)
+                cleaned, tags = _prepare(raw)
                 items.append((i, "html", tags))
-                inputs.append(protected)
+                inputs.append(cleaned)
 
     if not inputs:
         return page

@@ -225,34 +225,7 @@ def strip_pua(text: str) -> str:
     return _PUA_RE.sub("", text)
 
 
-# CBIC/Rajbhasha conventions: ID labels are transliterated while the alphanumeric ID
-# (which is protected by _ID_RE during translation) is kept verbatim for portal verification.
-_GOVT_LABEL_REWRITES = (
-    (re.compile(r"\bDIN-"), "डीआईएन-"),
-    (re.compile(r"\bF\.\s*NO\.?[-:\s]"), "फा.सं.-"),
-    (re.compile(r"\bF\.\s*No\.?[-:\s]"), "फा.सं.-"),
-)
-
-# Address-block abbreviations → full forms (Rajbhasha saral-shabdavali: formal notices
-# require full forms, not abbreviations).
-_ADDRESS_NORMALIZATIONS = (
-    (re.compile(r"प्लॉट\s*नं\.?"), "प्लॉट संख्या"),
-    (re.compile(r"बैंक\s*खाता\s*नं\.?"), "बैंक खाता संख्या"),
-    (re.compile(r"मकान\s*नं\.?"), "मकान संख्या"),
-)
-
-
-def normalize_govt_hindi(text: str) -> str:
-    """Post-translation pass for Indian govt/legal Hindi documents.
-
-    Applies CBIC/Rajbhasha conventions the LLM/Sarvam call doesn't reliably enforce:
-    transliterates ID labels (DIN, F.NO.), expands address abbreviations (नं. → संख्या).
-    Safe to run on any Hindi output — patterns are specific enough to avoid collateral.
-    """
-    if not text:
-        return text
-    for pat, repl in _GOVT_LABEL_REWRITES:
-        text = pat.sub(repl, text)
-    for pat, repl in _ADDRESS_NORMALIZATIONS:
-        text = pat.sub(repl, text)
-    return text
+# Govt-Hindi rules (DIN-, F.NO., address abbreviations) moved to
+# `hindi_postprocess.clean_hindi_output` so they are register-gated to
+# government_legal docs only — academic translations no longer pick up
+# CBIC bureaucratic conventions they don't need.

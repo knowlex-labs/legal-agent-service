@@ -52,6 +52,10 @@ _PLACEHOLDER_RE = __import__("re").compile(
 # Heading font-size thresholds (relative to median body size)
 _H1_RATIO = 1.3
 _H2_RATIO = 1.08
+# Title is reserved for very-large early-document blocks (e.g. journal article
+# title, book chapter title). Footnotes are detected from a sub-body font size.
+_TITLE_RATIO = 1.6
+_FOOTNOTE_RATIO = 0.85
 
 _PERCENTILE_LO = 5   # margin_left: 5th-pct of line x0 values
 _PERCENTILE_HI = 95  # margin_right: 95th-pct of line x1 values
@@ -115,15 +119,30 @@ def _classify(item: _Item, m_left: float, m_right: float, median_size: float) ->
     align = _infer_align(item.x0, item.x1, m_left, m_right)
 
     if median_size:
+        if item.max_size >= _TITLE_RATIO * median_size:
+            return TextBlock(
+                type="heading", level=1, align=align, spans=item.spans, role="title",
+            )
         if item.max_size >= _H1_RATIO * median_size:
-            return TextBlock(type="heading", level=1, align=align, spans=item.spans)
+            return TextBlock(
+                type="heading", level=1, align=align, spans=item.spans, role="heading",
+            )
         if item.max_size >= _H2_RATIO * median_size:
-            return TextBlock(type="heading", level=2, align=align, spans=item.spans)
+            return TextBlock(
+                type="heading", level=2, align=align, spans=item.spans, role="heading",
+            )
+        if item.max_size and item.max_size <= _FOOTNOTE_RATIO * median_size:
+            # Small-font paragraph — almost always a footnote / endnote / page
+            # number / fine-print disclaimer on legal & journal pages. The
+            # chunker / renderer treats these distinctly from body.
+            return TextBlock(type="paragraph", align=align, spans=item.spans, role="footnote")
 
     if _is_bullet(full_text):
-        return TextBlock(type="bullet", align="left", spans=_strip_bullet_prefix(item.spans))
+        return TextBlock(
+            type="bullet", align="left", spans=_strip_bullet_prefix(item.spans), role="body",
+        )
 
-    return TextBlock(type="paragraph", align=align, spans=item.spans)
+    return TextBlock(type="paragraph", align=align, spans=item.spans, role="body")
 
 
 def _y_center(it: _Item) -> float:

@@ -13,6 +13,7 @@ pipeline exists to eliminate.
 from __future__ import annotations
 
 import asyncio
+import difflib
 import json
 import logging
 import re
@@ -43,6 +44,13 @@ A translation is WRONG if any of the following hold:
   (e) It alters or drops any number, date, identifier, section reference, name,
       email, URL, or `[__NNNN__]` placeholder.
   (f) Its register is informal/marketing when the source is administrative.
+  (g) Its register reads as a textbook / Sanskritized government-circular tone
+      when the source is modern legal/administrative prose. Prefer professional
+      modern Hindi that an Indian lawyer would actually write — avoid forced
+      तत्सम where a common-register word reads more naturally. Common English
+      legal terms (plaintiff, defendant, tort, prima facie, mens rea,
+      consideration, equity, estoppel, in personam, in rem) may be used inline
+      with a Hindi gloss on first occurrence only.
 
 For each numbered region:
   - If the translation is faithful and glossary-compliant, return status "ok"
@@ -88,6 +96,14 @@ A translation is WRONG if any of the following hold:
       rendering exists (e.g. "U.S" inside a Hindi sentence should be
       "अमेरिकी" / "संयुक्त राज्य अमेरिका"). Verbatim case names and citations
       (e.g. "Printz v. United States", "117 S. Ct. 2365") are exempt.
+  (g) Its register reads as a textbook or government circular when the source
+      is modern academic / journalistic prose. Prefer professional modern
+      Hindi accessible to Indian researchers — avoid over-Sanskritized
+      constructions where a natural-register word communicates the same
+      meaning. Common English academic / legal terms (plaintiff, defendant,
+      tort, prima facie, mens rea, consideration, equity, estoppel, in
+      personam, in rem) may be used inline with a Hindi gloss on first
+      occurrence only.
 
 For each numbered region:
   - If the translation is faithful and glossary-compliant, return status "ok"
@@ -173,6 +189,9 @@ class Reviewer:
         self._source_language = source_language
         self._target_language = target_language
         self._register = register if register in {"government_legal", "general"} else "government_legal"
+        self._sem = asyncio.Semaphore(
+            max(1, settings.translation_reviewer_max_concurrency)
+        )
         self._llm = (
             init_chat_model(self._model, model_provider=_infer_provider(self._model))
             if self._enabled
@@ -230,7 +249,8 @@ class Reviewer:
             numbered_candidate=_format_numbered(candidate_regions),
         )
         try:
-            resp = await self._llm.ainvoke([HumanMessage(content=prompt)])
+            async with self._sem:
+                resp = await self._llm.ainvoke([HumanMessage(content=prompt)])
         except Exception as exc:
             logger.warning("[reviewer] %s call failed: %s", self._model, exc)
             return ReviewResult(
@@ -308,6 +328,32 @@ class Reviewer:
             fixed_count,
         )
         return ReviewResult(items=items, fixed_count=fixed_count)
+
+
+def reviewer_changed_spans(
+    candidate: str, corrected: str
+) -> list[tuple[int, int]]:
+    """Spans in `corrected` whose content differs from `candidate`.
+
+    Used by the smoother-merge layer to drop smoother edits whose target span
+    overlaps a reviewer correction. Returns spans as `[start, end)` over the
+    `corrected` string. Equal opcodes contribute nothing; any non-equal opcode
+    contributes the corresponding corrected-side span.
+    """
+    if candidate == corrected:
+        return []
+    sm = difflib.SequenceMatcher(a=candidate, b=corrected, autojunk=False)
+    spans: list[tuple[int, int]] = []
+    for op, _i1, _i2, j1, j2 in sm.get_opcodes():
+        if op == "equal":
+            continue
+        if j1 != j2:
+            spans.append((j1, j2))
+        else:
+            # Pure deletion — flag a zero-width span so adjacent smoother
+            # edits at the join point are dropped.
+            spans.append((j1, j1))
+    return spans
 
 
 async def review_in_batches(
