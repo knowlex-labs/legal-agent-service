@@ -50,6 +50,7 @@ from legal_agent.synopsis.generator import SynopsisGenerator
 from legal_agent.synopsis.service import SynopsisService
 from legal_agent.workspace_chat.agent import WorkspaceChatAgent
 from legal_agent.workspace_chat.routes import set_workspace_chat_agent, workspace_chat_router
+from legal_agent.judgments.router import router as judgments_router
 
 def _setup_llm_environment() -> None:
     settings = get_settings()
@@ -161,6 +162,7 @@ def create_app() -> FastAPI:
     app.include_router(templates_router, prefix="/api/v1/drafts/templates", tags=["draft-templates"])
     app.include_router(workspace_chat_router, prefix="/api/v1", tags=["workspace-chat"])
     app.include_router(causelist_router, prefix="/api/v1", tags=["causelist"])
+    app.include_router(judgments_router, prefix="/api/v1/judgments", tags=["judgments"])
     from legal_agent.rag_engine.api.routes.collections import router as rag_collections_router
 
     app.include_router(rag_collections_router, prefix="/api/v1/collections", tags=["rag"])
