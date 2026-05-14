@@ -36,7 +36,11 @@ logger = logging.getLogger(__name__)
 
 
 PROMPT_VERSION_LEGACY = "vision-translate-v3-simple-hindi-layout"
-PROMPT_VERSION_STRUCTURED = "vision-translate-v4-structured-layout"
+# v5 splits the pipeline: vision is used for OCR + layout only (output is in
+# the source language), and translation runs separately through Sarvam. The
+# version bump invalidates the per-page S3 cache from the old v4 single-pass
+# prompt cleanly.
+PROMPT_VERSION_STRUCTURED = "vision-ocr-v5-then-sarvam"
 
 # Anthropic enforces a 5 MiB limit on the base64 image payload. Keep a margin
 # below the hard limit so SDK wrapping never crosses the boundary.
@@ -47,6 +51,40 @@ _VISION_RETRY_MAX_ATTEMPTS = 4
 _VISION_RETRY_BASE_SECONDS = 1.5
 
 _SECTION_RE = re.compile(r"<section\b[^>]*>.*?</section>", re.IGNORECASE | re.DOTALL)
+
+# Inline HTML tags (and a broader pattern for legacy fallback) are tokenized
+# to [__VTAG_NNNN__] sentinels before being sent to Sarvam, then restored
+# after translation. Uses the same `[__..._NNNN__]` family as the existing
+# `[__NNNN__]` (glossary) and `[__SEP_NNNN__]` (batch) sentinels, which
+# Sarvam preserves verbatim in formal mode.
+_INLINE_TAG_RE = re.compile(r"</?(?:strong|em|u)\s*>|<br\s*/?>", re.IGNORECASE)
+_HTML_ANY_TAG_RE = re.compile(r"<[^>]+>")
+_VTAG_TEMPLATE = "[__VTAG_{:04d}__]"
+_VTAG_RE = re.compile(r"\[__VTAG_(\d{4})__\]")
+
+
+def _protect_tags(text: str, pattern: re.Pattern[str]) -> tuple[str, list[str]]:
+    if not text:
+        return text, []
+    tags: list[str] = []
+
+    def _repl(m: re.Match[str]) -> str:
+        i = len(tags)
+        tags.append(m.group(0))
+        return _VTAG_TEMPLATE.format(i)
+
+    return pattern.sub(_repl, text), tags
+
+
+def _restore_tags(text: str, tags: list[str]) -> str:
+    if not tags or not text:
+        return text
+
+    def _repl(m: re.Match[str]) -> str:
+        i = int(m.group(1))
+        return tags[i] if i < len(tags) else m.group(0)
+
+    return _VTAG_RE.sub(_repl, text)
 
 _LANG_LABELS = {
     "hindi": "Hindi (Devanagari script)",
@@ -63,108 +101,123 @@ _LANG_LABELS = {
 
 
 _PROMPT_LEGACY_HTML = """\
-Translate this scanned Indian legal/government document page into {target_language}.
+OCR this scanned page into HTML. DO NOT TRANSLATE. Transcribe into the same
+language as the source — a downstream translator handles language conversion.
 
 Return only one HTML fragment:
 <section data-page="{page_no}">...</section>
 
-No markdown fences. No explanation. No original English prose unless it is a
-protected literal listed below.
+No markdown fences. No explanation.
 
 Main task:
-- Translate all readable English natural-language text into {target_language}.
-- This includes letterhead department names, form titles, labels, subject lines,
-  salutations, paragraph text, footer text, signature/designation labels, and notes.
-- Preserve the visual layout as much as possible using simple HTML.
-
-Keep unchanged only these literal values:
-- Personal names, addresses, place names
-- File numbers, DIN/CBIC/DGGI IDs, PAN/account numbers
-- Dates, phone numbers, emails, URLs
-- Bare statute abbreviations like CGST, DRC-22, ITC
-- Section/rule numbers, but translate the surrounding words
+- Transcribe every readable line on the page — titles, body, footnotes,
+  page headers, page numbers, captions, signatures.
+- Preserve the visual layout using simple HTML.
+- Wrap visibly italicized spans (case names, titles, foreign words) in <em>.
 
 Layout rules:
-- Centered letterhead/title: <h1 class="center"> or <p class="center">
-- Right aligned DIN/date/signature block: <p class="right">
-- Same-line left/right items like F.NO and Date:
+- Centered title: <h1 class="center"> or <p class="center">
+- Author byline: <p class="center"><em>...</em></p>
+- Page header (running top-of-page band): <p class="page-header">...</p>
+- Page number (standalone numeric foot): <p class="page-number center">...</p>
+- Right-aligned items: <p class="right">
+- Same-line left/right items:
   <div class="row"><div class="col-left">...</div><div class="col-right">...</div></div>
-- Subject line: <p><strong>विषय:</strong> ...</p>
+- Subject line: <p><strong>...:</strong> ...</p>
 - Body paragraphs: <p>...</p>
-- Original numbered paragraphs: <p><strong>1.</strong> ...</p> (do not use <ol>)
+- Block quotes: <blockquote>...</blockquote>
+- Footnotes: <p class="footnote">...</p> (one per footnote, preserve the leading marker)
 - Use <strong>, <u>, <em> only where visually needed.
-- Do not create visible placeholder boxes for logos, seals, stamps, or signatures.
-  If a seal/stamp/signature is visible but cannot be reproduced, omit it rather
-  than writing [Seal], [Logo], or [Signature].
+- Do not create placeholder boxes for logos, seals, stamps, or signatures —
+  omit them rather than writing [Seal], [Logo], or [Signature].
 
-Important:
-- If the output still contains a full English sentence or English heading that is
-  not a protected literal, the translation is incorrect. Translate it.
+Fidelity:
+- Preserve numerals, dates, citations, identifiers, URLs, emails verbatim.
+- Do not invent text that is not visible.
 """
 
 
 _PROMPT_STRUCTURED_JSON = """\
-Translate this scanned Indian legal/government document page into {target_language}.
+You are an OCR + layout extractor for a single scanned page. DO NOT TRANSLATE.
+Output the text you see in the SAME LANGUAGE as the source — a downstream
+specialist translator will handle translation in a second pass. Your job is
+to faithfully transcribe the page content and capture its visual structure.
 
 Return ONLY valid JSON (no markdown fences, no explanation). Exact keys:
 
 {{
   "page": {page_no},
+  "register": "government_legal" | "general",
   "blocks": [
     {{
       "type": "text",
-      "role": "letterhead",
+      "role": "title",
       "align": "center",
       "weight": "bold",
       "size": "large",
       "line_spacing": "tight",
-      "html": "Translated line with optional inline tags only: <strong>, <em>, <u>, <br/>"
+      "html": "Source-language text exactly as printed; inline tags only: <strong>, <em>, <u>, <br/>"
     }},
     {{
       "type": "row",
       "role": "meta_row",
       "weight": "normal",
       "size": "normal",
-      "left_html": "File ref / address fragment",
-      "right_html": "Date or DIN fragment"
+      "left_html": "Left-column fragment, source language",
+      "right_html": "Right-column fragment, source language"
     }}
   ]
 }}
 
+Register classification (pick exactly one for the document; on page 1 this
+sets it for downstream pages):
+- "government_legal": Indian administrative / legal / tax / regulatory pages
+  (DIN, F.NO, CBIC, GST, Section references, letterhead, formal "To"/"सेवा में"
+  salutation, departmental signatures).
+- "general": Everything else — academic papers, journal articles, books,
+  resumes, business letters, news. When in doubt, choose "general".
+
 Allowed block shapes:
 1) Text block:
    - type: "text"
-   - role: one of letterhead | meta_row | subject | body_clause | signature_block | footer | general
-   - align: left | center | right | justify  (use justify for dense formal body paragraphs when margins align)
-   - weight: normal | semibold | bold  (match stroke weight visually)
-   - size: xs | small | normal | large | xlarge  (xs/fine print for footers; large/xlarge for titles)
-   - line_spacing: tight | normal | relaxed  (letterhead tight; body often normal or relaxed)
-   - html: translated text; inline tags ONLY <strong>, <em>, <u>, <br/>
+   - role: one of
+     title | author | page_header | page_number | body | footnote | block_quote | caption
+     | letterhead | meta_row | subject | body_clause | signature_block | footer | general
+   - align: left | center | right | justify
+   - weight: normal | semibold | bold (match stroke weight visually)
+   - size: xs | small | normal | large | xlarge (xs/small for footnotes/fine print, large/xlarge for titles)
+   - line_spacing: tight | normal | relaxed
+   - html: source-language text exactly as printed; inline tags ONLY <strong>, <em>, <u>, <br/>.
+     Use <em> for visibly italicized text (case names, titles, foreign words).
 
 2) Row block (same horizontal line split):
    - type: "row"
    - role: usually meta_row
-   - weight, size: apply to both columns unless clearly mismatched (then split into two text blocks)
-   - left_html, right_html: translated fragments with same inline tag allowance
+   - left_html, right_html: source-language fragments
 
-Translation rules:
-- Translate every readable English phrase into {target_language}.
-- Protected literals (keep verbatim): personal names; addresses and place names;
-  file numbers; DIN/CBIC/DGGI/PAN/account identifiers; dates; phones; emails; URLs;
-  bare abbreviations CGST, DRC-22, ITC; section numbers — translate surrounding words only.
+Role guidance:
+- title: the document or article title (often top-centered, large).
+- author: byline immediately under the title (often italic, centered).
+- page_header: running header at top of body pages (e.g. "JOURNAL OF CONSTITUTIONAL LAW [Vol. 1: 2]").
+- page_number: standalone numeric page marker (e.g. "325" centered at the foot, or in the header band).
+- body: main running paragraphs.
+- footnote: numbered footnotes below the body, usually separated by a thin rule and in smaller type.
+  Emit one block per footnote; preserve the leading marker (e.g. "1", "12") as part of html.
+- block_quote: indented quoted paragraphs offset from the body.
+- caption: figure / table captions.
+- letterhead / meta_row / subject / body_clause / signature_block / footer:
+  for Indian government / legal pages.
 
-Structure hints:
-- letterhead: centered department/org lines (one JSON block per visible line/stack).
-- meta_row: DIN alone flush-right may be text with align right OR a row with empty left_html.
-- subject: subject line (often bold / slightly larger).
-- body_clause: numbered clauses and substantive paragraphs.
-- signature_block: closing + designation lines.
-- footer: endorsements / copy-to lines.
-
-Do NOT emit placeholders for seals, stamps, logos, or handwritten signatures — omit them silently.
-
-Coverage:
-- Every printed line must appear in some block (headers, IDs, footers, page cues).
+OCR fidelity rules:
+- Transcribe every printed line into some block — headers, page numbers,
+  footnotes, signatures, all of it. Missing content is a defect.
+- Preserve numerals, dates, footnote markers, citations, identifiers, URLs,
+  emails, and section references EXACTLY as printed.
+- For italicized fragments inside otherwise upright text (e.g. case names like
+  "Printz v. United States" in body text), wrap only the italic span in <em>.
+- Do NOT translate. Do NOT paraphrase. Do NOT summarize.
+- Do NOT emit placeholders for seals, stamps, logos, or signatures — omit them.
+- Do NOT invent text that is not visible on the page.
 
 """
 
@@ -251,10 +304,10 @@ async def translate_scanned_pdf_via_vision(
 
     meta = {
         "pages": len(page_images),
-        "translation_backend": model,
-        "ocr_backend": "claude_vision",
+        "translation_backend": "sarvam",
+        "ocr_backend": f"claude_vision_ocr_only ({model})",
         "vision_cache_hits": cache_hits,
-        "translation_pipeline": "vision_llm_per_page_claude",
+        "translation_pipeline": "vision_ocr_then_sarvam",
         "scanned_translation_mode": "vision_reconstruct",
         "vision_structured_layout": structured,
         "vision_translation_prompt_version": prompt_ver,
@@ -343,6 +396,107 @@ def _base64_size(byte_count: int) -> int:
     return ((byte_count + 2) // 3) * 4
 
 
+async def _translate_structured_page_via_sarvam(
+    page,
+    target_language: str,
+    job_id: str | None,
+    page_no: int,
+):
+    """Translate every block's source-language text through Sarvam.
+
+    Inline HTML tags (<strong>, <em>, <u>, <br/>) are tokenized to
+    [__VTAG_NNNN__] sentinels before translation and restored after, so
+    italicized case names and bold spans survive intact.
+    """
+    from legal_agent.agents.translation.layout_ir import VisionStyledRowBlock
+    from legal_agent.agents.translation.sarvam_translate import SARVAM_LANG_CODES
+    from legal_agent.agents.translation.source_cleanup import clean_source_text
+    from legal_agent.agents.translation.translator import Translator
+
+    blocks = list(page.blocks)
+    items: list[tuple[int, str, list[str]]] = []  # (block_idx, side, tags)
+    inputs: list[str] = []
+
+    def _prepare(raw: str) -> tuple[str, list[str]]:
+        # Inline-tag protection first so cleanup never sees HTML; THEN run
+        # deterministic source cleanup on the residual text (NFC, mid-word
+        # repair, ngram dedup, whitespace collapse).
+        protected, tags = _protect_tags(raw, _INLINE_TAG_RE)
+        cleaned, _report = clean_source_text(protected)
+        return cleaned, tags
+
+    for i, b in enumerate(blocks):
+        if isinstance(b, VisionStyledRowBlock):
+            for side, raw in (("left", b.left_html), ("right", b.right_html)):
+                if raw and raw.strip():
+                    cleaned, tags = _prepare(raw)
+                    items.append((i, side, tags))
+                    inputs.append(cleaned)
+        else:
+            raw = b.html or ""
+            if raw.strip():
+                cleaned, tags = _prepare(raw)
+                items.append((i, "html", tags))
+                inputs.append(cleaned)
+
+    if not inputs:
+        return page
+
+    target_code = SARVAM_LANG_CODES.get(target_language.lower(), "hi-IN")
+    source_code = SARVAM_LANG_CODES.get("english", "en-IN")
+    translator = Translator(target_language, model="sarvam")
+    translated = await translator.translate_batch(inputs, source_code, target_code)
+    if len(translated) != len(inputs):
+        logger.warning(
+            "[%s] page %s: sarvam returned %d outputs for %d inputs — keeping source",
+            job_id or "?", page_no, len(translated), len(inputs),
+        )
+        return page
+
+    for (i, side, tags), tr in zip(items, translated):
+        restored = _restore_tags(tr or "", tags)
+        b = blocks[i]
+        if isinstance(b, VisionStyledRowBlock):
+            if side == "left":
+                blocks[i] = b.model_copy(update={"left_html": restored})
+            else:
+                blocks[i] = b.model_copy(update={"right_html": restored})
+        else:
+            blocks[i] = b.model_copy(update={"html": restored})
+
+    return page.model_copy(update={"blocks": blocks})
+
+
+async def _translate_legacy_section_html_via_sarvam(
+    section_html: str,
+    target_language: str,
+    job_id: str | None,
+    page_no: int,
+) -> str:
+    """Fallback path: translate a whole section's text by tokenizing every
+    HTML tag (not just inline) into sentinels, sending the residue through
+    Sarvam, and restoring tags after.
+    """
+    from legal_agent.agents.translation.sarvam_translate import SARVAM_LANG_CODES
+    from legal_agent.agents.translation.translator import Translator
+
+    if not section_html or not section_html.strip():
+        return section_html
+
+    protected, tags = _protect_tags(section_html, _HTML_ANY_TAG_RE)
+    target_code = SARVAM_LANG_CODES.get(target_language.lower(), "hi-IN")
+    source_code = SARVAM_LANG_CODES.get("english", "en-IN")
+    translator = Translator(target_language, model="sarvam")
+    out = await translator.translate_batch([protected], source_code, target_code)
+    if not out:
+        logger.warning(
+            "[%s] page %s: sarvam returned empty on legacy HTML — keeping source",
+            job_id or "?", page_no,
+        )
+        return section_html
+    return _restore_tags(out[0] or "", tags)
+
+
 async def _translate_page(
     *,
     sem: asyncio.Semaphore,
@@ -363,6 +517,7 @@ async def _translate_page(
         return cached, True, None
 
     async with sem:
+        # OCR pass — vision returns source-language transcript + layout.
         raw = await _call_vision_model(
             page_png=page_png,
             page_no=page_no,
@@ -371,10 +526,12 @@ async def _translate_page(
             model=model,
             structured_layout=structured_layout,
         )
-        html_out, fidelity = _materialize_vision_response(
+        html_out, fidelity = await _materialize_ocr_and_translate(
             raw=raw,
             page_no=page_no,
+            target_language=lang,
             structured_layout=structured_layout,
+            job_id=job_id,
         )
         # One retry with legacy HTML if structured JSON was unusable (avoid blank/garbled PDF).
         if structured_layout and fidelity is None:
@@ -393,10 +550,12 @@ async def _translate_page(
                     model=model,
                     structured_layout=False,
                 )
-                html_out, fidelity = _materialize_vision_response(
+                html_out, fidelity = await _materialize_ocr_and_translate(
                     raw=raw,
                     page_no=page_no,
+                    target_language=lang,
                     structured_layout=False,
+                    job_id=job_id,
                 )
     from legal_agent.config import get_settings
 
@@ -428,13 +587,21 @@ async def _translate_page(
     return cleaned, False, fidelity
 
 
-def _materialize_vision_response(
+async def _materialize_ocr_and_translate(
     *,
     raw: str,
     page_no: int,
+    target_language: str,
     structured_layout: bool,
+    job_id: str | None,
 ) -> tuple[str, dict | None]:
-    """Structured JSON → section HTML + fidelity metrics; fallback to legacy HTML."""
+    """Parse vision OCR response, translate via Sarvam, emit section HTML.
+
+    Structured path: JSON → VisionStructuredPage → Sarvam-translate each block
+    → normalize headers → emit HTML + fidelity metrics.
+    Legacy fallback: extract <section> HTML in source language → Sarvam-translate
+    its text (tags tokenized) → return.
+    """
     from legal_agent.agents.translation.vision_header_normalize import (
         normalize_government_header_blocks,
     )
@@ -447,9 +614,12 @@ def _materialize_vision_response(
     if structured_layout:
         page = parse_vision_structured_response(raw)
         if page is not None:
-            norm_blocks = normalize_government_header_blocks(list(page.blocks))
-            page = page.model_copy(update={"blocks": norm_blocks})
-            html = vision_structured_page_to_section_html(page, page_no)
+            translated_page = await _translate_structured_page_via_sarvam(
+                page, target_language, job_id, page_no,
+            )
+            norm_blocks = normalize_government_header_blocks(list(translated_page.blocks))
+            translated_page = translated_page.model_copy(update={"blocks": norm_blocks})
+            html = vision_structured_page_to_section_html(translated_page, page_no)
             return html, vision_fidelity_summary(norm_blocks)
         logger.warning(
             "vision structured JSON parse failed for page %s — falling back to legacy HTML",
@@ -457,9 +627,11 @@ def _materialize_vision_response(
         )
     stripped = _strip_code_fence(raw).strip()
     match = _SECTION_RE.search(stripped)
-    if match:
-        return match.group(0), None
-    return _normalize_section_html(stripped, page_no), None
+    section_html = match.group(0) if match else _normalize_section_html(stripped, page_no)
+    translated_html = await _translate_legacy_section_html_via_sarvam(
+        section_html, target_language, job_id, page_no,
+    )
+    return translated_html, None
 
 
 def _cache_key_for_page(image_bytes: bytes, lang: str, model: str, prompt_version: str) -> tuple[str, str]:
