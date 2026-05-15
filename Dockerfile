@@ -58,13 +58,13 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PYTHONDONTWRITEBYTECODE=1 \
     PORT=8001
 
-# Install Camoufox browser (Firefox-based anti-detect) and Playwright deps.
-# Camoufox stores the browser under user_cache_dir (~/.cache/camoufox); pin it
-# to a shared path so the appuser can read what root fetched at build time.
+# Camoufox (scraping) + Playwright Chromium (HTML→PDF in html_pdf_translator).
+# Browsers live under XDG_CACHE_HOME so appuser can read what root fetched at build.
 ENV CAMOUFOX_CACHE_DIR=/app/.cache/camoufox \
-    XDG_CACHE_HOME=/app/.cache
-RUN mkdir -p /app/.cache/camoufox && \
-    /app/.venv/bin/playwright install-deps && \
+    XDG_CACHE_HOME=/app/.cache \
+    PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
+RUN mkdir -p /app/.cache/camoufox /app/.cache/ms-playwright && \
+    /app/.venv/bin/playwright install --with-deps chromium && \
     /app/.venv/bin/python -m camoufox fetch && \
     chown -R appuser:appuser /app/.cache
 
