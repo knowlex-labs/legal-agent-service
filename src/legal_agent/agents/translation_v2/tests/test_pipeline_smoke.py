@@ -52,7 +52,8 @@ def _raster(page_no: int = 1) -> PageRaster:
 
 
 @pytest.mark.asyncio
-async def test_glossary_fail_soft_returns_empty_dict():
+async def test_glossary_fail_soft_returns_baseline():
+    """When both LLM sub-calls fail, the baseline YAML glossary still survives."""
     from legal_agent.agents.translation_v2 import glossary as glossary_mod
 
     async def boom(*_a: Any, **_kw: Any) -> Any:
@@ -65,7 +66,9 @@ async def test_glossary_fail_soft_returns_empty_dict():
             model="gemini-2.5-pro",
             job_id="job-soft",
         )
-    assert result == {}
+    # LLM calls failed but baseline YAML still loads
+    assert result.get("plaintiff") == "वादी"
+    assert result.get("section") == "धारा"
 
 
 @pytest.mark.asyncio

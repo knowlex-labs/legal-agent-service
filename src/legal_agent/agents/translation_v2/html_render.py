@@ -31,6 +31,17 @@ _NUMERIC_COMPACT_MAX_LEN = 16
 # slightly-wider serif rendering of digits doesn't collide with the right neighbour.
 _COMPACT_PAD_MM = 2.0
 
+# Horizontal rules (separator blocks) are rendered as filled divs. The vision
+# model often emits a generous vertical bbox for what is visually a 1px line on
+# the source — without a cap the output would be a thick black bar. Cap at the
+# nearest equivalent of a typical printer rule (~1px at 72dpi ≈ 0.35mm).
+_SEPARATOR_MAX_HEIGHT_MM = 0.4
+
+# Minimum vertical gap (mm) the reflow pass enforces between two blocks that
+# would otherwise overlap after text wrap. Just enough to keep wrapped rows
+# from visually touching the row below.
+_REFLOW_MIN_GAP_MM = 1.0
+
 
 def _sanitize_inline(text: str) -> str:
     """Escape HTML except for inline <b>/<i>/<u>/<strong>/<em>."""
@@ -104,8 +115,10 @@ html, body { margin: 0; padding: 0; font-family: 'NSDev', 'Noto Serif Devanagari
 .fit-wrap { word-break: break-word; overflow-wrap: anywhere; }
 """
 
-_AUTOFIT_JS = """
+_AUTOFIT_JS = (
+    """
 (function(){
+  /* ── Step 1: autofit ladder (existing) ── */
   var tiers = ['fit-1','fit-2','fit-3'];
   var blocks = document.querySelectorAll('.blk');
   for (var i = 0; i < blocks.length; i++) {
@@ -118,8 +131,45 @@ _AUTOFIT_JS = """
       el.classList.add('fit-wrap');
     }
   }
+
+  /* ── Step 2: vertical reflow for wrapped blocks ──
+     When a text block wraps to more lines than its source bbox accommodated,
+     it grows downward and visually crashes into the row below. Walk blocks in
+     reading order; for each one, find any prior block that overlaps it
+     horizontally, and push the current block down so its top sits at least
+     MIN_GAP below that prior block's rendered bottom. Separators don't shift
+     anything — they're table rules and should stay anchored. */
+  var MIN_GAP_PX = """
+    + f"{_REFLOW_MIN_GAP_MM} * (96 / 25.4)"
+    + """;
+  var textBlocks = Array.prototype.slice.call(
+    document.querySelectorAll('.blk:not(.separator)')
+  );
+  textBlocks.sort(function(a, b) {
+    return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
+  });
+  for (var i = 0; i < textBlocks.length; i++) {
+    var cur = textBlocks[i];
+    var curRect = cur.getBoundingClientRect();
+    var maxBottom = -Infinity;
+    for (var j = 0; j < i; j++) {
+      var prev = textBlocks[j];
+      var prevRect = prev.getBoundingClientRect();
+      var horizSeparate = (curRect.right <= prevRect.left + 1) ||
+                          (prevRect.right <= curRect.left + 1);
+      if (horizSeparate) continue;
+      if (prevRect.bottom > maxBottom) maxBottom = prevRect.bottom;
+    }
+    if (maxBottom > -Infinity && curRect.top < maxBottom + MIN_GAP_PX) {
+      var shiftPx = (maxBottom + MIN_GAP_PX) - curRect.top;
+      var shiftMm = shiftPx / (96 / 25.4);
+      var currentTopMm = parseFloat(cur.style.top) || 0;
+      cur.style.top = (currentTopMm + shiftMm).toFixed(2) + 'mm';
+    }
+  }
 })();
 """
+)
 
 
 def _is_numeric_compact(text: str) -> bool:
@@ -138,13 +188,15 @@ def _block_div(block: Block, page_w_mm: float, page_h_mm: float) -> str:
 
     classes = ["blk"]
 
-    # Separator: rule line, no text body. Render the bbox itself as a filled
-    # thin div (height comes from the bbox; min-height kept small).
+    # Separator: rule line, no text body. Cap height so the line renders as a
+    # thin line, not a thick black bar — the vision model's bbox height is the
+    # visible region around the rule, not the rule's stroke width.
     if block.role == BlockRole.separator:
         classes.append("separator")
+        sep_height_mm = min(min_height_mm, _SEPARATOR_MAX_HEIGHT_MM)
         style = (
             f"left:{left_mm:.2f}mm;top:{top_mm:.2f}mm;"
-            f"width:{width_mm:.2f}mm;height:{min_height_mm:.2f}mm;"
+            f"width:{width_mm:.2f}mm;height:{sep_height_mm:.2f}mm;"
         )
         return f'<div class="{" ".join(classes)}" data-id="{block.id}" style="{style}"></div>'
 

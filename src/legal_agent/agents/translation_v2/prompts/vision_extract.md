@@ -40,5 +40,18 @@ Hard rules:
 8. If a region appears to be a stamp, seal, signature, or watermark with little/no readable text, emit a block with `role="signature"` or `role="other"` and `text_en` describing it as `[STAMP: <description>]`. This text will be skipped during translation.
 9. **Horizontal and vertical rules.** Lines that structure the document — table borders, ruled lines under column headers, lines bracketing a section, the closing rule under a list — are NOT decoration. Emit each such rule as a block with `role="separator"`, empty `text_en` (`""`), and a `bbox_norm` covering the rule's footprint (a thin tall rectangle for vertical rules, a thin wide rectangle for horizontal rules). Index tables and forms typically have one rule above the column header and one rule below the last data row — emit both.
 10. Truly decorative-only marks (page-border curls, ornamental flourishes, dot-leader sequences inside an entry's page-number column) may still be omitted.
+11. **SCRIPT FIDELITY (critical).** The page may contain English text, Devanagari text, or both — sometimes side-by-side. Transcribe each block in **exactly the script that appears on the page**. Do NOT translate. Do NOT transliterate. Do NOT guess across scripts.
+    - If the source line reads "IN THE HIGH COURT OF MADHYA PRADESH", emit that text verbatim — NOT "उच्च न्यायालय के समक्ष मध्य प्रदेश".
+    - If the source line reads "उच्च न्यायालय", emit that text verbatim — NOT "High Court".
+    - If a region is faint or partially illegible, copy what you can read in its native script and emit `role="other"` with `text_en="[ILLEGIBLE: <brief description>]"` for the unreadable portion. Do NOT invent content in the opposite script to fill gaps.
+    - If a single line genuinely mixes scripts on the source page (e.g. "Section 482 — धारा 482"), preserve that mixing exactly.
+12. **TABLE CELLS (critical).** When a row of a table or index contains values in multiple columns separated by visible whitespace, each cell **must be a separate block**. Do NOT concatenate cells from the same row into one block — the row's column structure is the most important layout signal and must be preserved.
+    - Example: an index row that reads
+      `3.   Copy of F.I.R.        Annexure P/1     12-166`
+      must produce **four separate blocks**, one per column: `"3."`, `"Copy of F.I.R."`, `"Annexure P/1"`, `"12-166"`. Each has its own `bbox_norm` covering only its column. **Never** emit `"3. Copy of F.I.R. Annexure P/1 12-166"` as a single block.
+    - Use `role="table_cell"` for each cell. If the row has a leading serial number, that's its own table_cell too.
+    - The same rule applies to the column-header row above the data rows: `"S.No."`, `"Des. of documents"`, `"Annexure No."`, `"Page No."` are four blocks, not one.
+    - Within a single cell, multi-line wrapping in the source IS one block (a cell that wraps to two lines is still one cell). The split is **horizontal column boundaries**, not line breaks within a cell.
+    - When in doubt: if there's more than ~5mm of horizontal whitespace between two pieces of text on the same visual row, they are different cells.
 
 Output a single JSON object only. No code fences. No prose. No explanations.

@@ -20,6 +20,11 @@ from typing import Any
 from pydantic import BaseModel
 
 from legal_agent.agents.translation_v2.gemini_client import call_gemini_json
+from legal_agent.agents.translation_v2.keep_english import (
+    mask_english_tokens,
+    restore_english_tokens,
+)
+from legal_agent.agents.translation_v2.sanitize import sanitize_translation
 from legal_agent.agents.translation_v2.schemas import Block, TranslatedPage, VisionPage
 
 logger = logging.getLogger(__name__)
@@ -88,8 +93,25 @@ def _needs_translation(text: str) -> bool:
     return True
 
 
-def _build_blocks_payload(page: VisionPage) -> list[dict[str, str]]:
-    return [{"id": b.id, "role": b.role.value, "text_en": b.text_en} for b in page.blocks]
+def _build_blocks_payload(
+    page: VisionPage,
+) -> tuple[list[dict[str, str]], dict[str, dict[str, str]]]:
+    """Build the per-block payload with English-token masking applied.
+
+    Returns (payload_for_prompt, keep_maps_by_id). Non-translatable blocks
+    pass through unmasked so the LLM sees the literal text.
+    """
+    payload: list[dict[str, str]] = []
+    keep_maps: dict[str, dict[str, str]] = {}
+    for b in page.blocks:
+        if not _needs_translation(b.text_en):
+            payload.append({"id": b.id, "role": b.role.value, "text_en": b.text_en})
+            continue
+        masked_text, km = mask_english_tokens(b.text_en)
+        if km:
+            keep_maps[b.id] = km
+        payload.append({"id": b.id, "role": b.role.value, "text_en": masked_text})
+    return payload, keep_maps
 
 
 async def _translate_one(
@@ -103,14 +125,12 @@ async def _translate_one(
 ) -> TranslatedPage:
     async with sem:
         filtered = _filter_glossary_for_page(glossary, page)
+        payload, keep_maps = _build_blocks_payload(page)
         prompt = (
             _prompt_template()
             .replace("{glossary_table}", _glossary_table(filtered))
             .replace("{style_anchors}", _style_anchors(all_pages))
-            .replace(
-                "{blocks_json}",
-                json.dumps(_build_blocks_payload(page), ensure_ascii=False, indent=2),
-            )
+            .replace("{blocks_json}", json.dumps(payload, ensure_ascii=False, indent=2))
         )
 
         # If every block on the page is non-translatable (empty / numeric / placeholders),
@@ -139,32 +159,52 @@ async def _translate_one(
         by_id = {tb.id: tb.text_hi for tb in result.blocks}
 
         translated_blocks: list[Block] = []
+        sanitize_issue_count = 0
         for src in page.blocks:
             if not _needs_translation(src.text_en):
                 # Non-translatable: copy text_en into text_hi verbatim.
                 translated_blocks.append(src.model_copy(update={"text_hi": src.text_en}))
                 continue
-            text_hi = by_id.get(src.id)
-            if text_hi is None or not text_hi.strip():
-                # Model dropped this id — fall back to source text rather than aborting.
+            raw_hi = by_id.get(src.id)
+            missing = raw_hi is None or not raw_hi.strip()
+            if missing:
                 logger.warning(
                     "[%s] translate page %d: block %s missing in response; using source",
                     job_id,
                     page.page_no,
                     src.id,
                 )
-                text_hi = src.text_en
-            translated_blocks.append(
-                src.model_copy(update={"text_hi": unicodedata.normalize("NFC", text_hi)})
-            )
+                raw_hi = src.text_en
+
+            km = keep_maps.get(src.id, {})
+            restored = restore_english_tokens(raw_hi, km)
+            repaired, issues = sanitize_translation(src.id, src.text_en, restored, km)
+            for iss in issues:
+                logger.warning(
+                    "[%s] sanitize page %d block %s: %s — %s",
+                    job_id,
+                    page.page_no,
+                    iss.block_id,
+                    iss.kind,
+                    iss.detail,
+                )
+            sanitize_issue_count += len(issues)
+            # Un-repairable kinds: fall back to source text.
+            if any(i.kind in ("fallback_marker", "empty_translation") for i in issues):
+                repaired = src.text_en
+
+            final_hi = unicodedata.normalize("NFC", repaired)
+            translated_blocks.append(src.model_copy(update={"text_hi": final_hi}))
 
         logger.info(
-            "[%s] translate page %d took %.2fs (%d/%d translatable blocks)",
+            "[%s] translate page %d took %.2fs (%d/%d blocks, %d masked, %d sanitize issues)",
             job_id,
             page.page_no,
             time.perf_counter() - t0,
             len(translatable_ids),
             len(page.blocks),
+            sum(len(km) for km in keep_maps.values()),
+            sanitize_issue_count,
         )
         return TranslatedPage(
             page_no=page.page_no,
