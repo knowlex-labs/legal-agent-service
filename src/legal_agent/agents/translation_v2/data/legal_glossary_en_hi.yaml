@@ -1,0 +1,179 @@
+# Baseline EN → formal-Hindi (शुद्ध हिन्दी विधिक रजिस्टर) glossary for
+# Indian legal documents. Loaded at startup and merged with the per-document
+# LLM-built glossary. Per-document entries win on key collision so a document
+# can override the baseline if it consistently uses a different convention.
+#
+# Format: <english key>: <formal Devanagari Hindi translation>
+# Keys are matched case-insensitively at lookup time. Multi-word keys are
+# matched as a whole phrase, not word-by-word.
+
+# ── Parties / actors ──────────────────────────────────────────────────
+plaintiff: वादी
+defendant: प्रतिवादी
+petitioner: याचिकाकर्ता
+respondent: प्रत्यर्थी
+applicant: आवेदक
+non-applicant: अनावेदक
+accused: अभियुक्त
+complainant: शिकायतकर्ता
+informant: सूचनादाता
+appellant: अपीलार्थी
+respondents: प्रत्यर्थीगण
+petitioners: याचिकाकर्तागण
+parties: पक्षकार
+counsel: अधिवक्ता
+advocate: अधिवक्ता
+advocates: अधिवक्तागण
+through counsel: अधिवक्ता के माध्यम से
+humble petitioner: विनीत याचिकाकर्ता
+humble applicant: विनीत आवेदक
+through advocate: अधिवक्ता के माध्यम से
+
+# ── Courts and forums ────────────────────────────────────────────────
+court: न्यायालय
+high court: उच्च न्यायालय
+supreme court: सर्वोच्च न्यायालय
+sessions court: सत्र न्यायालय
+district court: जिला न्यायालय
+trial court: विचारण न्यायालय
+magistrate: मजिस्ट्रेट
+chief judicial magistrate: मुख्य न्यायिक मजिस्ट्रेट
+judicial magistrate: न्यायिक मजिस्ट्रेट
+bench: खंडपीठ
+division bench: खण्डपीठ
+full bench: पूर्ण पीठ
+tribunal: न्यायाधिकरण
+
+# ── Document types ────────────────────────────────────────────────────
+petition: याचिका
+application: आवेदन
+writ petition: रिट याचिका
+memo of petition: याचिका ज्ञापन
+affidavit: शपथपत्र
+bail application: ज़मानत आवेदन
+anticipatory bail: अग्रिम ज़मानत
+stay application: स्थगन आवेदन
+quashing petition: विखंडन याचिका
+revision petition: पुनरीक्षण याचिका
+review petition: पुनर्विचार याचिका
+appeal: अपील
+criminal appeal: आपराधिक अपील
+special leave petition: विशेष अनुमति याचिका
+vakalatnama: वकालतनामा
+written statement: लिखित कथन
+written arguments: लिखित तर्क
+execution petition: निष्पादन याचिका
+notice: नोटिस
+legal notice: विधिक नोटिस
+show-cause notice: कारण बताओ नोटिस
+contract: संविदा
+agreement: करार
+copy: प्रति
+copy of fir: एफ.आई.आर. की प्रतिलिपि
+copy of bail orders: ज़मानत आदेशों की प्रतिलिपि
+copy of ration card: राशन कार्ड की प्रतिलिपि
+ration card: राशन कार्ड
+
+# ── Procedure / standard phrases ─────────────────────────────────────
+hereby: एतद्द्वारा
+prayed: निवेदन किया गया
+versus: बनाम
+v.: बनाम
+vs.: बनाम
+vs: बनाम
+'and others': व अन्य
+'& others': व अन्य
+ors.: व अन्य
+'& ors.': व अन्य
+state of: राज्य
+through: के माध्यम से
+humble: विनीत
+on behalf of: की ओर से
+in the matter of: के मामले में
+honble: माननीय
+"hon'ble": माननीय
+dated: दिनांकित
+date: दिनांक
+place: स्थान
+index: अनुक्रमणिका
+table of contents: विषय-सूची
+description: विवरण
+documents: दस्तावेज़
+description of documents: दस्तावेज़ों का विवरण
+s.no.: क्र.सं.
+sl.no.: क्र.सं.
+serial no.: क्रम संख्या
+page no.: पृष्ठ संख्या
+page no: पृष्ठ संख्या
+page: पृष्ठ
+annexure: संलग्नक
+annexure no.: संलग्नक संख्या
+annexure no: संलग्नक संख्या
+signature: हस्ताक्षर
+sd/-: ह./-
+
+# ── Statutes and citations ───────────────────────────────────────────
+section: धारा
+sub-section: उपधारा
+clause: खण्ड
+sub-clause: उपखण्ड
+article: अनुच्छेद
+order: आदेश
+rule: नियम
+schedule: अनुसूची
+chapter: अध्याय
+ipc: भा.द.स.
+indian penal code: भारतीय दण्ड संहिता
+crpc: द.प्र.स.
+code of criminal procedure: दण्ड प्रक्रिया संहिता
+cpc: सि.प्र.स.
+code of civil procedure: सिविल प्रक्रिया संहिता
+constitution: संविधान
+constitution of india: भारत का संविधान
+fir: एफ.आई.आर.
+first information report: प्रथम सूचना रिपोर्ट
+charge sheet: आरोप पत्र
+chargesheet: आरोप पत्र
+police station: पुलिस थाना
+investigation: अन्वेषण
+investigating officer: अन्वेषण अधिकारी
+witness: साक्षी
+prosecution: अभियोजन
+
+# ── Verbs and clauses commonly seen in pleadings ─────────────────────
+filed: प्रस्तुत किया
+submitted: प्रस्तुत किया
+heard: सुना
+ordered: आदेश दिया
+allowed: स्वीकार किया
+dismissed: खारिज किया
+rejected: अस्वीकृत किया
+disposed of: निपटारा किया
+pending: लंबित
+adjourned: स्थगित
+issued: जारी किया
+served: तामील किया
+granted: प्रदान किया
+
+# ── Misc legal vocabulary ────────────────────────────────────────────
+jurisdiction: क्षेत्राधिकार
+relief: अनुतोष
+prayer: प्रार्थना
+cause of action: वाद-हेतुक
+verification: सत्यापन
+acknowledgement: पावती
+power of attorney: मुख्तारनामा
+notice period: नोटिस अवधि
+limitation: परिसीमा
+ex parte: एकपक्षीय
+in camera: रुद्ध न्यायालय में
+suo motu: स्वप्रेरणा से
+
+# ── Common Indian legal acronyms ─────────────────────────────────────
+m.cr.c.: एम.सी.आर.सी.
+mcrc: एम.सी.आर.सी.
+slp: एस.एल.पी.
+o.s.: मूल वाद
+ws: लिखित कथन
+ia: अन्तरिम आवेदन
+i.a.: अन्तरिम आवेदन

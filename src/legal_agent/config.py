@@ -141,6 +141,28 @@ class Settings(BaseSettings):
     # Running header (document subject) + page number rendered via Playwright
     # headerTemplate / footerTemplate. Off keeps the bare-page look.
     translation_pdf_running_header: bool = True
+
+    # ── Translation v2 (vision-first Gemini pipeline) ────────────────────
+    # Feature flag selects between legacy v1 (PyMuPDF + flow HTML) and v2
+    # (Gemini vision → per-page HTML → Playwright). v1 is the default so
+    # existing behaviour is unchanged until v2 is explicitly opted in.
+    translation_pipeline: Literal["v1", "v2"] = "v1"
+    # Stage 2 (vision OCR) uses Flash — #1 on OCR Arena, 3–4× faster than Pro
+    # on vision transcription. With thinking_budget=0 it avoids reasoning latency.
+    translation_v2_vision_model: str = "gemini-2.5-flash"
+    # Stages 3–4 (glossary + translation) use Pro — highest BLEU on legal
+    # Eng→Hindi translation (WMT 2025); this is where output quality lives.
+    translation_v2_translate_model: str = "gemini-2.5-pro"
+    # Concurrent Gemini vision-extract calls (one per page).
+    translation_v2_vision_concurrency: int = 10
+    # Concurrent Gemini per-page translate calls.
+    translation_v2_translate_concurrency: int = 10
+    # DPI used when rasterising source PDF pages for vision extraction.
+    translation_v2_target_dpi: int = 300
+    # Concurrent Playwright/Chromium renders. Chromium launches are heavy;
+    # >4 in parallel typically slows wall clock.
+    translation_v2_render_concurrency: int = 4
+
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"
     # Content-addressed OCR + vision-translation cache in S3 (shared client/path prefix).
@@ -211,8 +233,8 @@ class Settings(BaseSettings):
     # Workspace RAG (rag_engine/) — user documents in Qdrant.
     # Default mirrors the legacy single config until we re-index to BGE.
     workspace_embedding_provider: str | None = None  # falls back to embedding_provider
-    workspace_embedding_model: str | None = None     # falls back to embedding_model
-    workspace_vector_size: int | None = None         # falls back to vector_size
+    workspace_embedding_model: str | None = None  # falls back to embedding_model
+    workspace_vector_size: int | None = None  # falls back to vector_size
 
     # Legal retrieval (legal_retrieval/) — Supreme Court judgments in
     # PostgreSQL + pgvector. DB column is halfvec(3072) — must use Gemini.
@@ -281,9 +303,12 @@ class Settings(BaseSettings):
         return "openai"
 
     def get_llm_api_key(self) -> str | None:
-        keys = {"openai": self.openai_api_key, "anthropic": self.anthropic_api_key, "gemini": self.gemini_api_key}
+        keys = {
+            "openai": self.openai_api_key,
+            "anthropic": self.anthropic_api_key,
+            "gemini": self.gemini_api_key,
+        }
         return keys.get(self.draft_llm_provider)
-
 
 
 @lru_cache
