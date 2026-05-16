@@ -1,4 +1,4 @@
-"""Translation service — PyMuPDF HTML path."""
+"""Translation service — dispatches to v1 (PyMuPDF flow HTML) or v2 (Gemini vision)."""
 
 from __future__ import annotations
 
@@ -6,6 +6,7 @@ import asyncio
 import logging
 import time
 from pathlib import Path
+from typing import Any
 
 from legal_agent.clients.decryption import DecryptionService
 from legal_agent.clients.s3_client import S3Client
@@ -17,14 +18,20 @@ from legal_agent.services.job_manager import ErrorStage, JobManager, StagedError
 logger = logging.getLogger(__name__)
 
 _IMAGE_EXTS: dict[str, str] = {
-    "png": "png", "jpg": "jpeg", "jpeg": "jpeg",
-    "tif": "tiff", "tiff": "tiff",
-    "webp": "webp", "bmp": "bmp", "gif": "gif",
+    "png": "png",
+    "jpg": "jpeg",
+    "jpeg": "jpeg",
+    "tif": "tiff",
+    "tiff": "tiff",
+    "webp": "webp",
+    "bmp": "bmp",
+    "gif": "gif",
 }
 
 
 def _image_bytes_to_pdf(image_bytes: bytes, ext: str) -> bytes:
     import fitz
+
     ft = _IMAGE_EXTS[ext.lower()]
     img_doc = fitz.open(stream=image_bytes, filetype=ft)
     try:
@@ -74,7 +81,9 @@ class TranslationService:
             metadata={
                 "case_folder_id": case_folder_id,
                 "target_language": lang,
-                "source_language": request.source_language.value if request.source_language else None,
+                "source_language": request.source_language.value
+                if request.source_language
+                else None,
                 "file_id": request.file_id,
                 **request.metadata,
             },
@@ -85,7 +94,9 @@ class TranslationService:
 
         logger.info(
             "Created translation job %s: target=%s, user=%s",
-            job.job_id, request.target_language.value, user_id,
+            job.job_id,
+            request.target_language.value,
+            user_id,
         )
 
         async def task() -> None:
@@ -109,7 +120,9 @@ class TranslationService:
         try:
             t_resolve = time.perf_counter()
             source_bytes, filename = await self._resolve_source_bytes(request, user_id)
-            logger.info("[%s] source resolve/decrypt took %.2fs", job_id, time.perf_counter() - t_resolve)
+            logger.info(
+                "[%s] source resolve/decrypt took %.2fs", job_id, time.perf_counter() - t_resolve
+            )
         except StagedError:
             raise
         except Exception as exc:
@@ -121,7 +134,9 @@ class TranslationService:
             try:
                 t_convert = time.perf_counter()
                 source_bytes = await asyncio.to_thread(_image_bytes_to_pdf, source_bytes, ext)
-                logger.info("[%s] image→PDF conversion took %.2fs", job_id, time.perf_counter() - t_convert)
+                logger.info(
+                    "[%s] image→PDF conversion took %.2fs", job_id, time.perf_counter() - t_convert
+                )
             except Exception as exc:
                 raise StagedError(ErrorStage.EXTRACTION, exc) from exc
             filename = filename.rsplit(".", 1)[0] + ".pdf"
@@ -129,12 +144,17 @@ class TranslationService:
         elif ext != "pdf":
             raise StagedError(
                 ErrorStage.EXTRACTION,
-                RuntimeError(f"Unsupported file type: {filename} (supported: pdf, {', '.join(_IMAGE_EXTS)})"),
+                RuntimeError(
+                    f"Unsupported file type: {filename} (supported: pdf, {', '.join(_IMAGE_EXTS)})"
+                ),
             )
 
-        await self._execute_html_translation(
-            request, job_id, source_bytes, filename, debug_dir
-        )
+        if get_settings().translation_pipeline == "v2":
+            await self._execute_html_translation_v2(
+                request, job_id, source_bytes, filename, debug_dir
+            )
+        else:
+            await self._execute_html_translation(request, job_id, source_bytes, filename, debug_dir)
 
     async def _execute_html_translation(
         self,
@@ -152,20 +172,71 @@ class TranslationService:
             pdf_bytes, html_meta = await translate_pdf_via_html(
                 source_bytes, filename, request, job_id, debug_dir
             )
-            logger.info("[%s] translation pipeline took %.2fs", job_id, time.perf_counter() - t_translate)
+            logger.info(
+                "[%s] translation pipeline took %.2fs", job_id, time.perf_counter() - t_translate
+            )
         except Exception as exc:
             raise StagedError(ErrorStage.TRANSLATION, exc) from exc
 
+        meta = {
+            "extraction_route": html_meta.get("translation_pipeline", "pymupdf_html"),
+            **html_meta,
+        }
+        await self._upload_translated_pdf(request, job_id, pdf_bytes, meta)
+
+    async def _execute_html_translation_v2(
+        self,
+        request: CreateTranslationJobRequest,
+        job_id: str,
+        source_bytes: bytes,
+        filename: str,
+        debug_dir: str | None,
+    ) -> None:
+        """Gemini 2.5 Pro vision → per-page HTML → Playwright PDF → S3 upload."""
+        from legal_agent.agents.translation_v2.pipeline import translate_pdf_v2
+
+        try:
+            t_translate = time.perf_counter()
+            pdf_bytes, v2_meta = await translate_pdf_v2(
+                source_bytes, filename, request, job_id, debug_dir
+            )
+            logger.info(
+                "[%s] translation v2 pipeline took %.2fs", job_id, time.perf_counter() - t_translate
+            )
+        except StagedError:
+            raise
+        except Exception as exc:
+            raise StagedError(ErrorStage.TRANSLATION, exc) from exc
+
+        meta = {
+            "extraction_route": v2_meta.get("extraction_route", "v2_gemini_html"),
+            **v2_meta,
+        }
+        await self._upload_translated_pdf(request, job_id, pdf_bytes, meta)
+
+    async def _upload_translated_pdf(
+        self,
+        request: CreateTranslationJobRequest,
+        job_id: str,
+        pdf_bytes: bytes,
+        meta: dict[str, Any],
+    ) -> None:
+        """Common upload + status update path shared by v1 and v2."""
         lang_slug = request.target_language.value
         folder = request.case_folder_id or _case_folder_from_file_id(request.file_id)
         original_name = _strip_extension(request.file_name)
         lang_suffix = lang_slug.replace("_", " ").replace("-", " ").title().replace(" ", "_")
-        out_name = f"{original_name}_{lang_suffix}.pdf" if original_name else f"{lang_suffix}_translation.pdf"
+        out_name = (
+            f"{original_name}_{lang_suffix}.pdf"
+            if original_name
+            else f"{lang_suffix}_translation.pdf"
+        )
 
         meta = {
-            "extraction_route": html_meta.get("translation_pipeline", "pymupdf_html"),
-            "detected_document_type": request.document_type.value if request.document_type else None,
-            **html_meta,
+            "detected_document_type": request.document_type.value
+            if request.document_type
+            else None,
+            **meta,
         }
         await self._job_manager.update_job_metadata(job_id, **meta)
 
@@ -195,7 +266,9 @@ class TranslationService:
         if not request.file_id:
             raise ValueError("file_id required")
         if not self._decryption:
-            raise ValueError("Document decryption is not configured (DOCUMENT_ENCRYPTION_MASTER_KEY missing)")
+            raise ValueError(
+                "Document decryption is not configured (DOCUMENT_ENCRYPTION_MASTER_KEY missing)"
+            )
 
         logger.info("Downloading encrypted file from S3: %s", request.file_id)
         try:
@@ -204,9 +277,7 @@ class TranslationService:
             raise StagedError(ErrorStage.EXTRACTION, exc) from exc
 
         try:
-            plaintext = await asyncio.to_thread(
-                self._decryption.decrypt_file, encrypted, user_id
-            )
+            plaintext = await asyncio.to_thread(self._decryption.decrypt_file, encrypted, user_id)
         except Exception as exc:
             raise StagedError(ErrorStage.EXTRACTION, exc) from exc
 
