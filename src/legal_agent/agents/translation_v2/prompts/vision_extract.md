@@ -49,9 +49,16 @@ Hard rules:
     - Example: an index row that reads
       `3.   Copy of F.I.R.        Annexure P/1     12-166`
       must produce **four separate blocks**, one per column: `"3."`, `"Copy of F.I.R."`, `"Annexure P/1"`, `"12-166"`. Each has its own `bbox_norm` covering only its column. **Never** emit `"3. Copy of F.I.R. Annexure P/1 12-166"` as a single block.
-    - Use `role="table_cell"` for each cell. If the row has a leading serial number, that's its own table_cell too.
-    - The same rule applies to the column-header row above the data rows: `"S.No."`, `"Des. of documents"`, `"Annexure No."`, `"Page No."` are four blocks, not one.
+    - Use `role="table_cell"` for **data rows only**. If the row has a leading serial number, that's its own table_cell too.
+    - **Column-header rows use `role="heading"`, NOT `role="table_cell"`.** The header row is the topmost row whose cells describe what the columns contain ("S.No.", "Description", "Annexure No.", "Page No.", "Sr.", "Sl.", "Date", "Particulars", etc.) rather than being actual data. Emitting the header row as `table_cell` causes serial-number drift downstream because the renderer treats it as data row 1 and shifts every real row by one.
+    - **All `table_cell` blocks belonging to the same data row MUST share the same `bbox_norm.y0`** (and the same `bbox_norm.y1` — i.e. matching row height). Pick a single top edge and a single bottom edge for each row, then apply them to every cell in that row. Do NOT let per-cell OCR drift produce different y-coordinates for cells you visually identify as row-mates. Row identity is conveyed solely through shared y0/y1 — the renderer clusters cells by y0 into rows, so a drift of more than ~2mm breaks row alignment downstream.
     - Within a single cell, multi-line wrapping in the source IS one block (a cell that wraps to two lines is still one cell). The split is **horizontal column boundaries**, not line breaks within a cell.
     - When in doubt: if there's more than ~5mm of horizontal whitespace between two pieces of text on the same visual row, they are different cells.
+13. **COLUMN-STACKED TEXT LINES.** When multiple lines of text are visually stacked in a column (a sender address, a recipient address, a signature block, a `To,` block on a letter), each line is its own block, but their `bbox_norm.x0` values must be **identical**. Pick the leftmost column edge that all the lines share and emit every line in that group with that same `x0`. Do not let small per-line OCR drift produce a staircase of left edges. Apply this to:
+    - Letterhead sender blocks (name + address lines stacked in the right column).
+    - Recipient blocks ("To, / Name / Address line 1 / Address line 2 / City, State, PIN").
+    - "In the matter of:" party-address blocks.
+    - Closing-signature blocks (name + designation + city/date stacked).
+14. **FIRST-LINE PARAGRAPH INDENT.** If a paragraph's first line is visibly indented from the block's left edge (a typical body-paragraph indent in formal letters and pleadings, where the first line starts 5-10mm right of the rest of the paragraph), encode that indent as **two leading em-spaces** (`  ` — two U+2003 characters) at the start of `text_en`. The renderer preserves leading whitespace, so the indent will survive into the translated output. Do NOT add em-spaces to paragraphs that aren't visibly indented. Do NOT use regular spaces or tabs — only two em-spaces.
 
 Output a single JSON object only. No code fences. No prose. No explanations.

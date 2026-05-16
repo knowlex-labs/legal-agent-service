@@ -21,6 +21,13 @@ def _render_one_sync(html_doc: str, w_mm: float, h_mm: float) -> bytes:
         "height": f"{h_mm:.2f}mm",
         "margin": {"top": "0", "bottom": "0", "left": "0", "right": "0"},
         "print_background": True,
+        # Hindi expansion + autofit/reflow can occasionally push absolute-
+        # positioned blocks past the page boundary. .page has overflow:hidden,
+        # but Chromium's print engine still emits an extra physical page when
+        # a positioned descendant lands past the page-end coordinate. Force
+        # exactly one page per per-page render so the downstream concat
+        # invariant (source pages == output pages) cannot be violated.
+        "page_ranges": "1",
     }
     return render_html_to_pdf_bytes(html_doc, pdf_options=pdf_options)
 

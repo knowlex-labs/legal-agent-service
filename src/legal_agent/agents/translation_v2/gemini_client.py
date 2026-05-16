@@ -43,6 +43,7 @@ def _call_sync(
     max_output_tokens: int,
     response_mime_type: str | None,
     thinking_budget: int | None,
+    context: str = "",
 ) -> str:
     from google.genai import types
 
@@ -52,6 +53,17 @@ def _call_sync(
     }
     if response_mime_type:
         cfg_kwargs["response_mime_type"] = response_mime_type
+    # Disable Automatic Function Calling. We never register tools on these
+    # calls, so AFC just adds a wasted round-trip per request and the
+    # "AFC is enabled with max remote calls: 10" log spam. Setting disable=True
+    # turns it off cleanly. Wrapped in try/except so older SDK versions that
+    # don't expose AutomaticFunctionCallingConfig don't break.
+    try:
+        cfg_kwargs["automatic_function_calling"] = types.AutomaticFunctionCallingConfig(
+            disable=True,
+        )
+    except (AttributeError, TypeError):
+        pass
     # Disable / cap "extended thinking" — vision-OCR doesn't need reasoning and
     # Gemini 2.5 Pro otherwise spends 10–30s on thinking tokens per call.
     if thinking_budget is not None:
@@ -65,7 +77,30 @@ def _call_sync(
         contents=contents,
         config=types.GenerateContentConfig(**cfg_kwargs),
     )
+    # Log usage / cache telemetry so we can verify Gemini's implicit context
+    # cache is firing on translate calls (cached_content_token_count > 0 on
+    # the 2nd+ per-page call of a document).
+    usage = getattr(response, "usage_metadata", None)
+    if usage is not None:
+        prompt_toks = getattr(usage, "prompt_token_count", None)
+        cached_toks = getattr(usage, "cached_content_token_count", None)
+        output_toks = getattr(usage, "candidates_token_count", None)
+        if prompt_toks is not None:
+            logger.info(
+                "[gemini %s] tokens prompt=%s cached=%s output=%s",
+                context or model,
+                prompt_toks,
+                cached_toks if cached_toks is not None else 0,
+                output_toks if output_toks is not None else 0,
+            )
     return response.text or ""
+
+
+# Hard per-call timeout. When Gemini's HTTP stream stalls / drops mid-response,
+# the SDK has no client-side timeout and waits ~3–5 minutes for the server-side
+# socket close before raising RemoteProtocolError. With this timeout we fail
+# fast and let the retry loop fire within seconds instead of minutes.
+_CALL_TIMEOUT_S = 90.0
 
 
 async def call_gemini_json(
@@ -79,6 +114,7 @@ async def call_gemini_json(
     retries: int = 1,
     context: str = "",
     thinking_budget: int | None = None,
+    timeout_s: float | None = None,
 ) -> T:
     """Run a JSON-mode Gemini call and validate the response against `schema`.
 
@@ -90,19 +126,25 @@ async def call_gemini_json(
     context  : Short tag used in log lines, e.g. "vision page 3".
     thinking_budget : Optional thinking-token cap. Pass 0 on Flash to disable
         extended-thinking entirely; on Pro it's clamped to the minimum allowed.
+    timeout_s : Per-attempt timeout in seconds. Defaults to _CALL_TIMEOUT_S.
     """
+    effective_timeout = timeout_s if timeout_s is not None else _CALL_TIMEOUT_S
     last_exc: BaseException | None = None
     for attempt in range(retries + 1):
         try:
-            raw = await asyncio.to_thread(
-                _call_sync,
-                client,
-                model,
-                contents,
-                temperature=temperature,
-                max_output_tokens=max_output_tokens,
-                response_mime_type="application/json",
-                thinking_budget=thinking_budget,
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _call_sync,
+                    client,
+                    model,
+                    contents,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                    response_mime_type="application/json",
+                    thinking_budget=thinking_budget,
+                    context=context,
+                ),
+                timeout=effective_timeout,
             )
             cleaned = _strip_code_fence(raw)
             if not cleaned.strip():
@@ -149,20 +191,26 @@ async def call_gemini_text(
     retries: int = 1,
     context: str = "",
     thinking_budget: int | None = None,
+    timeout_s: float | None = None,
 ) -> str:
     """Plain-text Gemini call with retry. No JSON parsing."""
+    effective_timeout = timeout_s if timeout_s is not None else _CALL_TIMEOUT_S
     last_exc: BaseException | None = None
     for attempt in range(retries + 1):
         try:
-            raw = await asyncio.to_thread(
-                _call_sync,
-                client,
-                model,
-                contents,
-                temperature=temperature,
-                max_output_tokens=max_output_tokens,
-                response_mime_type=None,
-                thinking_budget=thinking_budget,
+            raw = await asyncio.wait_for(
+                asyncio.to_thread(
+                    _call_sync,
+                    client,
+                    model,
+                    contents,
+                    temperature=temperature,
+                    max_output_tokens=max_output_tokens,
+                    response_mime_type=None,
+                    thinking_budget=thinking_budget,
+                    context=context,
+                ),
+                timeout=effective_timeout,
             )
             return raw
         except Exception as exc:

@@ -61,6 +61,17 @@ class Block(BaseModel):
     text_en: str
     text_hi: str | None = None
 
+    @field_validator("font_size_pt", mode="before")
+    @classmethod
+    def _coerce_font_size(cls, v: float | int | None) -> float:
+        try:
+            f = float(v) if v is not None else 0.0
+        except (TypeError, ValueError):
+            return 11.0
+        if f <= 0 or f > 200:
+            return 11.0
+        return f
+
     @field_validator("bbox_norm")
     @classmethod
     def _clamp_bbox(cls, v: tuple[float, float, float, float]) -> tuple[float, float, float, float]:

@@ -1,9 +1,10 @@
 """Stage 4: per-page translation of vision blocks.
 
-One Gemini call per page, fanned out with a shared semaphore. Per-page glossary
-is filtered to terms actually present on the page (smaller prompt = faster +
-cheaper). Style anchors come from the first 1-2 blocks of page 1 to keep the
-register consistent across the whole document.
+One Gemini call per page, fanned out with a shared semaphore. The prompt is
+structured for Gemini 2.5 Pro's implicit context cache: a stable prefix
+(template + full document glossary + style anchors + hard rules) followed by
+the per-page blocks_json at the tail. Every page after the first reuses the
+cached prefix at ~25% of full input cost.
 """
 
 from __future__ import annotations
@@ -49,18 +50,21 @@ class _TranslateResponse(BaseModel):
     blocks: list[_TranslatedBlock]
 
 
-def _filter_glossary_for_page(glossary: dict[str, str], page: VisionPage) -> dict[str, str]:
+def _glossary_table(glossary: dict[str, str]) -> str:
+    """Render the FULL document glossary as a markdown table.
+
+    We deliberately send the entire glossary on every per-page call (not a
+    page-filtered subset). The prompt prefix — template, glossary, style
+    anchors, rules — becomes byte-identical across all pages of a document,
+    which lets Gemini 2.5 Pro's implicit context cache kick in and bill the
+    cached prefix at ~25% of full rate. The extra tokens sent per page are
+    more than offset by the cache discount (~70% net savings on translate
+    input on a multi-page document).
+    """
     if not glossary:
-        return {}
-    joined = " ".join(b.text_en for b in page.blocks).lower()
-    return {en: hi for en, hi in glossary.items() if en.lower() in joined}
-
-
-def _glossary_table(filtered: dict[str, str]) -> str:
-    if not filtered:
-        return "(no glossary entries for this page)"
+        return "(glossary is empty)"
     lines = ["| English | Hindi |", "|---|---|"]
-    for en, hi in filtered.items():
+    for en, hi in glossary.items():
         lines.append(f"| {en} | {hi} |")
     return "\n".join(lines)
 
@@ -124,11 +128,13 @@ async def _translate_one(
     job_id: str,
 ) -> TranslatedPage:
     async with sem:
-        filtered = _filter_glossary_for_page(glossary, page)
         payload, keep_maps = _build_blocks_payload(page)
+        # Stable prefix (template + full glossary + style anchors + rules) then
+        # variable per-page blocks_json at the tail — this lets Gemini's
+        # implicit context cache hit on every page after the first.
         prompt = (
             _prompt_template()
-            .replace("{glossary_table}", _glossary_table(filtered))
+            .replace("{glossary_table}", _glossary_table(glossary))
             .replace("{style_anchors}", _style_anchors(all_pages))
             .replace("{blocks_json}", json.dumps(payload, ensure_ascii=False, indent=2))
         )
