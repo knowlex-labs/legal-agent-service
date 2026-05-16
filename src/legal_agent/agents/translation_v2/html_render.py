@@ -42,6 +42,14 @@ _SEPARATOR_MAX_HEIGHT_MM = 0.4
 # from visually touching the row below.
 _REFLOW_MIN_GAP_MM = 1.0
 
+# Devanagari glyphs at the same point size as Latin look perceptibly smaller
+# because their x-height is lower and the bundled Noto Serif Devanagari runs
+# slightly tight. Scale Hindi-rendered blocks up by this factor so body text
+# is comfortably legible. The autofit ladder will shrink overflowing blocks
+# back down on a per-block basis, so the net effect is "bigger where it fits,
+# same as before where it doesn't."
+_HINDI_FONT_SCALE = 1.12
+
 
 def _sanitize_inline(text: str) -> str:
     """Escape HTML except for inline <b>/<i>/<u>/<strong>/<em>."""
@@ -79,7 +87,16 @@ def load_font_face_css() -> str:
 
 _BASE_CSS = """
 *, *::before, *::after { box-sizing: border-box; }
-html, body { margin: 0; padding: 0; font-family: 'NSDev', 'Noto Serif Devanagari', serif; }
+html, body {
+  margin: 0; padding: 0;
+  font-family: 'NSDev', 'Noto Serif Devanagari', serif;
+  /* Hard-cap document height to one page so Chromium's print engine cannot
+     emit an extra physical page when an absolute-positioned block lands past
+     the page boundary after Hindi expansion. Combined with page_ranges:"1"
+     in compose.py, this makes the page-count mismatch failure impossible. */
+  overflow: hidden;
+  height: 100%;
+}
 .page {
   position: relative;
   overflow: hidden;
@@ -112,22 +129,40 @@ html, body { margin: 0; padding: 0; font-family: 'NSDev', 'Noto Serif Devanagari
 .fit-1 { line-height: 1.28; }
 .fit-2 { line-height: 1.22; font-size: calc(var(--fs) - 1pt); }
 .fit-3 { line-height: 1.18; font-size: calc(var(--fs) - 2pt); }
-.fit-wrap { word-break: break-word; overflow-wrap: anywhere; }
+.fit-4 { line-height: 1.14; font-size: calc(var(--fs) - 3pt); }
+.fit-5 { line-height: 1.10; font-size: calc(var(--fs) - 4pt); }
+/* fit-wrap is the last resort: prefer breaking at word boundaries first
+   (overflow-wrap: break-word). Only if a single Devanagari word is longer
+   than its cell will the browser fall back to mid-word breaks — and at
+   that point fit-5 has already shrunk the font, so cases that hit this
+   are rare. The previous overflow-wrap:anywhere was too aggressive and
+   produced ugly mid-syllable breaks like "अनुक्रमणि / का" and split
+   Latin names like "Rajiv / Sharma" even when a whole-name break would fit. */
+.fit-wrap { word-break: normal; overflow-wrap: break-word; }
 """
 
 _AUTOFIT_JS = (
     """
 (function(){
-  /* ── Step 1: autofit ladder (existing) ── */
-  var tiers = ['fit-1','fit-2','fit-3'];
+  /* ── Step 1: autofit ladder ──
+     Triggers on EITHER vertical or horizontal overflow. Horizontal-overflow
+     handling is what keeps Hindi-expanded table cells (e.g. an index row's
+     "Annexure P/1" cell rendering as "संलग्नक P/1") from spilling into the
+     adjacent column — fit-2/fit-3 shrink the font, fit-wrap allows mid-word
+     breaks as a last resort. */
+  var tiers = ['fit-1','fit-2','fit-3','fit-4','fit-5'];
   var blocks = document.querySelectorAll('.blk');
+  function overflows(el) {
+    return (el.scrollHeight > el.clientHeight + 1) ||
+           (el.scrollWidth > el.clientWidth + 1);
+  }
   for (var i = 0; i < blocks.length; i++) {
     var el = blocks[i];
     var step = 0;
-    while (el.scrollHeight > el.clientHeight + 1 && step < tiers.length) {
+    while (overflows(el) && step < tiers.length) {
       el.classList.add(tiers[step++]);
     }
-    if (el.scrollHeight > el.clientHeight + 1) {
+    if (overflows(el)) {
       el.classList.add('fit-wrap');
     }
   }
@@ -135,19 +170,70 @@ _AUTOFIT_JS = (
   /* ── Step 2: vertical reflow for wrapped blocks ──
      When a text block wraps to more lines than its source bbox accommodated,
      it grows downward and visually crashes into the row below. Walk blocks in
-     reading order; for each one, find any prior block that overlaps it
-     horizontally, and push the current block down so its top sits at least
-     MIN_GAP below that prior block's rendered bottom. Separators don't shift
-     anything — they're table rules and should stay anchored. */
+     reading order; for each one, find any prior block (text OR separator)
+     that overlaps it horizontally, and push the current block down so its top
+     sits at least MIN_GAP below that prior block's rendered bottom.
+
+     Separators stay anchored — they're table rules — but they DO act as
+     collision sources. Otherwise a horizontal rule under a letterhead can end
+     up visually crossing through an expanded Hindi line below it (the
+     "strikethrough on email" artifact). */
   var MIN_GAP_PX = """
     + f"{_REFLOW_MIN_GAP_MM} * (96 / 25.4)"
     + """;
   var textBlocks = Array.prototype.slice.call(
     document.querySelectorAll('.blk:not(.separator)')
   );
+  var separators = Array.prototype.slice.call(
+    document.querySelectorAll('.blk.separator')
+  );
+
+  /* ── Row-mate grouping for table_cell blocks ──
+     Cluster all table_cell blocks by their ORIGINAL style.top into rows
+     (within ROW_THRESHOLD_MM). When the reflow pushes any cell down, we
+     apply the same shift to every cell in its row so the s.no. column
+     stays aligned with the content column. Without this, a wrapped cell
+     in column B drifts down while column A's s.no. stays put, producing
+     the "1, 2, 3" labels mis-pointing at the wrong content row. */
+  var ROW_THRESHOLD_MM = 3.0;
+  var cellBlocks = Array.prototype.slice.call(
+    document.querySelectorAll('.blk[data-role="table_cell"]')
+  );
+  cellBlocks.sort(function(a, b) {
+    return parseFloat(a.style.top) - parseFloat(b.style.top);
+  });
+  var rowMatesById = {};
+  if (cellBlocks.length > 0) {
+    var currentRow = [cellBlocks[0]];
+    var rowAnchorTop = parseFloat(cellBlocks[0].style.top);
+    function commitRow(row) {
+      for (var c = 0; c < row.length; c++) {
+        rowMatesById[row[c].dataset.id] = row;
+      }
+    }
+    for (var i = 1; i < cellBlocks.length; i++) {
+      var cellTopMm = parseFloat(cellBlocks[i].style.top);
+      if (Math.abs(cellTopMm - rowAnchorTop) <= ROW_THRESHOLD_MM) {
+        currentRow.push(cellBlocks[i]);
+      } else {
+        commitRow(currentRow);
+        currentRow = [cellBlocks[i]];
+        rowAnchorTop = cellTopMm;
+      }
+    }
+    commitRow(currentRow);
+  }
+
   textBlocks.sort(function(a, b) {
     return a.getBoundingClientRect().top - b.getBoundingClientRect().top;
   });
+  function horizOverlap(a, b) {
+    return !((a.right <= b.left + 1) || (b.right <= a.left + 1));
+  }
+  function applyShiftMm(el, shiftMm) {
+    var currentTopMm = parseFloat(el.style.top) || 0;
+    el.style.top = (currentTopMm + shiftMm).toFixed(2) + 'mm';
+  }
   for (var i = 0; i < textBlocks.length; i++) {
     var cur = textBlocks[i];
     var curRect = cur.getBoundingClientRect();
@@ -155,16 +241,41 @@ _AUTOFIT_JS = (
     for (var j = 0; j < i; j++) {
       var prev = textBlocks[j];
       var prevRect = prev.getBoundingClientRect();
-      var horizSeparate = (curRect.right <= prevRect.left + 1) ||
-                          (prevRect.right <= curRect.left + 1);
-      if (horizSeparate) continue;
+      if (!horizOverlap(curRect, prevRect)) continue;
       if (prevRect.bottom > maxBottom) maxBottom = prevRect.bottom;
+    }
+    for (var k = 0; k < separators.length; k++) {
+      var sep = separators[k];
+      var sepRect = sep.getBoundingClientRect();
+      if (!horizOverlap(curRect, sepRect)) continue;
+      /* Two cases push the current block down:
+         (a) separator is above the block (sepRect.bottom <= curRect.top)
+             AND close enough that MIN_GAP isn't satisfied — handled by the
+             same maxBottom logic below.
+         (b) separator is INSIDE the block's rendered rect — i.e. the block
+             expanded vertically (Hindi text wrapped to more lines) and now
+             the rule is drawing through the block. Detect by checking
+             vertical overlap: sepRect.top < curRect.bottom AND
+             sepRect.bottom > curRect.top. */
+      var vertOverlap = (sepRect.top < curRect.bottom) &&
+                        (sepRect.bottom > curRect.top);
+      var separatorAbove = sepRect.bottom <= curRect.top;
+      if (!vertOverlap && !separatorAbove) continue;
+      if (sepRect.bottom > maxBottom) maxBottom = sepRect.bottom;
     }
     if (maxBottom > -Infinity && curRect.top < maxBottom + MIN_GAP_PX) {
       var shiftPx = (maxBottom + MIN_GAP_PX) - curRect.top;
       var shiftMm = shiftPx / (96 / 25.4);
-      var currentTopMm = parseFloat(cur.style.top) || 0;
-      cur.style.top = (currentTopMm + shiftMm).toFixed(2) + 'mm';
+      /* If this is a table_cell that has row-mates, shift the whole row
+         together. Otherwise just shift this block. */
+      var mates = rowMatesById[cur.dataset.id];
+      if (mates && mates.length > 1) {
+        for (var m = 0; m < mates.length; m++) {
+          applyShiftMm(mates[m], shiftMm);
+        }
+      } else {
+        applyShiftMm(cur, shiftMm);
+      }
     }
   }
 })();
@@ -209,7 +320,9 @@ def _block_div(block: Block, page_w_mm: float, page_h_mm: float) -> str:
 
     text = block.text_hi or block.text_en
     body = _sanitize_inline(text)
-    fs = block.font_size_pt
+    # Apply the Hindi bump only when we're actually rendering Devanagari
+    # content — fallback-to-source (text_en) blocks keep their original size.
+    fs = block.font_size_pt * _HINDI_FONT_SCALE if block.text_hi else block.font_size_pt
 
     # Numeric/short tokens: extend width slightly and mark compact so they don't
     # wrap at hyphens. The wider serif rendering plus the +2mm pad keeps the
@@ -225,7 +338,8 @@ def _block_div(block: Block, page_w_mm: float, page_h_mm: float) -> str:
     )
     return (
         f'<div class="{" ".join(classes)}" data-align="{block.align.value}" '
-        f'data-id="{block.id}" style="{style}">{body}</div>'
+        f'data-role="{block.role.value}" data-id="{block.id}" '
+        f'style="{style}">{body}</div>'
     )
 
 

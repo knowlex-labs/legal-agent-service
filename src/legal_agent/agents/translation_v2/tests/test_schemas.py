@@ -71,9 +71,15 @@ def test_translated_page_inherits_shape():
     assert page.blocks[0].text_hi == "नमस्ते"
 
 
-def test_font_size_must_be_positive():
-    with pytest.raises(Exception):
-        _block(font_size_pt=0.0)
+def test_font_size_coerced_when_non_positive():
+    """Gemini sometimes returns 0.0 / negative font sizes for separator-like
+    blocks. The model coerces those to the default 11.0 rather than failing
+    page validation. Values inside (0, 200] pass through unchanged; values
+    outside that range are coerced."""
+    assert _block(font_size_pt=0.0).font_size_pt == 11.0
+    assert _block(font_size_pt=-5.0).font_size_pt == 11.0
+    assert _block(font_size_pt=999.0).font_size_pt == 11.0
+    assert _block(font_size_pt=12.5).font_size_pt == 12.5
 
 
 def test_separator_role_allows_empty_text():
