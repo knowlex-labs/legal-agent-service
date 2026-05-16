@@ -42,6 +42,7 @@ def _call_sync(
     temperature: float,
     max_output_tokens: int,
     response_mime_type: str | None,
+    thinking_budget: int | None,
 ) -> str:
     from google.genai import types
 
@@ -51,6 +52,14 @@ def _call_sync(
     }
     if response_mime_type:
         cfg_kwargs["response_mime_type"] = response_mime_type
+    # Disable / cap "extended thinking" — vision-OCR doesn't need reasoning and
+    # Gemini 2.5 Pro otherwise spends 10–30s on thinking tokens per call.
+    if thinking_budget is not None:
+        try:
+            cfg_kwargs["thinking_config"] = types.ThinkingConfig(thinking_budget=thinking_budget)
+        except (AttributeError, TypeError):
+            # SDK version doesn't support thinking_config — silently proceed.
+            pass
     response = client.models.generate_content(
         model=model,
         contents=contents,
@@ -69,6 +78,7 @@ async def call_gemini_json(
     max_output_tokens: int = 32768,
     retries: int = 1,
     context: str = "",
+    thinking_budget: int | None = None,
 ) -> T:
     """Run a JSON-mode Gemini call and validate the response against `schema`.
 
@@ -78,6 +88,8 @@ async def call_gemini_json(
     schema   : Pydantic model class to validate against.
     retries  : Number of retries after the first attempt (default 1 = 2 total).
     context  : Short tag used in log lines, e.g. "vision page 3".
+    thinking_budget : Optional thinking-token cap. Pass 0 on Flash to disable
+        extended-thinking entirely; on Pro it's clamped to the minimum allowed.
     """
     last_exc: BaseException | None = None
     for attempt in range(retries + 1):
@@ -90,6 +102,7 @@ async def call_gemini_json(
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 response_mime_type="application/json",
+                thinking_budget=thinking_budget,
             )
             cleaned = _strip_code_fence(raw)
             if not cleaned.strip():
@@ -135,6 +148,7 @@ async def call_gemini_text(
     max_output_tokens: int = 32768,
     retries: int = 1,
     context: str = "",
+    thinking_budget: int | None = None,
 ) -> str:
     """Plain-text Gemini call with retry. No JSON parsing."""
     last_exc: BaseException | None = None
@@ -148,6 +162,7 @@ async def call_gemini_text(
                 temperature=temperature,
                 max_output_tokens=max_output_tokens,
                 response_mime_type=None,
+                thinking_budget=thinking_budget,
             )
             return raw
         except Exception as exc:

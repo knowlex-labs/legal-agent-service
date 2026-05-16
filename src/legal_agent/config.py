@@ -144,14 +144,19 @@ class Settings(BaseSettings):
 
     # ── Translation v2 (vision-first Gemini pipeline) ────────────────────
     # Feature flag selects between legacy v1 (PyMuPDF + flow HTML) and v2
-    # (Gemini 2.5 Pro vision → per-page HTML → Playwright). v1 is the default
-    # so existing behaviour is unchanged until v2 is explicitly opted in.
+    # (Gemini vision → per-page HTML → Playwright). v1 is the default so
+    # existing behaviour is unchanged until v2 is explicitly opted in.
     translation_pipeline: Literal["v1", "v2"] = "v1"
-    translation_v2_model: str = "gemini-2.5-pro"
+    # Stage 2 (vision OCR) uses Flash — #1 on OCR Arena, 3–4× faster than Pro
+    # on vision transcription. With thinking_budget=0 it avoids reasoning latency.
+    translation_v2_vision_model: str = "gemini-2.5-flash"
+    # Stages 3–4 (glossary + translation) use Pro — highest BLEU on legal
+    # Eng→Hindi translation (WMT 2025); this is where output quality lives.
+    translation_v2_translate_model: str = "gemini-2.5-pro"
     # Concurrent Gemini vision-extract calls (one per page).
-    translation_v2_vision_concurrency: int = 6
+    translation_v2_vision_concurrency: int = 10
     # Concurrent Gemini per-page translate calls.
-    translation_v2_translate_concurrency: int = 8
+    translation_v2_translate_concurrency: int = 10
     # DPI used when rasterising source PDF pages for vision extraction.
     translation_v2_target_dpi: int = 300
     # Concurrent Playwright/Chromium renders. Chromium launches are heavy;

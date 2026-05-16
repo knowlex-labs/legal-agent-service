@@ -74,3 +74,9 @@ def test_translated_page_inherits_shape():
 def test_font_size_must_be_positive():
     with pytest.raises(Exception):
         _block(font_size_pt=0.0)
+
+
+def test_separator_role_allows_empty_text():
+    b = _block(role=BlockRole.separator, text_en="")
+    assert b.role == BlockRole.separator
+    assert b.text_en == ""

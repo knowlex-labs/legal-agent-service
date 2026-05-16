@@ -26,6 +26,7 @@ class BlockRole(str, Enum):
     page_number = "page_number"
     table_cell = "table_cell"
     caption = "caption"
+    separator = "separator"
     other = "other"
 
 

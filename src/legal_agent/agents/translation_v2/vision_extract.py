@@ -64,6 +64,7 @@ async def _extract_one(
             max_output_tokens=32768,
             retries=1,
             context=f"vision page {page.page_no}",
+            thinking_budget=0,
         )
         # The model can drift on page_no / dimensions — force these to match source.
         result = result.model_copy(

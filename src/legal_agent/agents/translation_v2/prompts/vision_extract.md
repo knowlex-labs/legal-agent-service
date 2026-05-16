@@ -14,7 +14,7 @@ Output a single JSON object with this exact shape:
   "blocks": [
     {
       "id": "p{page_no}-b{NN}",                 # stable per-page id, NN zero-padded
-      "role": "title|heading|subheading|paragraph|clause|list_item|signature|footer|header|page_number|table_cell|caption|other",
+      "role": "title|heading|subheading|paragraph|clause|list_item|signature|footer|header|page_number|table_cell|caption|separator|other",
       "align": "left|center|right|justify",
       "weight": "normal|bold",
       "italic": <bool>,
@@ -38,6 +38,7 @@ Hard rules:
 6. For intra-line emphasis only, you may use inline `<b>`, `<i>`, `<u>` tags inside `text_en`. Do NOT use other HTML.
 7. Group glyphs into the smallest meaningful semantic unit. Two adjacent lines that belong to the same paragraph should be one block. Two visually separate headings must be two blocks.
 8. If a region appears to be a stamp, seal, signature, or watermark with little/no readable text, emit a block with `role="signature"` or `role="other"` and `text_en` describing it as `[STAMP: <description>]`. This text will be skipped during translation.
-9. Ignore decorative ornaments and pure ruled lines that contain no text.
+9. **Horizontal and vertical rules.** Lines that structure the document — table borders, ruled lines under column headers, lines bracketing a section, the closing rule under a list — are NOT decoration. Emit each such rule as a block with `role="separator"`, empty `text_en` (`""`), and a `bbox_norm` covering the rule's footprint (a thin tall rectangle for vertical rules, a thin wide rectangle for horizontal rules). Index tables and forms typically have one rule above the column header and one rule below the last data row — emit both.
+10. Truly decorative-only marks (page-border curls, ornamental flourishes, dot-leader sequences inside an entry's page-number column) may still be omitted.
 
 Output a single JSON object only. No code fences. No prose. No explanations.

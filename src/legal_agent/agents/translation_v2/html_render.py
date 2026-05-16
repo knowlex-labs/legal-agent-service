@@ -14,12 +14,22 @@ import re
 from functools import lru_cache
 from pathlib import Path
 
-from legal_agent.agents.translation_v2.schemas import Block, TranslatedPage
+from legal_agent.agents.translation_v2.schemas import Block, BlockRole, TranslatedPage
 
 _ASSETS = Path(__file__).parent / "assets"
 
 # Allow only inline emphasis tags in translated text; everything else gets escaped.
 _INLINE_ALLOWED = re.compile(r"<(/?)(b|i|u|strong|em)\s*>", re.IGNORECASE)
+
+# Short numeric/punctuation strings (page ranges, dates, clause numbers) that
+# CSS would otherwise wrap at a hyphen — e.g. "12-166" becoming "12-16" + "6".
+# When matched, we apply white-space: nowrap so the token stays on one line.
+_NUMERIC_COMPACT_RE = re.compile(r"^[\d\s\-–—/.,:()]+$")
+_NUMERIC_COMPACT_MAX_LEN = 16
+
+# Extra horizontal breathing room (mm) we add to a compact block's width so the
+# slightly-wider serif rendering of digits doesn't collide with the right neighbour.
+_COMPACT_PAD_MM = 2.0
 
 
 def _sanitize_inline(text: str) -> str:
@@ -78,6 +88,16 @@ html, body { margin: 0; padding: 0; font-family: 'NSDev', 'Noto Serif Devanagari
 .blk.bold      { font-weight: 700; }
 .blk.italic    { font-style: italic; }
 .blk.underline { text-decoration: underline; }
+/* Compact: short numeric/punctuation tokens (page ranges, dates) that must not
+   wrap at hyphens. Horizontal overflow is preferable to row-to-row collision. */
+.blk.compact   { white-space: nowrap; }
+/* Separator: a horizontal or vertical rule. No text body — the div itself is
+   the line, filled with currentColor and sized by its bbox. */
+.blk.separator {
+  white-space: normal;
+  background: currentColor;
+  color: #000;
+}
 .fit-1 { line-height: 1.28; }
 .fit-2 { line-height: 1.22; font-size: calc(var(--fs) - 1pt); }
 .fit-3 { line-height: 1.18; font-size: calc(var(--fs) - 2pt); }
@@ -102,6 +122,13 @@ _AUTOFIT_JS = """
 """
 
 
+def _is_numeric_compact(text: str) -> bool:
+    """Short string made entirely of digits / punctuation — must not wrap on '-'."""
+    if not text or len(text) > _NUMERIC_COMPACT_MAX_LEN:
+        return False
+    return bool(_NUMERIC_COMPACT_RE.fullmatch(text))
+
+
 def _block_div(block: Block, page_w_mm: float, page_h_mm: float) -> str:
     x0, y0, x1, y1 = block.bbox_norm
     left_mm = x0 * page_w_mm
@@ -110,6 +137,17 @@ def _block_div(block: Block, page_w_mm: float, page_h_mm: float) -> str:
     min_height_mm = max(2.0, (y1 - y0) * page_h_mm)
 
     classes = ["blk"]
+
+    # Separator: rule line, no text body. Render the bbox itself as a filled
+    # thin div (height comes from the bbox; min-height kept small).
+    if block.role == BlockRole.separator:
+        classes.append("separator")
+        style = (
+            f"left:{left_mm:.2f}mm;top:{top_mm:.2f}mm;"
+            f"width:{width_mm:.2f}mm;height:{min_height_mm:.2f}mm;"
+        )
+        return f'<div class="{" ".join(classes)}" data-id="{block.id}" style="{style}"></div>'
+
     if block.weight.value == "bold":
         classes.append("bold")
     if block.italic:
@@ -120,6 +158,13 @@ def _block_div(block: Block, page_w_mm: float, page_h_mm: float) -> str:
     text = block.text_hi or block.text_en
     body = _sanitize_inline(text)
     fs = block.font_size_pt
+
+    # Numeric/short tokens: extend width slightly and mark compact so they don't
+    # wrap at hyphens. The wider serif rendering plus the +2mm pad keeps the
+    # token on one row without colliding with the next block to the right.
+    if _is_numeric_compact(text):
+        classes.append("compact")
+        width_mm = min(page_w_mm - left_mm, width_mm + _COMPACT_PAD_MM)
 
     style = (
         f"left:{left_mm:.2f}mm;top:{top_mm:.2f}mm;"
