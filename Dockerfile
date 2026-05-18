@@ -59,10 +59,11 @@ ENV PATH="/app/.venv/bin:$PATH" \
     PORT=8001
 
 # Camoufox (scraping) + Playwright Chromium (HTML→PDF in html_pdf_translator).
-# Browsers live under XDG_CACHE_HOME so appuser can read what root fetched at build.
+# Cached under /app/.cache so appuser can read what root fetched at build.
 ENV CAMOUFOX_CACHE_DIR=/app/.cache/camoufox \
     XDG_CACHE_HOME=/app/.cache \
-    PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright
+    PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright \
+    HOME=/app
 RUN mkdir -p /app/.cache/camoufox /app/.cache/ms-playwright && \
     /app/.venv/bin/playwright install --with-deps chromium && \
     /app/.venv/bin/python -m camoufox fetch && \

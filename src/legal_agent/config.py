@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     sarvam_api_key: str | None = None
     mistral_api_key: str | None = None
+    # Azure Document Intelligence (translation_v3 stage 2 OCR).
+    # Endpoint looks like https://<resource>.cognitiveservices.azure.com/
+    azure_document_intelligence_endpoint: str | None = None
+    azure_document_intelligence_key: str | None = None
 
     # Model used for the structured-metadata extraction call inside output_node.
     # Defaulted to Haiku so the small, fixed-shape extraction does not consume
@@ -146,7 +150,7 @@ class Settings(BaseSettings):
     # Feature flag selects between legacy v1 (PyMuPDF + flow HTML) and v2
     # (Gemini vision → per-page HTML → Playwright). v1 is the default so
     # existing behaviour is unchanged until v2 is explicitly opted in.
-    translation_pipeline: Literal["v1", "v2"] = "v1"
+    translation_pipeline: Literal["v1", "v2", "v3"] = "v1"
     # Stage 2 (vision OCR) uses Flash — #1 on OCR Arena, 3–4× faster than Pro
     # on vision transcription. With thinking_budget=0 it avoids reasoning latency.
     translation_v2_vision_model: str = "gemini-2.5-flash"
@@ -162,6 +166,29 @@ class Settings(BaseSettings):
     # Concurrent Playwright/Chromium renders. Chromium launches are heavy;
     # >4 in parallel typically slows wall clock.
     translation_v2_render_concurrency: int = 4
+
+    # ── Translation v3 (Azure Document Intelligence + Haiku) ─────────────
+    # Replaces v2's per-page Gemini Vision (~50₹/scanned page) with Azure
+    # `prebuilt-layout` + Anthropic Haiku translation. ~₹0.13/page for OCR.
+    # Per-page Azure calls bounded by concurrency (Azure tier limits permit
+    # several in flight; tune up if quota allows).
+    translation_v3_azure_concurrency: int = 4
+    # Anthropic Haiku Tier-1 limits are generous; 6 parallel per-page calls is safe.
+    translation_v3_translate_concurrency: int = 6
+    translation_v3_target_dpi: int = 300
+    translation_v3_render_concurrency: int = 4
+    # Hint passed to the OCR engine — Azure auto-detects language so this is
+    # currently informational. Kept so the extractor signature is stable if
+    # a different engine that requires a hint is wired later.
+    translation_v3_ocr_lang_hint: str = "auto"
+    # Anthropic model for glossary stage (2 calls/doc, fail-soft).
+    translation_v3_glossary_model: str = "claude-haiku-4-5-20251001"
+    # "haiku" = Anthropic per-page (default); "sarvam" = Sarvam REST formal.
+    translation_v3_translate_engine: Literal["haiku", "sarvam"] = "haiku"
+    # Anthropic model for per-page translation (used when engine=haiku).
+    translation_v3_translate_model: str = "claude-haiku-4-5-20251001"
+    # S3 prefix where structured TranslatedPage JSON is uploaded for UI editing.
+    translation_v3_document_json_prefix: str = "translation-v3-documents"
 
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"

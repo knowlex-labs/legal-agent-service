@@ -219,6 +219,22 @@ class CreateTranslationJobRequest(BaseModel):
             "Defaults to TRANSLATION_LLM_MODEL env var (server default: sarvam)."
         ),
     )
+    translation_pipeline: Literal["v1", "v2", "v3"] | None = Field(
+        None,
+        description=(
+            "Per-request override of the translation pipeline. v1 = PyMuPDF + Sarvam, "
+            "v2 = Gemini vision + Gemini translate, v3 = Azure Document Intelligence + "
+            "Haiku/Sarvam (cheap, editable, multilingual). "
+            "Falls back to settings.translation_pipeline when omitted."
+        ),
+    )
+    translate_engine: Literal["haiku", "sarvam"] | None = Field(
+        None,
+        description=(
+            "v3 only: which engine drives the per-page translation. 'haiku' (default) uses "
+            "Anthropic Claude Haiku 4.5; 'sarvam' uses Sarvam REST formal mode. Ignored on v1/v2."
+        ),
+    )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional extra context")
 
     @model_validator(mode="after")

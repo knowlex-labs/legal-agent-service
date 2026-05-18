@@ -149,7 +149,13 @@ class TranslationService:
                 ),
             )
 
-        if get_settings().translation_pipeline == "v2":
+        # Per-request override wins over the settings default.
+        pipeline = getattr(request, "translation_pipeline", None) or get_settings().translation_pipeline
+        if pipeline == "v3":
+            await self._execute_html_translation_v3(
+                request, job_id, source_bytes, filename, debug_dir
+            )
+        elif pipeline == "v2":
             await self._execute_html_translation_v2(
                 request, job_id, source_bytes, filename, debug_dir
             )
@@ -211,6 +217,36 @@ class TranslationService:
         meta = {
             "extraction_route": v2_meta.get("extraction_route", "v2_gemini_html"),
             **v2_meta,
+        }
+        await self._upload_translated_pdf(request, job_id, pdf_bytes, meta)
+
+    async def _execute_html_translation_v3(
+        self,
+        request: CreateTranslationJobRequest,
+        job_id: str,
+        source_bytes: bytes,
+        filename: str,
+        debug_dir: str | None,
+    ) -> None:
+        """Azure Document Intelligence → Haiku/Sarvam → per-page HTML → PDF → S3."""
+        from legal_agent.agents.translation_v3.pipeline import translate_pdf_v3
+
+        try:
+            t_translate = time.perf_counter()
+            pdf_bytes, v3_meta = await translate_pdf_v3(
+                source_bytes, filename, request, job_id, debug_dir
+            )
+            logger.info(
+                "[%s] translation v3 pipeline took %.2fs", job_id, time.perf_counter() - t_translate
+            )
+        except StagedError:
+            raise
+        except Exception as exc:
+            raise StagedError(ErrorStage.TRANSLATION, exc) from exc
+
+        meta = {
+            "extraction_route": v3_meta.get("extraction_route", "v3_azure_html"),
+            **v3_meta,
         }
         await self._upload_translated_pdf(request, job_id, pdf_bytes, meta)
 

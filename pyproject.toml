@@ -52,6 +52,10 @@ dependencies = [
     # ImportError: cannot import name 'matrix_power' from 'numpy.linalg' (unknown location)
     "numpy>=2.1.0,<3",
     "docling>=2.0.0",
+    # translation_v3 stage 2 OCR: Azure Document Intelligence prebuilt-layout.
+    # Cloud API — no native deps, no model weights to download at build time.
+    "azure-ai-documentintelligence>=1.0.0",
+    "anthropic>=0.40.0",  # translation_v3 glossary + per-page Haiku translation
 ]
 
 [project.optional-dependencies]

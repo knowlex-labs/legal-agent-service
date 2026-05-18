@@ -44,11 +44,11 @@ _REFLOW_MIN_GAP_MM = 1.0
 
 # Devanagari glyphs at the same point size as Latin look perceptibly smaller
 # because their x-height is lower and the bundled Noto Serif Devanagari runs
-# slightly tight. Scale Hindi-rendered blocks up by this factor so body text
-# is comfortably legible. The autofit ladder will shrink overflowing blocks
-# back down on a per-block basis, so the net effect is "bigger where it fits,
-# same as before where it doesn't."
-_HINDI_FONT_SCALE = 1.12
+# slightly tight. A small bump keeps body text legible. Kept conservative
+# (1.05) because larger scales accumulate vertical drift across the page and
+# push footers off the bottom — the autofit ladder's per-block shrink is too
+# local to undo a cumulative cascade.
+_HINDI_FONT_SCALE = 1.05
 
 
 def _sanitize_inline(text: str) -> str:
@@ -107,7 +107,10 @@ html, body {
   font-feature-settings: "kern", "liga", "calt";
   word-break: keep-all;
   overflow-wrap: normal;
-  line-height: 1.35;
+  /* 1.2 matches typeset legal documents (Microsoft Office defaults to 1.35
+     which is too loose — multiplied across a page it accumulates ~5-10mm of
+     unnecessary downward drift, pushing footer content off the page). */
+  line-height: 1.2;
   white-space: pre-wrap;
 }
 .blk[data-align="center"]  { text-align: center; }
@@ -126,11 +129,12 @@ html, body {
   background: currentColor;
   color: #000;
 }
-.fit-1 { line-height: 1.28; }
-.fit-2 { line-height: 1.22; font-size: calc(var(--fs) - 1pt); }
-.fit-3 { line-height: 1.18; font-size: calc(var(--fs) - 2pt); }
-.fit-4 { line-height: 1.14; font-size: calc(var(--fs) - 3pt); }
-.fit-5 { line-height: 1.10; font-size: calc(var(--fs) - 4pt); }
+/* Autofit ladder — each step strictly tighter than the base 1.2. */
+.fit-1 { line-height: 1.16; }
+.fit-2 { line-height: 1.14; font-size: calc(var(--fs) - 1pt); }
+.fit-3 { line-height: 1.12; font-size: calc(var(--fs) - 2pt); }
+.fit-4 { line-height: 1.10; font-size: calc(var(--fs) - 3pt); }
+.fit-5 { line-height: 1.08; font-size: calc(var(--fs) - 4pt); }
 /* fit-wrap is the last resort: prefer breaking at word boundaries first
    (overflow-wrap: break-word). Only if a single Devanagari word is longer
    than its cell will the browser fall back to mid-word breaks — and at
