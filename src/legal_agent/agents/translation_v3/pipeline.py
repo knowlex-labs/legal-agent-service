@@ -13,13 +13,12 @@ import logging
 import time
 from typing import TYPE_CHECKING, Any
 
-from legal_agent.agents.translation_v2.column_stack_layout import reflow_column_stacks
 from legal_agent.agents.translation_v2.compose import concat_pdfs, render_pages_to_pdfs
 from legal_agent.agents.translation_v2.html_render import load_font_face_css, render_page_html
 from legal_agent.agents.translation_v2.rasterize import rasterize_pdf
 from legal_agent.agents.translation_v2.schemas import Document
-from legal_agent.agents.translation_v2.table_layout import reflow_tables
 from legal_agent.agents.translation_v3.azure_extract import extract_pages
+from legal_agent.agents.translation_v3.block_refine_haiku import refine_pages
 from legal_agent.agents.translation_v3.glossary_haiku import build_glossary
 from legal_agent.config import get_settings
 from legal_agent.services.job_manager import ErrorStage, StagedError
@@ -124,6 +123,31 @@ async def translate_pdf_v3(
         meta["ocr_ms"],
     )
 
+    # ── Stage 2.5: Haiku multimodal block refinement (fail-soft) ─────────
+    # Corrects misclassified roles (heading vs paragraph) and false bold/italic
+    # using the page raster as visual evidence. Role is load-bearing for the
+    # flow-layout renderer (each role → CSS class → typography). Disabled via
+    # `translation_v3_refine_enabled=false`.
+    if settings.translation_v3_refine_enabled:
+        t0 = time.perf_counter()
+        try:
+            vision_pages = await refine_pages(
+                vision_pages,
+                rasters,
+                model=settings.translation_v3_refine_model,
+                concurrency=settings.translation_v3_refine_concurrency,
+                job_id=job_id,
+            )
+        except Exception as exc:  # noqa: BLE001 — fail-soft, fall through to glossary
+            logger.warning(
+                "[%s] v3 stage 2.5 refine failed (%s: %s); using Azure output as-is",
+                job_id, type(exc).__name__, exc,
+            )
+        meta["refine_ms"] = int((time.perf_counter() - t0) * 1000)
+        logger.info("[%s] v3 stage 2.5 refine: %d ms", job_id, meta["refine_ms"])
+    else:
+        meta["refine_ms"] = 0
+
     # ── Stage 3: glossary (fail-soft) ────────────────────────────────────
     t0 = time.perf_counter()
     glossary = await build_glossary(vision_pages, model=glossary_model, job_id=job_id)
@@ -162,12 +186,7 @@ async def translate_pdf_v3(
     meta["translate_ms"] = int((time.perf_counter() - t0) * 1000)
     logger.info("[%s] v3 stage 4 translate (%s): %d ms", job_id, engine, meta["translate_ms"])
 
-    # ── Stage 4.5: layout reflow (reused from v2) ────────────────────────
-    t0 = time.perf_counter()
-    translated_pages = [reflow_column_stacks(reflow_tables(p)) for p in translated_pages]
-    meta["layout_reflow_ms"] = int((time.perf_counter() - t0) * 1000)
-
-    # ── Stage 5: HTML render (reused from v2) ────────────────────────────
+    # ── Stage 5: HTML render (semantic flow) ─────────────────────────────
     t0 = time.perf_counter()
     try:
         font_css = load_font_face_css()
@@ -213,12 +232,13 @@ async def translate_pdf_v3(
 
     logger.info(
         "[%s] v3 pipeline complete: %d pages, %d bytes "
-        "(raster %d / azure %d / glossary %d / translate %d / html %d / pdf %d / concat %d / doc %d ms)",
+        "(raster %d / azure %d / refine %d / glossary %d / translate %d / html %d / pdf %d / concat %d / doc %d ms)",
         job_id,
         len(per_page_pdfs),
         len(final_pdf),
         meta["rasterize_ms"],
         meta["ocr_ms"],
+        meta["refine_ms"],
         meta["glossary_ms"],
         meta["translate_ms"],
         meta["html_render_ms"],

@@ -1,7 +1,8 @@
 """Translation v2 — Gemini 2.5 Pro vision-first pipeline.
 
-Per-page HTML rebuild with absolute-positioned semantic blocks, autofit ladder
-for Hindi expansion, bundled Noto Serif Devanagari for clean HarfBuzz shaping.
+Per-source-page semantic HTML rebuild (headings, justified paragraphs with
+hanging-indent numbered items, HTML tables), one page-level autofit pass for
+Hindi expansion, bundled Noto Serif Devanagari for clean HarfBuzz shaping.
 Page count = source page count by construction.
 """
 

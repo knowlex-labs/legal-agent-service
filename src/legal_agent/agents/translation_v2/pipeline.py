@@ -114,7 +114,7 @@ async def translate_pdf_v2(
     meta["translate_ms"] = int((time.perf_counter() - t0) * 1000)
     logger.info("[%s] v2 stage 4 translate: %d ms", job_id, meta["translate_ms"])
 
-    # ── Stage 5: HTML render ─────────────────────────────────────────────
+    # ── Stage 5: HTML render (flow layout — no per-page reflow needed) ───
     t0 = time.perf_counter()
     try:
         font_css = load_font_face_css()

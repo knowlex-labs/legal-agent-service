@@ -51,6 +51,11 @@ def _vision_page(page_no: int = 1) -> VisionPage:
     )
 
 
+async def _fake_refine_identity(pages, *_a: Any, **_kw: Any):
+    """Stand-in for `refine_pages` that returns the pages unchanged."""
+    return pages
+
+
 def _translated_page(page_no: int = 1) -> TranslatedPage:
     blocks = list(_vision_page(page_no).blocks)
     blocks[0] = blocks[0].model_copy(update={"text_hi": "वादी एतद्द्वारा प्रस्तुत करता है।"})
@@ -127,6 +132,7 @@ async def test_v3_pipeline_translate_failure_maps_to_translation():
     with (
         patch.object(p, "rasterize_pdf", side_effect=fake_rast),
         patch.object(p, "extract_pages", side_effect=fake_ocr),
+        patch.object(p, "refine_pages", side_effect=_fake_refine_identity),
         patch.object(p, "build_glossary", side_effect=fake_gloss),
         patch.object(th, "translate_pages", side_effect=boom_translate),
     ):
@@ -175,6 +181,7 @@ async def test_v3_pipeline_haiku_engine_runs_to_completion():
     with (
         patch.object(p, "rasterize_pdf", side_effect=fake_rast),
         patch.object(p, "extract_pages", side_effect=fake_ocr),
+        patch.object(p, "refine_pages", side_effect=_fake_refine_identity),
         patch.object(p, "build_glossary", side_effect=fake_gloss),
         patch.object(th, "translate_pages", side_effect=fake_translate),
         patch.object(p, "render_pages_to_pdfs", side_effect=fake_render),
@@ -229,6 +236,7 @@ async def test_v3_pipeline_sarvam_engine_routes_correctly():
     with (
         patch.object(p, "rasterize_pdf", side_effect=fake_rast),
         patch.object(p, "extract_pages", side_effect=fake_ocr),
+        patch.object(p, "refine_pages", side_effect=_fake_refine_identity),
         patch.object(p, "build_glossary", side_effect=fake_gloss),
         patch.object(ts, "translate_pages", side_effect=fake_sarvam_translate),
         patch.object(p, "render_pages_to_pdfs", side_effect=fake_render),

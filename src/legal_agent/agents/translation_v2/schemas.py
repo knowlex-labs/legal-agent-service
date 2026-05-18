@@ -60,6 +60,14 @@ class Block(BaseModel):
     bbox_norm: tuple[float, float, float, float]
     text_en: str
     text_hi: str | None = None
+    # Set on `role == table_cell` blocks so the renderer can reconstruct
+    # `<table><tr><td>`. Optional / default-zero for non-cell blocks.
+    table_id: int | None = None
+    row_index: int = 0
+    column_index: int = 0
+    row_span: int = 1
+    column_span: int = 1
+    is_header_cell: bool = False
 
     @field_validator("font_size_pt", mode="before")
     @classmethod

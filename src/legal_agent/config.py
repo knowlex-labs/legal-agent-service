@@ -189,6 +189,14 @@ class Settings(BaseSettings):
     translation_v3_translate_model: str = "claude-haiku-4-5-20251001"
     # S3 prefix where structured TranslatedPage JSON is uploaded for UI editing.
     translation_v3_document_json_prefix: str = "translation-v3-documents"
+    # ── Stage 2.5: Haiku multimodal block refinement ─────────────────────
+    # Optional post-pass over Azure output: Haiku sees the page raster +
+    # block list and corrects role/font_size/bold/italic/underline where
+    # Azure's heuristics misfired. Adds ~$0.002/page and ~2-3s/page latency,
+    # masked by per-page concurrency.
+    translation_v3_refine_enabled: bool = True
+    translation_v3_refine_model: str = "claude-haiku-4-5-20251001"
+    translation_v3_refine_concurrency: int = 4
 
     # Sarvam's OpenAI-compatible base URL — override only if Sarvam changes hosts.
     sarvam_api_base_url: str = "https://api.sarvam.ai/v1"

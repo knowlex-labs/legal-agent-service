@@ -265,6 +265,142 @@ async def list_jobs(
     return JobListResponse(jobs=job_responses, total=total)
 
 
+# ── translation v3: editable structured document ───────────────────────────
+
+
+class TranslationRenderRequest(BaseModel):
+    """Body for POST /jobs/{job_id}/render — edited TranslatedPage[] from the UI."""
+
+    pages: list[dict] = Field(
+        ..., description="Edited TranslatedPage objects (same shape as document.json)."
+    )
+    glossary: dict[str, str] = Field(
+        default_factory=dict,
+        description="Glossary used (informational; renderer doesn't apply it).",
+    )
+    source_filename: str | None = Field(
+        None, description="Echoed into the re-rendered PDF metadata."
+    )
+
+
+class TranslationRenderResponse(BaseModel):
+    s3_path: str
+    signed_url: str | None = None
+    page_count: int
+    bytes_size: int
+
+
+@router.get("/jobs/{job_id}/document")
+async def get_translation_document(
+    job_id: str,
+    job_manager: JobManager = Depends(get_job_manager),
+    s3_client: S3Client = Depends(get_s3_client),
+) -> Response:
+    """Fetch the editable TranslatedPage[] JSON produced by translation v3.
+
+    The UI calls this to render an editable EN→HI block table, then POSTs
+    edits to `/jobs/{job_id}/render` to regenerate the PDF.
+    """
+    job = await job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    key = (job.metadata or {}).get("document_json_key")
+    if not key:
+        raise HTTPException(
+            status_code=404,
+            detail="No editable document for this job (not v3 or upload failed).",
+        )
+
+    try:
+        body = await s3_client.download_bytes(key)
+    except Exception as exc:
+        logger.warning("[%s] failed to download document.json: %s", job_id, exc, exc_info=True)
+        raise HTTPException(status_code=502, detail="Failed to read document.json from storage")
+    return Response(content=body, media_type="application/json; charset=utf-8")
+
+
+@router.post("/jobs/{job_id}/render", response_model=TranslationRenderResponse)
+async def render_translation_edits(
+    job_id: str,
+    body: TranslationRenderRequest,
+    job_manager: JobManager = Depends(get_job_manager),
+    s3_client: S3Client = Depends(get_s3_client),
+) -> TranslationRenderResponse:
+    """Re-render the translated PDF from user-edited blocks.
+
+    No OCR, no glossary, no translation — just HTML render + Playwright +
+    PyMuPDF concat. Uploads a versioned PDF (edited_v{N}.pdf) so prior
+    versions remain accessible.
+    """
+    job = await job_manager.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    # Validate against the v2 schema (single source of truth for both v2 and v3).
+    from legal_agent.agents.translation_v2.compose import concat_pdfs, render_pages_to_pdfs
+    from legal_agent.agents.translation_v2.html_render import load_font_face_css, render_page_html
+    from legal_agent.agents.translation_v2.schemas import TranslatedPage
+    from pydantic import ValidationError
+
+    try:
+        translated_pages = [TranslatedPage.model_validate(p) for p in body.pages]
+    except ValidationError as ve:
+        raise HTTPException(status_code=422, detail=f"Invalid TranslatedPage payload: {ve}")
+    if not translated_pages:
+        raise HTTPException(status_code=400, detail="pages list is empty")
+
+    settings = get_settings()
+
+    # We need page width/height in mm for each page. They live on TranslatedPage
+    # as pt values — convert (1 pt = 0.352778 mm).
+    PT_TO_MM = 0.352777778
+    page_sizes_mm = [(p.width_pt * PT_TO_MM, p.height_pt * PT_TO_MM) for p in translated_pages]
+
+    font_css = load_font_face_css()
+    htmls = [
+        render_page_html(p, w_mm, h_mm, font_css)
+        for p, (w_mm, h_mm) in zip(translated_pages, page_sizes_mm, strict=True)
+    ]
+    per_page_pdfs = await render_pages_to_pdfs(
+        htmls,
+        page_sizes_mm,
+        concurrency=settings.translation_v3_render_concurrency,
+        job_id=f"{job_id}-render",
+    )
+    final_pdf = await concat_pdfs(per_page_pdfs)
+
+    # Versioned key — never overwrite the original.
+    base = (job.metadata or {}).get("document_json_key", "").rsplit("/", 1)[0]
+    if not base:
+        base = f"{settings.translation_v3_document_json_prefix}/{job_id}"
+    # Probe S3 for the next available version number.
+    version = 1
+    while True:
+        key = f"{base}/edited_v{version}.pdf"
+        try:
+            await s3_client.download_bytes(key)
+            version += 1
+            if version > 99:
+                raise HTTPException(status_code=507, detail="too many edit versions")
+        except Exception:
+            break
+    await s3_client.upload_bytes(key, final_pdf, content_type="application/pdf")
+
+    signed: str | None = None
+    try:
+        signed = await s3_client.signed_url(key)
+    except Exception:
+        logger.warning("[%s] failed to sign edited PDF url", job_id)
+
+    return TranslationRenderResponse(
+        s3_path=key,
+        signed_url=signed,
+        page_count=len(translated_pages),
+        bytes_size=len(final_pdf),
+    )
+
+
 @router.get("/health")
 async def health_check(job_manager: JobManager = Depends(get_job_manager)) -> dict:
     """Health check endpoint."""
